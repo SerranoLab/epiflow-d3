@@ -394,6 +394,7 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
 
   # UMAP embedding for scatter plot (preferred over PCA for clustering viz)
   viz <- data.frame(cluster = wide$cluster)
+  if ("cell_id" %in% names(wide)) viz$cell_id <- wide$cell_id
   if ("genotype" %in% names(wide)) viz$genotype <- wide$genotype
   if ("identity" %in% names(wide)) viz$identity <- wide$identity
   if ("cell_cycle" %in% names(wide)) viz$cell_cycle <- wide$cell_cycle
@@ -423,6 +424,12 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     viz[[col]] <- wide[[col]]
   }
 
+  # Build full cell→cluster mapping (before viz subsampling)
+  cell_assignments <- NULL
+  if ("cell_id" %in% names(wide)) {
+    cell_assignments <- setNames(as.character(wide$cluster), wide$cell_id)
+  }
+
   if (nrow(viz) > 12000) {
     set.seed(seed)
     idx <- sample(nrow(viz), 12000)
@@ -431,6 +438,7 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
 
   result <- list(
     visualization = viz,
+    cell_assignments = as.list(cell_assignments),
     centers = centers,
     summaries = summaries,
     cluster_signatures = cluster_sigs,

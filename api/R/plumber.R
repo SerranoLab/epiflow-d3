@@ -185,39 +185,41 @@ function(session_id, req) {
     timepoints  = params$timepoints
   )
 
-  # Apply quadrant gate filter if provided
-  qf <- params$quadrant_filter
-  if (!is.null(qf) && !is.null(qf$marker_x) && !is.null(qf$marker_y)) {
-    mx <- qf$marker_x
-    my <- qf$marker_y
-    tx <- as.numeric(qf$threshold_x)
-    ty <- as.numeric(qf$threshold_y)
-    sel_q <- unlist(qf$selected_quadrants)
+  extra_grouping <- character(0)
 
-    if (length(sel_q) > 0 && !is.na(tx) && !is.na(ty)) {
-      # Get unique cell values for the gating markers
+  # ---- Gate population column + filtering ----
+  gm <- params$gating_metadata
+  if (!is.null(gm) && !is.null(gm$marker_x) && !is.null(gm$marker_y)) {
+    mx <- gm$marker_x
+    my <- gm$marker_y
+    tx <- as.numeric(gm$threshold_x)
+    ty <- as.numeric(gm$threshold_y)
+    labels <- gm$labels  # named list: Q1 -> "name", Q2 -> "name", etc.
+
+    if (!is.na(tx) && !is.na(ty)) {
       cell_data <- filtered
+      # Get marker values per cell
+      vals_x <- NULL; vals_y <- NULL
+
       if ("H3PTM" %in% names(cell_data)) {
-        # Long format: pivot to get marker columns per cell
         vals_x <- cell_data %>% dplyr::filter(H3PTM == mx) %>%
           dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-          dplyr::select(cell_id, value) %>%
-          dplyr::rename(val_x = value)
+          dplyr::select(cell_id, value) %>% dplyr::rename(val_x = value)
         vals_y <- cell_data %>% dplyr::filter(H3PTM == my) %>%
           dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-          dplyr::select(cell_id, value) %>%
-          dplyr::rename(val_y = value)
+          dplyr::select(cell_id, value) %>% dplyr::rename(val_y = value)
+      }
+      # Fallback to wide-format columns
+      if ((is.null(vals_x) || nrow(vals_x) == 0) && mx %in% names(cell_data)) {
+        vals_x <- cell_data %>% dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+          dplyr::select(cell_id, val_x = !!dplyr::sym(mx))
+      }
+      if ((is.null(vals_y) || nrow(vals_y) == 0) && my %in% names(cell_data)) {
+        vals_y <- cell_data %>% dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+          dplyr::select(cell_id, val_y = !!dplyr::sym(my))
+      }
 
-        # Also check wide-format columns (phenotypic markers)
-        if (mx %in% names(cell_data) && nrow(vals_x) == 0) {
-          vals_x <- cell_data %>% dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-            dplyr::select(cell_id, val_x = !!dplyr::sym(mx))
-        }
-        if (my %in% names(cell_data) && nrow(vals_y) == 0) {
-          vals_y <- cell_data %>% dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-            dplyr::select(cell_id, val_y = !!dplyr::sym(my))
-        }
-
+      if (!is.null(vals_x) && !is.null(vals_y) && nrow(vals_x) > 0 && nrow(vals_y) > 0) {
         gate_df <- dplyr::inner_join(vals_x, vals_y, by = "cell_id") %>%
           dplyr::mutate(
             quadrant = dplyr::case_when(
@@ -226,34 +228,84 @@ function(session_id, req) {
               val_x <  tx & val_y <  ty ~ "Q3",
               val_x >= tx & val_y <  ty ~ "Q4",
               TRUE ~ NA_character_
+            ),
+            gate_population = dplyr::case_when(
+              quadrant == "Q1" ~ as.character(labels$Q1 %||% "Q1"),
+              quadrant == "Q2" ~ as.character(labels$Q2 %||% "Q2"),
+              quadrant == "Q3" ~ as.character(labels$Q3 %||% "Q3"),
+              quadrant == "Q4" ~ as.character(labels$Q4 %||% "Q4"),
+              TRUE ~ NA_character_
             )
           ) %>%
-          dplyr::filter(quadrant %in% sel_q)
+          dplyr::select(cell_id, gate_population)
 
-        keep_cells <- gate_df$cell_id
-        filtered <- filtered %>% dplyr::filter(cell_id %in% keep_cells)
+        # Join gate_population to filtered data
+        filtered <- filtered %>%
+          dplyr::left_join(gate_df, by = "cell_id")
+
+        extra_grouping <- c(extra_grouping, "gate_population")
+
+        # Filter by selected quadrants if specified
+        sel_q <- unlist(gm$selected_quadrants)
+        if (!is.null(sel_q) && length(sel_q) > 0) {
+          # Map selected quadrant codes to population labels
+          sel_labels <- sapply(sel_q, function(q) as.character(labels[[q]] %||% q))
+          filtered <- filtered %>% dplyr::filter(gate_population %in% sel_labels)
+        }
       }
+    }
+  } else {
+    # Remove gate_population column if no gating active
+    if ("gate_population" %in% names(filtered)) {
+      filtered <- filtered %>% dplyr::select(-gate_population)
     }
   }
 
-  # Apply cluster identity filter if provided
-  cf <- params$cluster_filter
-  if (!is.null(cf) && !is.null(cf$selected_clusters)) {
-    sel_clusters <- as.character(unlist(cf$selected_clusters))
+  # ---- Cluster identity column + filtering ----
+  cm <- params$cluster_metadata
+  if (!is.null(cm) && !is.null(cm$name_map) && !is.null(cm$cell_assignments)) {
+    name_map <- cm$name_map
+    cell_assigns <- cm$cell_assignments
 
-    # Use stored cell→cluster assignments
-    cell_assigns <- store$cluster_cell_assignments
-    if (!is.null(cell_assigns)) {
-      # cell_assigns is a named list: cell_id → cluster_number
+    if (length(name_map) > 0 && length(cell_assigns) > 0) {
+      # Build cell_id → cluster_identity mapping
       assign_df <- data.frame(
         cell_id = names(cell_assigns),
-        cluster = as.character(unlist(cell_assigns)),
+        cluster_num = as.character(unlist(cell_assigns)),
         stringsAsFactors = FALSE
       )
-      keep_cells <- assign_df$cell_id[assign_df$cluster %in% sel_clusters]
-      if (length(keep_cells) > 0) {
-        filtered <- filtered %>% dplyr::filter(cell_id %in% keep_cells)
+      # Map cluster numbers to names
+      cmap <- setNames(as.character(unlist(name_map)), names(name_map))
+      assign_df$cluster_identity <- cmap[assign_df$cluster_num]
+      assign_df$cluster_identity[is.na(assign_df$cluster_identity)] <-
+        paste0("Cluster ", assign_df$cluster_num[is.na(assign_df$cluster_identity)])
+
+      # Match cell_id types before joining
+      assign_df$cell_id <- as(assign_df$cell_id, class(filtered$cell_id))
+
+      # Join to filtered data
+      filtered <- filtered %>%
+        dplyr::left_join(assign_df %>% dplyr::select(cell_id, cluster_identity), by = "cell_id")
+
+      # Cells not in clustering get NA — fill with "Unassigned"
+      filtered$cluster_identity[is.na(filtered$cluster_identity)] <- "Unassigned"
+
+      extra_grouping <- c(extra_grouping, "cluster_identity")
+
+      # Filter by selected clusters if specified
+      sel_clusters <- unlist(cm$selected_clusters)
+      if (!is.null(sel_clusters) && length(sel_clusters) > 0) {
+        sel_names <- cmap[as.character(sel_clusters)]
+        sel_names <- sel_names[!is.na(sel_names)]
+        if (length(sel_names) > 0) {
+          filtered <- filtered %>% dplyr::filter(cluster_identity %in% sel_names)
+        }
       }
+    }
+  } else {
+    # Remove cluster_identity column if no clustering active
+    if ("cluster_identity" %in% names(filtered)) {
+      filtered <- filtered %>% dplyr::select(-cluster_identity)
     }
   }
 
@@ -266,7 +318,8 @@ function(session_id, req) {
     n_rows = nrow(filtered),
     identities = sort(unique(filtered$identity)),
     cell_cycles = sort(unique(filtered$cell_cycle)),
-    genotypes = sort(unique(filtered$genotype))
+    genotypes = sort(unique(filtered$genotype)),
+    extra_grouping = extra_grouping
   )
 }
 

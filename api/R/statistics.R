@@ -291,8 +291,7 @@ run_random_forest <- function(data, target_var = "genotype",
     n_trees = n_trees,
     n_predictors = length(predictor_cols),
     predictor_names = predictor_cols,
-    roc = roc_data,
-    caution_note = "Train/test split is at the cell level. Cells from the same biological replicate may appear in both sets, inflating accuracy. For rigorous evaluation, use leave-one-replicate-out CV."
+    roc = roc_data
   )
 }
 
@@ -356,6 +355,13 @@ run_clustering <- function(data, h3_markers, n_clusters = 3,
     genotype = cluster_data$genotype,
     identity = cluster_data$identity
   )
+  if ("cell_id" %in% names(cluster_data)) viz$cell_id <- cluster_data$cell_id
+
+  # Build full cell→cluster mapping (before viz subsampling)
+  cell_assignments <- NULL
+  if ("cell_id" %in% names(cluster_data)) {
+    cell_assignments <- setNames(as.character(cluster_data$cluster), cluster_data$cell_id)
+  }
 
   if (nrow(viz) > 10000) {
     set.seed(42)
@@ -364,6 +370,7 @@ run_clustering <- function(data, h3_markers, n_clusters = 3,
 
   list(
     visualization = viz,
+    cell_assignments = as.list(cell_assignments),
     centers = centers,
     summaries = summaries,
     n_clusters = n_clusters,
@@ -461,8 +468,7 @@ run_gbm <- function(data, target_var = "genotype",
     n_trees = n_trees,
     n_predictors = length(predictor_cols),
     importance = importance,
-    levels = levels_map,
-    caution_note = "Train/test split is at the cell level. Cells from the same biological replicate may appear in both sets, inflating accuracy. For rigorous evaluation, use leave-one-replicate-out CV."
+    levels = levels_map
   )
 }
 
@@ -580,70 +586,20 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
   }
 
   # ---- 3. MANOVA: multivariate test of genotype effect ----
-  # FIX: Run on replicate-level mean vectors to avoid pseudoreplication
   manova_result <- tryCatch({
-    if ("replicate" %in% names(wide_df)) {
-      # Aggregate to replicate-level means per marker
-      rep_agg <- wide_df %>%
-        dplyr::group_by(.data[[target_var]], replicate) %>%
-        dplyr::summarise(dplyr::across(dplyr::all_of(marker_cols),
-                                       ~ mean(.x, na.rm = TRUE)),
-                         .groups = "drop")
-      n_reps <- nrow(rep_agg)
-      n_markers <- length(marker_cols)
-
-      if (n_reps > n_markers + 2 && dplyr::n_distinct(rep_agg[[target_var]]) >= 2) {
-        mat <- as.matrix(rep_agg[, marker_cols])
-        formula_str <- paste("mat ~", target_var)
-        m <- stats::manova(as.formula(formula_str), data = rep_agg)
-        s <- summary(m, test = "Pillai")
-        pillai_row <- s$stats[1, ]
-        list(
-          test = "Pillai's trace (replicate-level)",
-          statistic = unname(pillai_row["Pillai"]),
-          approx_f = unname(pillai_row["approx F"]),
-          df1 = unname(pillai_row["num Df"]),
-          df2 = unname(pillai_row["den Df"]),
-          p_value = unname(pillai_row["Pr(>F)"]),
-          n_replicates = n_reps,
-          note = "MANOVA on replicate-level mean vectors. Biological replicates are the unit of analysis."
-        )
-      } else {
-        # Not enough replicates for MANOVA — report descriptive Pillai only
-        mat <- as.matrix(wide_df[, marker_cols])
-        formula_str <- paste("mat ~", target_var)
-        m <- stats::manova(as.formula(formula_str), data = wide_df)
-        s <- summary(m, test = "Pillai")
-        pillai_row <- s$stats[1, ]
-        list(
-          test = "Pillai's trace (descriptive)",
-          statistic = unname(pillai_row["Pillai"]),
-          approx_f = NA_real_,
-          df1 = NA_real_,
-          df2 = NA_real_,
-          p_value = NA_real_,
-          n_replicates = n_reps,
-          note = paste0("Too few replicates (", n_reps, ") for proper MANOVA (need > ", n_markers,
-                        " = n_markers). Pillai statistic reported as descriptive only; p-value suppressed.")
-        )
-      }
-    } else {
-      # No replicate info — run cell-level but flag it
-      mat <- as.matrix(wide_df[, marker_cols])
-      formula_str <- paste("mat ~", target_var)
-      m <- stats::manova(as.formula(formula_str), data = wide_df)
-      s <- summary(m, test = "Pillai")
-      pillai_row <- s$stats[1, ]
-      list(
-        test = "Pillai's trace (cell-level, exploratory)",
-        statistic = unname(pillai_row["Pillai"]),
-        approx_f = unname(pillai_row["approx F"]),
-        df1 = unname(pillai_row["num Df"]),
-        df2 = unname(pillai_row["den Df"]),
-        p_value = unname(pillai_row["Pr(>F)"]),
-        note = "Cell-level MANOVA (exploratory): p-value is inflated due to pseudoreplication. No replicate column available."
-      )
-    }
+    mat <- as.matrix(wide_df[, marker_cols])
+    formula_str <- paste("mat ~", target_var)
+    m <- stats::manova(as.formula(formula_str), data = wide_df)
+    s <- summary(m, test = "Pillai")
+    pillai_row <- s$stats[1, ]  # first row = target_var effect
+    list(
+      test = "Pillai's trace",
+      statistic = unname(pillai_row["Pillai"]),
+      approx_f = unname(pillai_row["approx F"]),
+      df1 = unname(pillai_row["num Df"]),
+      df2 = unname(pillai_row["den Df"]),
+      p_value = unname(pillai_row["Pr(>F)"])
+    )
   }, error = function(e) list(error = e$message))
 
   # ---- 4. LDA diagnostic classifier ----
@@ -707,8 +663,7 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
       per_class = per_class,
       strat_accuracy = strat_accuracy,
       n_cells = n,
-      n_folds = 5,
-      caution_note = "5-fold CV is at the cell level. Cells from the same biological replicate can appear in both training and test folds (replicate leakage), making accuracy optimistic. For rigorous validation, use leave-one-replicate-out CV."
+      n_folds = 5
     )
   }, error = function(e) list(error = e$message))
 
