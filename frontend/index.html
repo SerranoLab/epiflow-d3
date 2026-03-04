@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<!--
+  EpiFlow D3 — Spectral flow cytometry analysis platform
+  Copyright (C) 2025 Maria A. Serrano
+  Serrano Lab, Center for Regenerative Medicine (CReM), Boston University
+
+  Licensed under the GNU Affero General Public License v3.0
+  See LICENSE file or https://www.gnu.org/licenses/agpl-3.0.txt
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230f766e'/><text x='16' y='23' text-anchor='middle' fill='white' font-size='18' font-family='sans-serif' font-weight='bold'>E</text></svg>">
+  <title>EpiFlow D3 — Spectral Flow Cytometry Analysis</title>
+  <link rel="stylesheet" href="css/epiflow.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <!-- Phase 5: Aesthetic polish overrides -->
+  <style>
+    /* Tab group separators */
+    .tab-sep {
+      display: inline-block;
+      width: 1px;
+      height: 20px;
+      background: #e2e8f0;
+      margin: 0 2px;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+
+    /* Smooth sidebar section reveals */
+    .sidebar-section {
+      transition: opacity 0.25s ease, max-height 0.3s ease;
+    }
+    .sidebar-section.hidden {
+      opacity: 0;
+      max-height: 0;
+      overflow: hidden;
+      padding: 0 !important;
+      margin: 0 !important;
+      border: none !important;
+    }
+
+    /* Refined button transitions */
+    .btn, .tab-btn {
+      transition: all 0.15s ease;
+    }
+
+    /* Subtle top-bar refinement */
+    .top-bar {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+    }
+    .version-badge {
+      font-weight: 500 !important;
+      letter-spacing: 0.5px;
+    }
+
+    /* Loading spinner: branded pulse ring */
+    .loading-overlay .spinner {
+      border-color: rgba(59,130,246,.15) !important;
+      border-top-color: #3b82f6 !important;
+    }
+
+    /* Welcome card polish */
+    .welcome-card h1 {
+      letter-spacing: -0.5px;
+    }
+    .welcome-card .subtitle {
+      opacity: 0.7;
+    }
+
+    /* Chart containers: subtle entry animation */
+    .chart-container svg {
+      animation: chartFadeIn 0.35s ease;
+    }
+    /* Prevent fixed footer from overlapping content */
+    .main-content {
+      padding-bottom: 28px !important;
+    }
+    @keyframes chartFadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Panel header refinement */
+    .panel-header h2 {
+      letter-spacing: -0.3px;
+    }
+
+    /* Inline message smoothness */
+    .inline-message {
+      transition: opacity 0.2s ease;
+    }
+
+    /* App footer */
+    /* App footer - fixed at bottom */
+    .app-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      text-align: center;
+      padding: 6px 16px;
+      font-size: 10px;
+      color: #94a3b8;
+      background: rgba(250,251,252,0.95);
+      border-top: 1px solid #f1f5f9;
+      letter-spacing: 0.2px;
+      z-index: 100;
+      backdrop-filter: blur(4px);
+    }
+    .app-footer a {
+      color: #64748b;
+      text-decoration: none;
+    }
+    .app-footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <header class="top-bar">
+    <div class="top-bar-left">
+      <span class="logo-text">EpiFlow</span>
+      <span class="version-badge">D3 v1.0</span>
+    </div>
+    <div class="top-bar-center" id="data-status">
+      <span class="status-dot inactive"></span>
+      <span>No data loaded</span>
+    </div>
+    <div class="top-bar-right">
+      <span class="lab-name">Serrano Lab · BU CReM</span>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+      <!-- Upload -->
+      <section class="sidebar-section">
+        <h3><i class="fas fa-upload"></i> Data</h3>
+        <div class="upload-area" id="upload-area">
+          <input type="file" id="file-input" accept=".rds" hidden>
+          <button class="btn btn-primary btn-block" id="upload-btn">
+            <i class="fas fa-file-upload"></i> Upload .rds
+          </button>
+          <p class="upload-hint">Drag & drop or click to upload</p>
+        </div>
+        <div id="data-summary" class="data-summary hidden"></div>
+      </section>
+
+      <!-- Filters -->
+      <section class="sidebar-section hidden" id="filters-section">
+        <h3><i class="fas fa-filter"></i> Filters</h3>
+        <div class="filter-group">
+          <label>Comparison Variable</label>
+          <select id="filter-comparison-var" class="select-input"><option value="genotype">Genotype</option></select>
+        </div>
+        <div class="filter-group">
+          <label>Reference (Control) Group</label>
+          <select id="filter-ref-level" class="select-input"><option value="">Auto (alphabetical)</option></select>
+        </div>
+        <div class="filter-group">
+          <label>Identities</label>
+          <div id="filter-identities" class="checkbox-group"></div>
+        </div>
+        <div class="filter-group">
+          <label>Cell Cycle</label>
+          <div id="filter-cellcycles" class="checkbox-group"></div>
+        </div>
+        <div class="filter-group">
+          <label>Genotype / Group</label>
+          <div id="filter-genotypes" class="checkbox-group"></div>
+        </div>
+        <div class="filter-group hidden" id="filter-celltype-group">
+          <label>Cell Type</label>
+          <div id="filter-celltypes" class="checkbox-group"></div>
+        </div>
+        <div class="filter-group hidden" id="filter-condition-group">
+          <label>Condition</label>
+          <div id="filter-conditions" class="checkbox-group"></div>
+        </div>
+        <div class="filter-group hidden" id="filter-timepoint-group">
+          <label>Timepoint</label>
+          <div id="filter-timepoints" class="checkbox-group"></div>
+        </div>
+        <div class="filter-group hidden" id="filter-treatment-group">
+          <label>Treatment</label>
+          <div id="filter-treatments" class="checkbox-group"></div>
+        </div>
+        <div id="dynamic-meta-filters"></div>
+
+        <!-- Quadrant Gate Filter (appears after applying gate labels) -->
+        <div class="filter-group hidden" id="filter-quadrant-group">
+          <label><i class="fas fa-crosshairs" style="color:#3b82f6;"></i> Quadrant Gate</label>
+          <div id="filter-quadrants" class="checkbox-group"></div>
+          <button class="btn btn-sm btn-outline" id="clear-quadrant-filter" style="margin-top:4px;font-size:10px;width:100%;">
+            <i class="fas fa-times"></i> Clear Gate Filter
+          </button>
+        </div>
+
+        <!-- Cluster Identity Filter (appears after naming clusters) -->
+        <div class="filter-group hidden" id="filter-cluster-identity-group">
+          <label><i class="fas fa-project-diagram" style="color:#8b5cf6;"></i> Cluster Identity</label>
+          <div id="filter-cluster-identities" class="checkbox-group"></div>
+          <button class="btn btn-sm btn-outline" id="clear-cluster-identity-filter" style="margin-top:4px;font-size:10px;width:100%;">
+            <i class="fas fa-times"></i> Clear Cluster Identity
+          </button>
+        </div>
+
+        <button class="btn btn-accent btn-block" id="apply-filters-btn"><i class="fas fa-check"></i> Apply Filters</button>
+        <button class="btn btn-outline btn-block" id="reset-filters-btn"><i class="fas fa-undo"></i> Reset</button>
+      </section>
+
+      <!-- Options -->
+      <section class="sidebar-section hidden" id="analysis-options-section">
+        <h3><i class="fas fa-cog"></i> Options</h3>
+        <div class="filter-group">
+          <label>Color Palette</label>
+          <select id="palette-select" class="select-input">
+            <option value="Ocean & Earth">Ocean & Earth</option>
+            <option value="Colorblind Safe (Wong)">Colorblind Safe (Wong)</option>
+            <option value="Colorblind Safe (Tol)">Colorblind Safe (Tol)</option>
+          </select>
+        </div>
+        <div class="filter-group" id="custom-colors-group" style="display:none">
+          <label>Custom Group Colors</label>
+          <div id="custom-color-pickers"></div>
+          <button class="btn btn-sm btn-outline" id="apply-custom-colors" style="margin-top:6px;"><i class="fas fa-palette"></i> Apply Colors</button>
+          <button class="btn btn-sm btn-outline" id="reset-custom-colors" style="margin-top:4px;"><i class="fas fa-undo"></i> Reset to Palette</button>
+        </div>
+        <div class="filter-group">
+          <label class="checkbox-inline"><input type="checkbox" id="cells-as-replicates"> Use cells as replicates</label>
+          <p class="option-warning hidden" id="cells-replicate-warning">⚠ Pseudoreplication: p-values will be anti-conservative. Only for exploratory analysis when biological replicates are unavailable.</p>
+        </div>
+      </section>
+
+      <!-- Filter summary -->
+      <section class="sidebar-section hidden" id="filter-summary-section">
+        <div id="filter-summary" class="filter-summary"></div>
+      </section>
+
+      <!-- Report & About -->
+      <section class="sidebar-section hidden" id="report-section">
+        <h3><i class="fas fa-file-alt"></i> Report</h3>
+        <button class="btn btn-primary btn-block" id="generate-report-btn">
+          <i class="fas fa-file-download"></i> Generate HTML Report
+        </button>
+        <p style="font-size:10px;color:#94a3b8;margin-top:4px;">Collects all analyses run so far into a downloadable report. Open in browser → Print → Save as PDF.</p>
+        <button class="btn btn-block" id="figure-composer-btn" style="margin-top:8px;background:#0f766e;color:#fff;border:none;">
+          <i class="fas fa-th-large"></i> Figure Composer
+        </button>
+        <p style="font-size:10px;color:#94a3b8;margin-top:4px;">Arrange panels into publication-ready multi-panel figures.</p>
+
+        <div style="margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px;">
+          <h4 style="font-size:12px;font-weight:600;color:#475569;margin:0 0 6px;"><i class="fas fa-save"></i> Session</h4>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-outline" id="session-save-btn" style="flex:1;"><i class="fas fa-download"></i> Save</button>
+            <label class="btn btn-sm btn-outline" style="flex:1;cursor:pointer;text-align:center;" id="session-load-label">
+              <i class="fas fa-upload"></i> Load
+              <input type="file" id="session-load-input" accept=".json" style="display:none;">
+            </label>
+          </div>
+          <p style="font-size:10px;color:#94a3b8;margin-top:4px;">Save/restore filters, options, and settings. Load your .rds first, then restore the session.</p>
+        </div>
+
+        <div style="margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px;">
+          <button class="btn btn-sm btn-outline btn-block" id="cite-epiflow-btn" style="color:#0f766e;border-color:#0f766e;">
+            <i class="fas fa-quote-left"></i> Cite EpiFlow
+          </button>
+        </div>
+
+        <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
+          <h4 style="font-size:12px;font-weight:600;color:#475569;margin:0 0 6px;cursor:pointer;" id="about-toggle">
+            <i class="fas fa-info-circle"></i> About EpiFlow <span style="font-size:9px;color:#94a3b8;">▼</span>
+          </h4>
+          <div id="about-content" style="display:none;font-size:10px;color:#64748b;line-height:1.5;">
+            <p><strong>EpiFlow D3</strong> — Spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification (PTM) profiling.</p>
+            <p><strong>Statistical approach:</strong> Biological replicates are the unit of inference. Linear mixed models (LMM) account for cell-level nesting within replicates. Cell-level tests (KS, Wilcoxon, chi-square) are flagged as exploratory. Effect sizes (Cohen's d, Cliff's δ, Cramér's V) are prioritized over p-values. BH correction is applied for multiple comparisons.</p>
+            <p><strong>ML caution:</strong> RF, GBM, and LDA train/test splits are at the cell level. Accuracy may be optimistic due to replicate leakage. Leave-one-replicate-out CV is recommended for rigorous validation.</p>
+            <p><strong>Version:</strong> EpiFlow D3 v1.0 · © 2025 Serrano Lab, Center for Regenerative Medicine (CReM), Boston University</p>
+            <p style="font-size:9px;color:#94a3b8;">Licensed under AGPL-3.0. Built with R/plumber + D3.js. Contact: Serrano Lab, BU Chobanian & Avedisian School of Medicine.</p>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <main class="main-content">
+      <nav class="tab-nav hidden" id="tab-nav">
+        <button class="tab-btn" data-tab="overview"><i class="fas fa-tachometer-alt"></i> Overview</button>
+        <span class="tab-sep"></span>
+        <button class="tab-btn active" data-tab="ridge"><i class="fas fa-chart-area"></i> Ridge</button>
+        <button class="tab-btn" data-tab="violin"><i class="fas fa-chart-bar"></i> Violin</button>
+        <button class="tab-btn" data-tab="statistics"><i class="fas fa-calculator"></i> Statistics</button>
+        <button class="tab-btn" data-tab="heatmap" style="display:none;"><i class="fas fa-th"></i> Heatmap</button>
+        <button class="tab-btn" data-tab="cellcycle"><i class="fas fa-sync-alt"></i> Cell Cycle</button>
+        <span class="tab-sep"></span>
+        <button class="tab-btn" data-tab="correlation"><i class="fas fa-grip-horizontal"></i> Correlation</button>
+        <button class="tab-btn" data-tab="positivity"><i class="fas fa-chart-line"></i> Positivity</button>
+        <button class="tab-btn" data-tab="gating"><i class="fas fa-crosshairs"></i> Gating</button>
+        <span class="tab-sep"></span>
+        <button class="tab-btn" data-tab="pca"><i class="fas fa-project-diagram"></i> PCA</button>
+        <button class="tab-btn" data-tab="umap"><i class="fas fa-braille"></i> UMAP</button>
+        <button class="tab-btn" data-tab="clustering"><i class="fas fa-th-large"></i> Clustering</button>
+        <span class="tab-sep"></span>
+        <button class="tab-btn" data-tab="volcano"><i class="fas fa-mountain"></i> Volcano</button>
+        <button class="tab-btn" data-tab="forest"><i class="fas fa-tree"></i> Forest</button>
+        <button class="tab-btn" data-tab="ml"><i class="fas fa-brain"></i> ML</button>
+      </nav>
+
+      <div class="tab-panels">
+        <!-- Welcome -->
+        <div class="tab-panel active" id="panel-welcome">
+          <div class="welcome-card">
+            <h1>EpiFlow <span class="accent">D3</span></h1>
+            <p>Multiparametric histone PTM profiling by spectral flow cytometry</p>
+            <p class="subtitle">Upload your .rds file to begin analysis</p>
+            <div class="feature-grid">
+              <div class="feature"><i class="fas fa-chart-area"></i> Ridge plots</div>
+              <div class="feature"><i class="fas fa-chart-bar"></i> Violin plots</div>
+              <div class="feature"><i class="fas fa-calculator"></i> LMM statistics</div>
+              <div class="feature"><i class="fas fa-th"></i> Heatmaps</div>
+              <div class="feature"><i class="fas fa-sync-alt"></i> Cell Cycle</div>
+              <div class="feature"><i class="fas fa-grip-horizontal"></i> Correlation</div>
+              <div class="feature"><i class="fas fa-chart-line"></i> Positivity</div>
+              <div class="feature"><i class="fas fa-crosshairs"></i> Gating</div>
+              <div class="feature"><i class="fas fa-project-diagram"></i> PCA</div>
+              <div class="feature"><i class="fas fa-braille"></i> UMAP + FeaturePlot</div>
+              <div class="feature"><i class="fas fa-th-large"></i> Clustering</div>
+              <div class="feature"><i class="fas fa-brain"></i> ML</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Data Overview -->
+        <div class="tab-panel" id="panel-overview">
+          <div class="panel-header">
+            <h2><i class="fas fa-tachometer-alt"></i> Data Overview</h2>
+            <div class="panel-controls">
+              <button class="btn btn-primary btn-sm" id="refresh-overview-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
+              <button class="btn btn-sm" id="overview-export-all-svg" title="Download all overview charts as SVGs"><i class="fas fa-file-archive"></i> All SVGs</button>
+            </div>
+          </div>
+
+          <!-- Summary cards -->
+          <div id="overview-cards" class="overview-cards"></div>
+
+          <!-- Cells per group charts -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div class="overview-section">
+              <h3>Cells per Condition <button class="btn btn-sm" id="ov-cond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div class="chart-container" id="overview-condition-chart" style="min-height:200px;"></div>
+            </div>
+            <div class="overview-section">
+              <h3>Cells per Replicate <button class="btn btn-sm" id="ov-rep-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div class="chart-container" id="overview-replicate-chart" style="min-height:200px;"></div>
+            </div>
+          </div>
+
+          <!-- Stratified breakdown charts -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div class="overview-section">
+              <h3>Cells per Identity <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by condition)</span> <button class="btn btn-sm" id="ov-identity-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div class="chart-container" id="overview-identity-chart" style="min-height:350px;"></div>
+            </div>
+            <div class="overview-section">
+              <h3>Cells per Cell Cycle Phase <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by condition)</span> <button class="btn btn-sm" id="ov-cycle-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div class="chart-container" id="overview-cycle-chart" style="min-height:300px;"></div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div class="overview-section">
+              <h3>Cells per Replicate <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by condition)</span> <button class="btn btn-sm" id="ov-repcond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div class="chart-container" id="overview-replicate-cond-chart" style="min-height:250px;"></div>
+            </div>
+            <div class="overview-section">
+              <h3>Condition × Cell Cycle Distribution <button class="btn btn-sm" id="ov-condcycle-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div class="chart-container" id="overview-cond-cycle-chart" style="min-height:250px;"></div>
+            </div>
+          </div>
+
+          <!-- Marker distribution overview -->
+          <div class="overview-section" style="margin-top:16px;">
+            <h3>Marker Distribution Overview <span style="font-size:11px;color:#94a3b8;font-weight:400;">(median = dashed line, box = mean ± SD)</span> <button class="btn btn-sm" id="ov-markerdist-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+            <div class="chart-container" id="overview-marker-dist" style="min-height:300px;"></div>
+          </div>
+          <div class="overview-section" style="margin-top:16px;">
+            <h3>Marker Distribution by Condition <span style="font-size:11px;color:#94a3b8;font-weight:400;">(median = dashed line, box = mean ± SD)</span> <button class="btn btn-sm" id="ov-markercond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+            <div class="chart-container" id="overview-marker-dist-cond" style="min-height:320px;"></div>
+          </div>
+
+          <!-- Data table -->
+          <div class="overview-section" style="margin-top:16px;">
+            <h3>Condition × Identity Cross-tabulation</h3>
+            <div id="overview-table" style="max-height:400px;overflow-y:auto;"></div>
+          </div>
+        </div>
+
+        <!-- Ridge -->
+        <div class="tab-panel" id="panel-ridge">
+          <div class="panel-header">
+            <h2>Ridge Plot</h2>
+            <div class="panel-controls">
+              <select id="ridge-marker" class="select-input"></select>
+              <select id="ridge-groupby" class="select-input">
+                <option value="genotype">Group by Genotype</option>
+                <option value="identity">Group by Identity</option>
+                <option value="cell_cycle">Group by Cell Cycle</option>
+              </select>
+              <select id="ridge-colorby" class="select-input">
+                <option value="same">Color = Group</option>
+                <option value="genotype">Color by Genotype</option>
+                <option value="identity">Color by Identity</option>
+                <option value="cell_cycle">Color by Cell Cycle</option>
+              </select>
+              <button class="btn btn-sm" id="ridge-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="ridge-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Ridge plots show full H3-PTM intensity distributions. <strong>Tip:</strong> Group by Identity, color by Genotype to reveal population-specific epigenetic shifts — overlapping curves show direct WT vs mutant comparisons within each cell population.</div>
+          <div class="chart-container" id="ridge-chart"></div>
+        </div>
+
+        <!-- Violin -->
+        <div class="tab-panel" id="panel-violin">
+          <div class="panel-header">
+            <h2>Marker Expression</h2>
+            <div class="panel-controls">
+              <select id="violin-marker" class="select-input"></select>
+              <select id="violin-groupby" class="select-input">
+                <option value="genotype">Group by Genotype</option>
+                <option value="identity">Group by Identity</option>
+                <option value="cell_cycle">Group by Cell Cycle</option>
+              </select>
+              <select id="violin-colorby" class="select-input">
+                <option value="same">Color = Group</option>
+                <option value="genotype">Color by Genotype</option>
+              </select>
+              <button class="btn btn-sm" id="violin-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="violin-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Violin plots show distribution shape with box plot summaries. <strong>Tip:</strong> Group by Identity, color by Genotype for side-by-side paired comparisons within each cell population.</div>
+          <div class="chart-container" id="violin-chart"></div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="tab-panel" id="panel-statistics">
+          <div class="panel-header">
+            <h2>Statistical Analysis</h2>
+            <div class="panel-controls">
+              <select id="stats-marker" class="select-input"></select>
+              <select id="stats-stratify" class="select-input">
+                <option value="None">No stratification</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="run-lmm-btn"><i class="fas fa-play"></i> Run LMM</button>
+              <button class="btn btn-accent btn-sm" id="run-all-markers-btn"><i class="fas fa-layer-group"></i> All Markers</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> LMM accounts for nested data structure (cells within replicates). Replicate = random effect to avoid pseudoreplication. Stratify by Identity/Cell Cycle to find population-specific effects.</div>
+          <div class="feature-select-bar" id="stats-feature-bar" style="display:none;">
+            <label style="font-weight:600;font-size:12px;margin-right:8px;"><i class="fas fa-filter"></i> Markers to include:</label>
+            <div id="stats-marker-checkboxes" class="inline-checkbox-group"></div>
+          </div>
+          <div id="stats-message" class="inline-message" style="display:none;"></div>
+          <div id="stats-results" class="stats-results"></div>
+        </div>
+
+        <!-- Heatmap -->
+        <div class="tab-panel" id="panel-heatmap">
+          <div class="panel-header">
+            <h2>Identity Helper Heatmap</h2>
+            <div class="panel-controls">
+              <select id="heatmap-groupby" class="select-input">
+                <option value="identity">Group by Identity</option>
+                <option value="genotype">Group by Genotype</option>
+                <option value="cell_cycle">Group by Cell Cycle</option>
+              </select>
+              <label class="checkbox-inline"><input type="checkbox" id="heatmap-include-pheno"> Include phenotypic</label>
+              <button class="btn btn-sm" id="heatmap-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="heatmap-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Z-score heatmap of marker expression per group. Blue = below average, Red = above average. Toggle "Include phenotypic" to add non-H3 markers. Use to identify cluster identities from marker signatures.</div>
+          <div class="chart-container" id="heatmap-chart"></div>
+        </div>
+
+        <!-- Cell Cycle -->
+        <div class="tab-panel" id="panel-cellcycle">
+          <div class="panel-header">
+            <h2>Cell Cycle Analysis</h2>
+            <div class="panel-controls">
+              <button class="btn btn-primary btn-sm" id="run-cellcycle-btn"><i class="fas fa-play"></i> Analyze</button>
+              <button class="btn btn-sm" id="cellcycle-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="cellcycle-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Cell cycle is a critical confounder: H3K27ac rises in S/G2 due to histone deposition. Tests whether cell cycle composition differs between conditions. <strong>Click a phase</strong> below to see per-marker H3-PTM comparisons within that phase.</div>
+          <div id="cellcycle-stats" class="stats-results"></div>
+          <div class="chart-container" id="cellcycle-chart"></div>
+
+          <!-- Phase-specific analysis -->
+          <div class="overview-section" style="margin-top:16px;">
+            <h3><i class="fas fa-filter"></i> Per-Phase Marker Analysis</h3>
+            <div id="cellcycle-phase-buttons" class="inline-checkbox-group" style="margin-bottom:12px;"></div>
+            <div id="cellcycle-phase-stats" class="stats-results"></div>
+            <div class="chart-container" id="cellcycle-marker-chart" style="min-height:280px;"></div>
+          </div>
+        </div>
+
+        <!-- Correlation -->
+        <div class="tab-panel" id="panel-correlation">
+          <div class="panel-header">
+            <h2>Correlation Analysis</h2>
+            <div class="panel-controls">
+              <select id="corr-method" class="select-input"><option value="pearson">Pearson</option><option value="spearman">Spearman</option></select>
+              <label class="checkbox-inline"><input type="checkbox" id="corr-include-pheno"> Include phenotypic</label>
+              <label class="checkbox-inline" title="Check this if your experiment lacks biological replicates. Default uses replicate-level N for proper inference."><input type="checkbox" id="corr-use-cell-n"> Use cells as replicates</label>
+              <button class="btn btn-primary btn-sm" id="run-correlation-btn"><i class="fas fa-play"></i> Global</button>
+              <button class="btn btn-primary btn-sm" id="run-corr-diff-btn" style="background:#7c3aed;border-color:#7c3aed;"><i class="fas fa-exchange-alt"></i> Per-Group + Differential</button>
+              <button class="btn btn-sm" id="correlation-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="correlation-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i>
+            <strong>Global</strong> computes one correlation matrix across all cells.
+            <strong>Per-Group + Differential</strong> computes separate matrices per genotype, then applies Fisher z-transform to test whether marker-marker correlations differ significantly between groups.
+            By default, the Fisher z uses <strong>replicate-level N</strong> for proper inference. Check <em>"Use cells as replicates"</em> only if your experiment lacks biological replicates.
+            Disrupted co-regulation (Δr with p<0.05) indicates chromatin regulator loss affects the coordinated deposition of marks.
+          </div>
+          <div class="chart-container" id="correlation-chart"></div>
+          <div id="corr-diff-results" style="display:none;">
+            <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:20px 0 12px;">Per-Group Correlation Matrices
+              <button class="btn btn-sm" id="corr-pg-export-svg" style="margin-left:8px;font-size:10px;"><i class="fas fa-download"></i> SVG</button>
+            </h3>
+            <div id="corr-per-group-charts" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;"></div>
+            <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:24px 0 12px;">Differential Correlation (Δr)
+              <button class="btn btn-sm" id="corr-diff-export-svg" style="margin-left:8px;font-size:10px;"><i class="fas fa-download"></i> SVG</button>
+            </h3>
+            <p style="font-size:12px;color:#64748b;margin-bottom:8px;">Color: blue = stronger in group 1, red = stronger in group 2. Asterisks = BH-adjusted p<0.05. Fisher z-transform on r values.</p>
+            <div id="corr-diff-chart" class="chart-container"></div>
+            <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:24px 0 8px;">Significant Differential Correlations</h3>
+            <div id="corr-diff-table" style="overflow-x:auto;"></div>
+          </div>
+        </div>
+
+        <!-- Positivity / GMM -->
+        <div class="tab-panel" id="panel-positivity">
+          <div class="panel-header">
+            <h2>Positivity / GMM</h2>
+            <div class="panel-controls">
+              <select id="pos-marker" class="select-input dynamic-all-markers"></select>
+              <label style="font-size:12px;color:#64748b;margin-left:8px;">Manual threshold:
+                <input type="number" id="pos-threshold" class="select-input" style="width:90px;" step="0.01" placeholder="auto (GMM)">
+              </label>
+              <button class="btn btn-primary btn-sm" id="run-positivity-btn"><i class="fas fa-play"></i> Analyze</button>
+              <button class="btn btn-sm" id="positivity-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="positivity-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i>
+            Fits a 2-component Gaussian Mixture Model (GMM) to identify <strong>positive</strong> (high) vs <strong>negative</strong> (low) subpopulations for each H3-PTM mark.
+            The threshold is set at the GMM crossover point. Compares fraction-positive between genotypes using Fisher's exact test, and assesses distribution shifts via KS test.
+            Leave "Manual threshold" blank for automatic GMM-based detection. This is key for marks with bimodal distributions (e.g. H3K27me3).
+          </div>
+          <div class="chart-container" id="positivity-chart"></div>
+          <div id="positivity-stats" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- Quadrant Gating -->
+        <div class="tab-panel" id="panel-gating">
+          <div class="panel-header">
+            <h2>Quadrant Gating</h2>
+            <div class="panel-controls" style="flex-wrap:wrap;gap:6px;">
+              <select id="gate-filter-identity" class="select-input" style="width:auto;font-size:11px;">
+                <option value="All">All identities</option>
+              </select>
+              <select id="gate-filter-cycle" class="select-input" style="width:auto;font-size:11px;">
+                <option value="All">All cell cycle</option>
+              </select>
+              <select id="gate-marker-x" class="select-input dynamic-all-markers"></select>
+              <span style="font-size:12px;color:#64748b;">vs</span>
+              <select id="gate-marker-y" class="select-input dynamic-all-markers"></select>
+              <button class="btn btn-primary btn-sm" id="run-gating-btn"><i class="fas fa-play"></i> Gate</button>
+              <button class="btn btn-sm" id="gating-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="gating-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i>
+            Interactive bi-axial scatter plot with <strong>draggable quadrant thresholds</strong> (blue crosshairs).
+            <strong>Click a quadrant</strong> to see H3-PTM density profiles and cell cycle distribution for cells in that quadrant.
+            Chi-square tests whether quadrant distributions differ between groups.
+          </div>
+          <!-- F. Custom quadrant labels -->
+          <div id="gate-labels-panel" style="display:none;padding:8px 16px;background:#f8fafc;border-radius:8px;margin-bottom:12px;font-size:12px;">
+            <strong>Custom Quadrant Labels</strong> <span style="color:#94a3b8;">(optional — used for metadata annotation)</span>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px;">
+              <div><label style="font-size:10px;color:#64748b;">Q1 (++)</label><input type="text" id="gate-label-Q1" class="select-input" style="width:100%;font-size:11px;" placeholder="e.g. Active"></div>
+              <div><label style="font-size:10px;color:#64748b;">Q2 (−+)</label><input type="text" id="gate-label-Q2" class="select-input" style="width:100%;font-size:11px;" placeholder="e.g. Y-only"></div>
+              <div><label style="font-size:10px;color:#64748b;">Q3 (−−)</label><input type="text" id="gate-label-Q3" class="select-input" style="width:100%;font-size:11px;" placeholder="e.g. Inactive"></div>
+              <div><label style="font-size:10px;color:#64748b;">Q4 (+−)</label><input type="text" id="gate-label-Q4" class="select-input" style="width:100%;font-size:11px;" placeholder="e.g. X-only"></div>
+            </div>
+            <button class="btn btn-sm" id="apply-gate-labels" style="margin-top:6px;"><i class="fas fa-tag"></i> Apply as metadata column</button>
+            <button class="btn btn-sm" id="clear-gate-labels" style="margin-top:6px;margin-left:4px;display:none;"><i class="fas fa-times"></i> Clear labels</button>
+            <button class="btn btn-sm" id="export-gate-labels" style="margin-top:6px;margin-left:4px;display:none;"><i class="fas fa-download"></i> Export gate assignments (CSV)</button>
+            <span id="gate-labels-status" style="margin-left:8px;font-size:11px;color:#16a34a;"></span>
+          </div>
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+            <div style="flex:1;min-width:450px;">
+              <div class="chart-container" id="gating-chart"></div>
+              <div id="gating-stats" style="margin-top:12px;"></div>
+            </div>
+            <!-- E. Quadrant detail sidebar -->
+            <div id="gate-detail-panel" style="width:340px;display:none;">
+              <div style="background:#f8fafc;border-radius:8px;padding:12px;border:1px solid #e2e8f0;">
+                <h4 id="gate-detail-title" style="font-size:13px;font-weight:600;margin:0 0 8px;"></h4>
+                <div id="gate-detail-densities"></div>
+                <div id="gate-detail-cycle" style="margin-top:12px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PCA -->
+        <div class="tab-panel" id="panel-pca">
+          <div class="panel-header">
+            <h2>PCA / Batch Effect QC</h2>
+            <div class="panel-controls">
+              <select id="pca-color" class="select-input" style="width:auto;">
+                <option value="genotype">Color: Genotype</option>
+                <option value="replicate">Color: Replicate</option>
+                <option value="identity">Color: Identity</option>
+                <option value="cell_cycle">Color: Cell Cycle</option>
+              </select>
+              <label class="checkbox-inline"><input type="checkbox" id="pca-pheno"> + Phenotypic</label>
+              <button class="btn btn-primary btn-sm" id="run-pca-btn"><i class="fas fa-play"></i> Run PCA</button>
+              <button class="btn btn-sm" id="pca-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="pca-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i>
+            PCA reduces multi-dimensional H3-PTM space. Color by <strong>Replicate</strong> to check for batch effects — replicates of the same genotype should cluster together.
+          </div>
+          <div class="chart-container" id="pca-chart-main"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
+            <div class="chart-container" id="pca-chart-secondary"></div>
+            <div class="chart-container" id="pca-variance-chart"></div>
+          </div>
+        </div>
+
+        <!-- UMAP -->
+        <div class="tab-panel" id="panel-umap">
+          <div class="panel-header">
+            <h2>UMAP</h2>
+            <div class="panel-controls" style="flex-wrap:wrap;gap:6px;">
+              <select id="umap-color" class="select-input" style="width:auto;">
+                <option value="genotype">Color: Genotype</option>
+                <option value="replicate">Color: Replicate</option>
+                <option value="identity">Color: Identity</option>
+                <option value="cell_cycle">Color: Cell Cycle</option>
+                <optgroup label="── Marker Intensity ──" id="umap-marker-options"></optgroup>
+              </select>
+              <select id="umap-dot-size" class="select-input" style="width:auto;">
+                <option value="1">Dots: Tiny</option>
+                <option value="2" selected>Dots: Small</option>
+                <option value="3">Dots: Medium</option>
+                <option value="5">Dots: Large</option>
+              </select>
+              <label class="checkbox-inline"><input type="checkbox" id="umap-split"> Split by Genotype</label>
+              <label class="checkbox-inline"><input type="checkbox" id="umap-pheno"> + Phenotypic</label>
+              <button class="btn btn-primary btn-sm" id="run-umap-btn"><i class="fas fa-play"></i> Run UMAP</button>
+              <button class="btn btn-sm" id="umap-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="umap-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div style="padding:8px 16px;background:#f0f9ff;border-radius:8px;margin-bottom:8px;font-size:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+            <label>n_neighbors: <input type="number" id="umap-neighbors" value="15" min="5" max="100" class="select-input" style="width:60px;" title="Controls how UMAP balances local vs. global structure. Low values (5-10) emphasize very local relationships — clusters appear tight and separated. High values (30-100) capture more global topology — clusters merge and structure appears smoother."></label>
+            <label>min_dist: <input type="number" id="umap-min-dist" value="0.1" min="0" max="1" step="0.05" class="select-input" style="width:60px;" title="Controls how tightly UMAP packs points together. Low values (0.0-0.1) produce tight clusters with dense cores. High values (0.5-1.0) spread points out, preserving broader topological structure."></label>
+            <span style="color:#64748b;">
+              <strong>n_neighbors</strong>: low = local structure (tight clusters), high = global topology.
+              <strong>min_dist</strong>: low = dense clusters, high = spread out. ℹ️ Hover for details.
+            </span>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i>
+            UMAP preserves local neighborhoods to reveal cell population structure.
+            Select a <strong>marker</strong> from the color dropdown to see fluorescence intensity (FeaturePlot).
+            Toggle <strong>Split</strong> to compare genotypes side-by-side on the same embedding.
+            <em>Re-coloring uses cached data — no need to re-run.</em>
+          </div>
+          <!-- Single UMAP or Split view -->
+          <div id="umap-single-panel">
+            <div class="chart-container" id="umap-chart-main" style="min-height:480px;"></div>
+          </div>
+          <div id="umap-split-panel" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div class="chart-container" id="umap-chart-split-left" style="min-height:400px;"></div>
+              <div class="chart-container" id="umap-chart-split-right" style="min-height:400px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Clustering -->
+        <div class="tab-panel" id="panel-clustering">
+          <div class="panel-header">
+            <h2>Clustering</h2>
+            <div class="panel-controls" style="flex-wrap:wrap;gap:6px;">
+              <select id="cluster-method" class="select-input" style="width:auto;">
+                <option value="kmeans">K-Means</option>
+                <option value="hierarchical">Hierarchical</option>
+                <option value="louvain">Louvain</option>
+                <option value="leiden">Leiden</option>
+              </select>
+              <div id="cluster-k-controls">
+                <label style="font-size:12px;">k: <input type="number" id="cluster-k" value="5" min="2" max="20" class="select-input" style="width:55px;"></label>
+              </div>
+              <div id="cluster-resolution-controls" style="display:none;">
+                <label style="font-size:12px;">Resolution: <input type="number" id="cluster-resolution" value="1.0" min="0.1" max="5.0" step="0.1" class="select-input" style="width:60px;"></label>
+              </div>
+              <select id="cluster-color" class="select-input" style="width:auto;">
+                <option value="cluster">Color: Cluster</option>
+                <option value="genotype">Color: Genotype</option>
+                <option value="identity">Color: Identity</option>
+                <option value="cell_cycle">Color: Cell Cycle</option>
+              </select>
+              <label class="checkbox-inline"><input type="checkbox" id="cluster-pheno"> + Phenotypic</label>
+              <button class="btn btn-primary btn-sm" id="run-cluster-btn"><i class="fas fa-play"></i> Cluster</button>
+              <button class="btn btn-sm" id="run-elbow-btn" title="Scan k=2..10 for optimal cluster count"><i class="fas fa-chart-line"></i> Elbow Scan</button>
+              <button class="btn btn-sm" id="cluster-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="cluster-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i>
+            Clusters cells by H3-PTM profiles on a UMAP embedding.
+            <strong>K-Means</strong>: specify k. <strong>Hierarchical</strong>: Ward linkage.
+            <strong>Louvain/Leiden</strong>: graph-based, resolution controls granularity.
+            Use <strong>Elbow Scan</strong> to find optimal k. After clustering, <strong>rename clusters</strong> below to assign biological identities, then <strong>Apply</strong> to update all tabs.
+          </div>
+          <div id="cluster-message" class="inline-message" style="display:none;"></div>
+          <!-- Side-by-side UMAP scatter — aligned -->
+          <div style="display:flex;gap:12px;align-items:stretch;">
+            <div style="flex:1;min-width:400px;">
+              <div class="chart-container" id="cluster-scatter-chart" style="height:100%;"></div>
+            </div>
+            <div style="flex:1;min-width:400px;display:flex;flex-direction:column;">
+              <div class="chart-container" id="cluster-compare-chart" style="flex:1;min-height:50px;"></div>
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 0;justify-content:center;flex-shrink:0;">
+                <span style="font-size:11px;font-weight:600;color:#64748b;">Compare with:</span>
+                <select id="cluster-compare-color" class="select-input" style="width:auto;font-size:11px;">
+                  <option value="none">— select —</option>
+                  <option value="genotype">Genotype</option>
+                  <option value="identity">Identity</option>
+                  <option value="cell_cycle">Cell Cycle</option>
+                  <option value="cluster">Cluster</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <!-- Elbow plot -->
+          <div class="chart-container" id="cluster-elbow-chart" style="margin-top:8px;"></div>
+          <!-- Cluster signatures heatmap -->
+          <div class="chart-container" id="cluster-signatures-chart" style="margin-top:8px;overflow-x:auto;"></div>
+          <!-- Identity Helper: rename clusters -->
+          <div id="cluster-identity-helper" style="display:none;margin-top:12px;padding:16px;border:2px solid #3b82f6;border-radius:8px;background:#f8fafc;">
+            <h3 style="margin:0 0 8px;font-size:14px;"><i class="fas fa-tag"></i> Rename Clusters → Cell Identities</h3>
+            <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Use the cross-tabs and signature heatmap to determine which cluster corresponds to which cell type, then rename below. Click "Apply" to push new identity labels back to your data.</p>
+            <div id="cluster-rename-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;">
+              <button class="btn btn-primary btn-sm" id="apply-cluster-names-btn"><i class="fas fa-check"></i> Apply Identity Names</button>
+              <button class="btn btn-sm" id="export-cluster-csv-btn"><i class="fas fa-download"></i> Export Cluster Assignments (CSV)</button>
+            </div>
+          </div>
+          <!-- Cross-tabs -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
+            <div id="cluster-cross-genotype"></div>
+            <div id="cluster-cross-identity"></div>
+          </div>
+        </div>
+
+        <!-- Volcano -->
+        <div class="tab-panel" id="panel-volcano">
+          <div class="panel-header">
+            <h2>Volcano Plot</h2>
+            <div class="panel-controls">
+              <span class="help-text">Run "All Markers" in Statistics tab first</span>
+              <button class="btn btn-sm" id="volcano-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="volcano-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="chart-container" id="volcano-chart"></div>
+        </div>
+
+        <!-- Forest -->
+        <div class="tab-panel" id="panel-forest">
+          <div class="panel-header">
+            <h2>Forest Plot</h2>
+            <div class="panel-controls">
+              <select id="forest-marker-filter" class="select-input">
+                <option value="all">All Markers</option>
+              </select>
+              <select id="forest-stratify" class="select-input">
+                <option value="identity">Stratify: Identity</option>
+                <option value="cell_cycle">Stratify: Cell Cycle</option>
+                <option value="None">No Stratification</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="run-forest-btn"><i class="fas fa-play"></i> Generate</button>
+              <button class="btn btn-sm" id="forest-export-svg"><i class="fas fa-download"></i> SVG</button>
+              <button class="btn btn-sm" id="forest-export-png"><i class="fas fa-image"></i> PNG</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Each <strong>color = H3-PTM marker</strong> (to track modifications across subsets). Gray = not significant (p&ge;0.05). Red p-values = significant. Use "Generate" to run All Markers LMM with chosen stratification directly.</div>
+          <div class="feature-select-bar" id="forest-feature-bar" style="display:none;">
+            <label style="font-weight:600;font-size:12px;margin-right:8px;"><i class="fas fa-filter"></i> Markers to plot:</label>
+            <div id="forest-marker-checkboxes" class="inline-checkbox-group"></div>
+          </div>
+          <div id="forest-message" class="inline-message" style="display:none;"></div>
+          <div class="chart-container" id="forest-chart"></div>
+        </div>
+
+        <!-- ML -->
+        <div class="tab-panel" id="panel-ml">
+          <div class="panel-header">
+            <h2>Machine Learning</h2>
+            <div class="panel-controls">
+              <select id="ml-target" class="select-input">
+                <option value="genotype">Target: Genotype</option>
+                <option value="identity">Target: Identity</option>
+                <option value="cell_cycle">Target: Cell Cycle</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="run-rf-btn"><i class="fas fa-play"></i> Random Forest</button>
+              <button class="btn btn-sm" id="run-gbm-btn"><i class="fas fa-play"></i> GBM</button>
+              <button class="btn btn-sm" id="run-signatures-btn"><i class="fas fa-fingerprint"></i> H3-PTM Signatures</button>
+              <button class="btn btn-sm" id="run-all-ml-btn" title="Run RF + GBM + Signatures together"><i class="fas fa-layer-group"></i> Run All</button>
+              <button class="btn btn-sm" id="ml-export-all" title="Download all ML plots as SVGs"><i class="fas fa-file-archive"></i> Download All Plots</button>
+            </div>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> RF and GBM classify cells using H3-PTM + phenotypic features. <strong>Uncheck noisy features</strong> (FxCycle, Live/Dead, etc.) below. Use "Run All" to compare all models side-by-side.</div>
+          <div class="feature-select-bar" id="ml-feature-bar" style="display:none;">
+            <label style="font-weight:600;font-size:12px;margin-right:8px;"><i class="fas fa-filter"></i> Features to include:</label>
+            <div id="ml-feature-checkboxes" class="inline-checkbox-group"></div>
+          </div>
+          <div id="ml-message" class="inline-message" style="display:none;"></div>
+
+          <!-- Side-by-side comparison grid -->
+          <div class="ml-comparison-grid" id="ml-comparison">
+            <div class="ml-panel" id="ml-panel-rf">
+              <h3 class="ml-panel-title"><i class="fas fa-tree"></i> Random Forest <button class="btn btn-sm" id="rf-imp-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div id="ml-rf-results" class="stats-results"><p class="ml-placeholder">Click "Random Forest" to run</p></div>
+              <div class="chart-container" id="ml-rf-importance"></div>
+            </div>
+            <div class="ml-panel" id="ml-panel-gbm">
+              <h3 class="ml-panel-title"><i class="fas fa-bolt"></i> GBM (xgboost) <button class="btn btn-sm" id="gbm-imp-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <div id="ml-gbm-results" class="stats-results"><p class="ml-placeholder">Click "GBM" to run</p></div>
+              <div class="chart-container" id="ml-gbm-importance"></div>
+            </div>
+          </div>
+          <div class="ml-panel" id="ml-panel-signatures" style="margin-top:16px;">
+            <h3 class="ml-panel-title"><i class="fas fa-fingerprint"></i> H3-PTM Signatures <button class="btn btn-sm" id="sig-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+            <div id="ml-sig-results" class="stats-results"><p class="ml-placeholder">Click "Signatures" to run</p></div>
+            <div class="chart-container" id="ml-signatures-chart"></div>
+          </div>
+
+          <!-- Diagnostic Assessment Section -->
+          <div class="ml-panel" id="ml-panel-diagnostic" style="margin-top:16px;border:2px solid #e2e8f0;border-radius:8px;padding:16px;">
+            <h3 class="ml-panel-title"><i class="fas fa-stethoscope"></i> Diagnostic Signature Assessment <button class="btn btn-sm" id="diag-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+            <div class="help-panel" style="margin-bottom:12px;"><i class="fas fa-info-circle"></i>
+              Assess whether H3-PTM signatures can discriminate genotype: <strong>MANOVA</strong> tests if multivariate profiles differ; <strong>LDA 5-fold CV</strong> estimates diagnostic accuracy; <strong>Consistency</strong> tests if effects hold within each identity (via LMM). Stratify to test cell-type or cell-cycle specificity.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+              <select id="diag-stratify" class="select-input" style="width:auto;">
+                <option value="None">No Stratification</option>
+                <option value="identity">Stratify by Identity</option>
+                <option value="cell_cycle">Stratify by Cell Cycle</option>
+              </select>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;">
+                k-means k: <input type="number" id="diag-k" value="0" min="0" max="20" style="width:50px;" class="select-input">
+                <span style="color:#94a3b8;font-size:11px;">(0 = skip)</span>
+              </label>
+              <button class="btn btn-primary btn-sm" id="run-diagnostic-btn"><i class="fas fa-stethoscope"></i> Run Diagnostic</button>
+            </div>
+            <div id="diag-message" class="inline-message" style="display:none;"></div>
+            <div id="diag-manova" class="stats-results"></div>
+            <div id="diag-lda" class="stats-results"></div>
+            <div id="diag-consistency" class="stats-results"></div>
+            <div class="chart-container" id="diag-strat-chart"></div>
+            <div id="diag-kmeans" class="stats-results"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="loading-overlay hidden" id="loading">
+        <div class="spinner"></div>
+        <p id="loading-message">Processing...</p>
+      </div>
+    </main>
+  </div>
+
+  <footer class="app-footer">
+    EpiFlow D3 v1.0 · © 2025 <a href="https://serranolab.github.io/online/" target="_blank">Serrano Lab</a>, <a href="https://crem.bu.edu/" target="_blank">Center for Regenerative Medicine (CReM)</a>, Boston University · <span style="color:#b0b8c4;">AGPL-3.0</span>
+  </footer>
+
+  <!-- Figure Composer Modal -->
+  <style>
+    .fc-overlay { position:fixed; inset:0; background:rgba(15,23,42,.85); z-index:9999; display:none; align-items:center; justify-content:center; }
+    .fc-overlay.active { display:flex; }
+    .fc-modal { background:#fff; border-radius:12px; width:95vw; height:92vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 25px 60px rgba(0,0,0,.4); }
+    .fc-header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:#f8fafc; border-bottom:1px solid #e2e8f0; flex-shrink:0; }
+    .fc-header h2 { margin:0; font-size:16px; color:#0f766e; white-space:nowrap; }
+    .fc-header .fc-controls { display:flex; align-items:center; gap:10px; flex:1; flex-wrap:wrap; }
+    .fc-header label { font-size:11px; color:#64748b; font-weight:600; }
+    .fc-header select, .fc-header input[type=number] { padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:11px; }
+    .fc-header input[type=number] { width:60px; }
+    .fc-close { background:none; border:none; font-size:20px; cursor:pointer; color:#64748b; margin-left:auto; padding:4px 8px; }
+    .fc-close:hover { color:#ef4444; }
+    .fc-body { display:flex; flex:1; overflow:hidden; }
+    .fc-sidebar { width:220px; background:#f8fafc; border-right:1px solid #e2e8f0; overflow-y:auto; flex-shrink:0; padding:10px; }
+    .fc-sidebar h3 { font-size:12px; color:#475569; margin:0 0 8px; }
+    .fc-thumb { display:flex; align-items:center; gap:8px; padding:6px 8px; margin-bottom:4px; border:1px solid #e2e8f0; border-radius:6px; cursor:pointer; font-size:11px; color:#334155; background:#fff; transition:all .15s; }
+    .fc-thumb:hover { border-color:#0f766e; background:#f0fdfa; }
+    .fc-thumb.used { opacity:.4; cursor:default; border-color:#e2e8f0; background:#f1f5f9; }
+    .fc-thumb i { color:#0f766e; width:16px; text-align:center; }
+    .fc-canvas-area { flex:1; display:flex; align-items:center; justify-content:center; background:#e2e8f0; overflow:auto; padding:20px; }
+    .fc-canvas { background:#fff; box-shadow:0 2px 20px rgba(0,0,0,.12); display:grid; gap:0; position:relative; }
+    .fc-slot { border:2px dashed #cbd5e1; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden; background:#fafafa; min-height:80px; transition:border-color .15s; }
+    .fc-slot:hover { border-color:#0f766e; }
+    .fc-slot.filled { border:1px solid #e2e8f0; background:#fff; }
+    .fc-slot .fc-label { position:absolute; top:4px; left:6px; font-size:14px; font-weight:700; color:#1e293b; z-index:2; background:rgba(255,255,255,.85); padding:1px 5px; border-radius:3px; }
+    .fc-slot .fc-remove { position:absolute; top:3px; right:5px; font-size:11px; color:#94a3b8; cursor:pointer; z-index:2; background:rgba(255,255,255,.85); border-radius:3px; padding:1px 4px; display:none; }
+    .fc-slot.filled:hover .fc-remove { display:block; }
+    .fc-slot .fc-remove:hover { color:#ef4444; }
+    .fc-slot svg { width:100%; height:100%; }
+    .fc-slot .fc-empty-label { color:#94a3b8; font-size:12px; }
+    .fc-footer { display:flex; align-items:center; gap:10px; padding:10px 16px; background:#f8fafc; border-top:1px solid #e2e8f0; flex-shrink:0; }
+    .fc-footer .fc-btn { padding:6px 14px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+    .fc-btn-primary { background:#0f766e; color:#fff; }
+    .fc-btn-primary:hover { background:#0d635c; }
+    .fc-btn-secondary { background:#e2e8f0; color:#334155; }
+    .fc-btn-secondary:hover { background:#cbd5e1; }
+    .fc-footer .fc-status { margin-left:auto; font-size:11px; color:#94a3b8; }
+    .fc-label-style { display:flex; align-items:center; gap:4px; }
+    .fc-pad-ctrl { display:flex; align-items:center; gap:4px; }
+  </style>
+
+  <div class="fc-overlay" id="fc-overlay">
+    <div class="fc-modal">
+      <div class="fc-header">
+        <h2><i class="fas fa-th-large"></i> Figure Composer</h2>
+        <div class="fc-controls">
+          <label>Layout</label>
+          <select id="fc-layout">
+            <option value="1x1">1 × 1</option>
+            <option value="1x2">1 × 2</option>
+            <option value="2x1">2 × 1</option>
+            <option value="2x2" selected>2 × 2</option>
+            <option value="2x3">2 × 3</option>
+            <option value="3x2">3 × 2</option>
+            <option value="1x3">1 × 3</option>
+            <option value="3x1">3 × 1</option>
+            <option value="3x3">3 × 3</option>
+          </select>
+          <label>Width (mm)</label>
+          <input type="number" id="fc-width" value="180" min="50" max="400" step="10">
+          <label>Height (mm)</label>
+          <input type="number" id="fc-height" value="140" min="50" max="400" step="10">
+          <label>Labels</label>
+          <select id="fc-label-style">
+            <option value="upper">A, B, C…</option>
+            <option value="lower">a, b, c…</option>
+            <option value="paren">(A), (B)…</option>
+            <option value="none">None</option>
+          </select>
+          <label>Padding</label>
+          <input type="number" id="fc-padding" value="8" min="0" max="40" step="2" style="width:45px;">
+          <label>px</label>
+        </div>
+        <button class="fc-close" id="fc-close" title="Close">✕</button>
+      </div>
+
+      <div class="fc-body">
+        <div class="fc-sidebar" id="fc-sidebar">
+          <h3>Available Charts</h3>
+          <div id="fc-chart-list"></div>
+        </div>
+        <div class="fc-canvas-area">
+          <div class="fc-canvas" id="fc-canvas"></div>
+        </div>
+      </div>
+
+      <div class="fc-footer">
+        <button class="fc-btn fc-btn-primary" id="fc-export-svg"><i class="fas fa-file-code"></i> Export SVG</button>
+        <button class="fc-btn fc-btn-primary" id="fc-export-png"><i class="fas fa-file-image"></i> Export PNG</button>
+        <button class="fc-btn fc-btn-secondary" id="fc-clear-all"><i class="fas fa-trash-alt"></i> Clear All</button>
+        <span class="fc-status" id="fc-status">Click a chart to add it to the next available slot</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/utils/palettes.js"></script>
+  <script src="js/utils/export.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/dataManager.js"></script>
+  <script src="js/charts/ridgePlot.js"></script>
+  <script src="js/charts/violinPlot.js"></script>
+  <script src="js/charts/pcaPlot.js"></script>
+  <script src="js/charts/heatmap.js"></script>
+  <script src="js/charts/forestPlot.js"></script>
+  <script src="js/charts/volcanoPlot.js"></script>
+  <script src="js/charts/positivityPlot.js"></script>
+  <script src="js/charts/gatingPlot.js"></script>
+  <script src="js/charts/cellCyclePlot.js"></script>
+  <script src="js/charts/correlationPlot.js"></script>
+  <script src="js/charts/overviewCharts.js"></script>
+  <script src="js/charts/scatter3D.js"></script>
+  <script src="js/charts/clusterPlot.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

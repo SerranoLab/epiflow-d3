@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.md
+LICENSE
+deploy/
+*.rds
+*.RData
+node_modules
+.DS_Store

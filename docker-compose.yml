@@ -1,0 +1,50 @@
+# ============================================================================
+# EpiFlow D3 — Docker Compose
+# Copyright (C) 2025 Maria A. Serrano
+# Serrano Lab, CReM, Boston University · AGPL-3.0
+# ============================================================================
+#
+# Usage:
+#   docker compose up -d          # Start (background)
+#   docker compose logs -f api    # Watch R API logs
+#   docker compose down            # Stop
+#   docker compose up -d --build   # Rebuild after code changes
+#
+# ============================================================================
+
+services:
+
+  # --- R/plumber API backend ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+    environment:
+      - R_MAX_UPLOAD_SIZE=200  # MB
+    # Internal only — nginx proxies to this
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # --- Nginx frontend + reverse proxy ---
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "${PORT:-80}:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
+volumes:
+  uploads:
