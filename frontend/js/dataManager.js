@@ -44,50 +44,54 @@ const DataManager = {
       if (vals && vals.length) this.filters[col] = vals;
     });
 
-    // Collect quadrant gate filter if active
-    const quadGroup = document.getElementById('filter-quadrant-group');
-    if (quadGroup && !quadGroup.classList.contains('hidden') && this.gatingMetadata) {
+    // Always send gating metadata when active (for gate_population column + filtering)
+    if (this.gatingMetadata) {
+      const quadGroup = document.getElementById('filter-quadrant-group');
       const selectedQuadrants = this._getCheckedValues('filter-quadrants');
-      if (selectedQuadrants && selectedQuadrants.length > 0 && selectedQuadrants.length < 4) {
-        this.filters.quadrant_filter = {
-          marker_x: this.gatingMetadata.marker_x,
-          marker_y: this.gatingMetadata.marker_y,
-          threshold_x: this.gatingMetadata.threshold_x,
-          threshold_y: this.gatingMetadata.threshold_y,
-          selected_quadrants: selectedQuadrants
-        };
-      } else {
-        delete this.filters.quadrant_filter;
-      }
+      const allChecked = !quadGroup || quadGroup.classList.contains('hidden') ||
+        !selectedQuadrants || selectedQuadrants.length >= 4;
+
+      this.filters.gating_metadata = {
+        marker_x: this.gatingMetadata.marker_x,
+        marker_y: this.gatingMetadata.marker_y,
+        threshold_x: this.gatingMetadata.threshold_x,
+        threshold_y: this.gatingMetadata.threshold_y,
+        labels: this.gatingMetadata.labels || {},
+        selected_quadrants: allChecked ? null : selectedQuadrants
+      };
     } else {
-      delete this.filters.quadrant_filter;
+      delete this.filters.gating_metadata;
     }
 
-    // Collect cluster identity filter if active
-    const ciGroup = document.getElementById('filter-cluster-identity-group');
-    if (ciGroup && !ciGroup.classList.contains('hidden') && this.clusterNameMap) {
+    // Always send cluster identity mapping when active (for cluster_identity column + filtering)
+    if (this.clusterNameMap && this.clusterAssignments) {
+      const ciGroup = document.getElementById('filter-cluster-identity-group');
       const ciContainer = document.getElementById('filter-cluster-identities');
-      if (ciContainer) {
+      let selectedClusters = null;
+
+      if (ciGroup && !ciGroup.classList.contains('hidden') && ciContainer) {
         const allBoxes = ciContainer.querySelectorAll('input[type="checkbox"]');
         const checkedBoxes = ciContainer.querySelectorAll('input[type="checkbox"]:checked');
-        // Only filter if some (but not all) are unchecked
         if (checkedBoxes.length > 0 && checkedBoxes.length < allBoxes.length) {
-          // Get selected cluster numbers
-          const selectedClusters = [];
+          selectedClusters = [];
           checkedBoxes.forEach(cb => {
             cb.value.split(',').forEach(c => selectedClusters.push(c.trim()));
           });
-          this.filters.cluster_filter = {
-            selected_clusters: selectedClusters,
-            name_map: this.clusterNameMap
-          };
-        } else {
-          delete this.filters.cluster_filter;
         }
       }
+
+      this.filters.cluster_metadata = {
+        name_map: this.clusterNameMap,
+        cell_assignments: this.clusterAssignments,
+        selected_clusters: selectedClusters
+      };
     } else {
-      delete this.filters.cluster_filter;
+      delete this.filters.cluster_metadata;
     }
+
+    // Clean up old keys
+    delete this.filters.quadrant_filter;
+    delete this.filters.cluster_filter;
   },
 
   async applyFilters() {

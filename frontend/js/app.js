@@ -334,11 +334,66 @@ const App = {
         <strong>Filtered:</strong> ${Number(result.n_cells).toLocaleString()} cells<br>
         ${ensureArray(result.identities).length} identities · ${ensureArray(result.cell_cycles).length} phases · ${ensureArray(result.genotypes).length} groups
       `;
+
+      // Update dropdowns with extra grouping options (gate_population, cluster_identity)
+      this._updateExtraGroupingOptions(ensureArray(result.extra_grouping));
+
       await this.loadCurrentTab();
     } catch (err) {
       alert('Filter error: ' + err.message);
     } finally {
       this.hideLoading();
+    }
+  },
+
+  _updateExtraGroupingOptions(extraGrouping) {
+    const dynamicCols = ['gate_population', 'cluster_identity'];
+    const groupBySelects = ['ridge-groupby', 'violin-groupby', 'heatmap-groupby'];
+    const colorBySelects = ['ridge-colorby', 'violin-colorby'];
+    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify'];
+    const allSelects = [...groupBySelects, ...colorBySelects, ...stratifySelects];
+
+    allSelects.forEach(selId => {
+      const sel = document.getElementById(selId);
+      if (!sel) return;
+
+      // Remove old dynamic options
+      dynamicCols.forEach(col => {
+        const existing = sel.querySelector(`option[value="${col}"]`);
+        if (existing && !extraGrouping.includes(col)) {
+          existing.remove();
+        }
+      });
+
+      // Add new dynamic options
+      extraGrouping.forEach(col => {
+        if (!sel.querySelector(`option[value="${col}"]`)) {
+          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const isStratify = stratifySelects.includes(selId);
+          const isColor = colorBySelects.includes(selId);
+          const prefix = isStratify ? 'By' : (isColor ? 'Color by' : 'Group by');
+          const icon = col === 'gate_population' ? '⊞ ' : '◆ ';
+          sel.insertAdjacentHTML('beforeend',
+            `<option value="${col}">${prefix} ${icon}${label}</option>`);
+        }
+      });
+    });
+
+    // Also update comparison variable dropdown
+    const compSel = document.getElementById('filter-comparison-var');
+    if (compSel) {
+      dynamicCols.forEach(col => {
+        const existing = compSel.querySelector(`option[value="${col}"]`);
+        if (existing && !extraGrouping.includes(col)) existing.remove();
+      });
+      extraGrouping.forEach(col => {
+        if (!compSel.querySelector(`option[value="${col}"]`)) {
+          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const icon = col === 'gate_population' ? '⊞ ' : '◆ ';
+          compSel.insertAdjacentHTML('beforeend',
+            `<option value="${col}">${icon}${label}</option>`);
+        }
+      });
     }
   },
 
@@ -1215,9 +1270,12 @@ const App = {
 
     // Store cluster assignments on DataManager for filtering
     DataManager.clusterNameMap = nameMap;
-    if (this._clusterData && this._clusterData.visualization) {
+    if (this._clusterData && this._clusterData.cell_assignments) {
+      // Use the full cell→cluster mapping from the R backend
+      DataManager.clusterAssignments = this._clusterData.cell_assignments;
+    } else if (this._clusterData && this._clusterData.visualization) {
+      // Fallback: build from visualization data (may be subsampled)
       const viz = ensureArray(this._clusterData.visualization);
-      // Build cell_id → cluster mapping
       DataManager.clusterAssignments = {};
       viz.forEach(d => {
         if (d.cell_id) DataManager.clusterAssignments[d.cell_id] = String(d.cluster);
