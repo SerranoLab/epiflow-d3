@@ -126,10 +126,8 @@ function(req) {
     metadata = result[setdiff(names(result), "data")]
   )
 
-  # Save to disk for persistence
-  data_dir <- "data"
-  if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
-  saveRDS(result$data, file.path(data_dir, paste0(session_id, ".rds")))
+  # Session data is kept in memory only (data_store environment)
+  # No disk persistence — sessions don't survive container restarts
 
   response <- list(
     session_id = session_id,
