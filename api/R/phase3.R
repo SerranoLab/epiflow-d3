@@ -7,7 +7,7 @@
 compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
                          n_neighbors = 15, min_dist = 0.1,
                          include_phenotypic = FALSE,
-                         max_cells = 20000, seed = 42) {
+                         max_cells = 80000, seed = 42) {
   if (!requireNamespace("uwot", quietly = TRUE)) {
     return(list(error = "uwot package not installed. Run: install.packages('uwot')"))
   }
@@ -67,9 +67,9 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
   }
 
   # Downsample for JSON transfer
-  if (nrow(result_df) > 15000) {
+  if (nrow(result_df) > 30000) {
     set.seed(seed)
-    result_df <- result_df[sample(nrow(result_df), 15000), ]
+    result_df <- result_df[sample(nrow(result_df), 30000), ]
   }
 
   list(
@@ -127,9 +127,9 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
   meta_present <- intersect(meta_all, names(complete_data))
   scores_df <- dplyr::bind_cols(scores_df, complete_data[, meta_present])
 
-  if (nrow(scores_df) > 15000) {
+  if (nrow(scores_df) > 30000) {
     set.seed(42)
-    scores_df <- scores_df[sample(nrow(scores_df), 15000), ]
+    scores_df <- scores_df[sample(nrow(scores_df), 30000), ]
   }
 
   loadings_df <- as.data.frame(pca_result$rotation[, 1:n_comp]) %>%
@@ -430,9 +430,9 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     cell_assignments <- setNames(as.character(wide$cluster), wide$cell_id)
   }
 
-  if (nrow(viz) > 12000) {
+  if (nrow(viz) > 25000) {
     set.seed(seed)
-    idx <- sample(nrow(viz), 12000)
+    idx <- sample(nrow(viz), 25000)
     viz <- viz[idx, ]
   }
 
@@ -463,7 +463,7 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
 
 # ---- Elbow / Silhouette scan for optimal k ----
 compute_elbow <- function(data, h3_markers, k_range = 2:10,
-                          max_cells = 20000, seed = 42) {
+                          max_cells = 50000, seed = 42) {
   wide <- data %>%
     dplyr::select(dplyr::any_of(c("cell_id")), H3PTM, value) %>%
     dplyr::group_by(cell_id, H3PTM) %>%

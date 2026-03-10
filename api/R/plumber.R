@@ -851,7 +851,7 @@ function(session_id, req) {
   h3_cols <- intersect(h3_markers, names(wide))
 
   # Subsample
-  max_cells <- params$max_cells %||% 20000
+  max_cells <- params$max_cells %||% 80000
   if (nrow(wide) > max_cells) {
     set.seed(42)
     wide <- wide[sample(nrow(wide), max_cells), ]
@@ -905,7 +905,7 @@ function(session_id, req) {
       n_neighbors         = params$n_neighbors %||% 15,
       min_dist            = params$min_dist %||% 0.1,
       include_phenotypic  = isTRUE(params$include_phenotypic),
-      max_cells           = params$max_cells %||% 20000
+      max_cells           = params$max_cells %||% 80000
     ),
     error = function(e) list(error = paste("UMAP failed:", e$message))
   )
