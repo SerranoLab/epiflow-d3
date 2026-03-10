@@ -222,11 +222,8 @@ run_random_forest <- function(data, target_var = "genotype",
   subsampled <- FALSE
   if (nrow(rf_wide) > max_cells) {
     set.seed(42)
-    # Stratified subsample to preserve group proportions
-    rf_wide <- rf_wide %>%
-      dplyr::group_by(.data[[target_var]]) %>%
-      dplyr::slice_sample(n = min(dplyr::n(), ceiling(max_cells / dplyr::n_distinct(rf_wide[[target_var]])))) %>%
-      dplyr::ungroup()
+    idx <- sample(nrow(rf_wide), max_cells)
+    rf_wide <- rf_wide[idx, ]
     subsampled <- TRUE
   }
 
@@ -421,10 +418,8 @@ run_gbm <- function(data, target_var = "genotype",
   subsampled <- FALSE
   if (nrow(wide) > max_cells) {
     set.seed(42)
-    wide <- wide %>%
-      dplyr::group_by(.data[[target_var]]) %>%
-      dplyr::slice_sample(n = min(dplyr::n(), ceiling(max_cells / dplyr::n_distinct(wide[[target_var]])))) %>%
-      dplyr::ungroup()
+    idx <- sample(nrow(wide), max_cells)
+    wide <- wide[idx, ]
     subsampled <- TRUE
   }
 
@@ -563,11 +558,8 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
   # Subsample if dataset is very large (memory protection)
   if (dplyr::n_distinct(data$cell_id) > max_cells) {
     set.seed(42)
-    keep_ids <- data %>%
-      dplyr::distinct(cell_id, .data[[target_var]]) %>%
-      dplyr::group_by(.data[[target_var]]) %>%
-      dplyr::slice_sample(n = min(dplyr::n(), ceiling(max_cells / length(groups)))) %>%
-      dplyr::pull(cell_id)
+    all_ids <- unique(data$cell_id)
+    keep_ids <- sample(all_ids, max_cells)
     data <- data %>% dplyr::filter(cell_id %in% keep_ids)
   }
 
