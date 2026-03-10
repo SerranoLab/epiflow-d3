@@ -202,7 +202,8 @@ run_all_markers_lmm <- function(data, markers, comparison_var = "genotype",
 run_random_forest <- function(data, target_var = "genotype",
                               h3_markers = NULL, phenotypic_markers = NULL,
                               selected_features = NULL,
-                              n_trees = 500, train_fraction = 0.7) {
+                              n_trees = 500, train_fraction = 0.7,
+                              max_cells = 50000) {
   suppressMessages(suppressWarnings(suppressPackageStartupMessages({
     library(randomForest); library(caret)
   })))
@@ -216,6 +217,18 @@ run_random_forest <- function(data, target_var = "genotype",
     dplyr::group_by(dplyr::across(dplyr::all_of(c(meta_cols, pheno_cols))), H3PTM) %>%
     dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
     tidyr::pivot_wider(names_from = H3PTM, values_from = value)
+
+  # Subsample if dataset is very large (memory protection)
+  subsampled <- FALSE
+  if (nrow(rf_wide) > max_cells) {
+    set.seed(42)
+    # Stratified subsample to preserve group proportions
+    rf_wide <- rf_wide %>%
+      dplyr::group_by(.data[[target_var]]) %>%
+      dplyr::slice_sample(n = min(dplyr::n(), ceiling(max_cells / dplyr::n_distinct(rf_wide[[target_var]])))) %>%
+      dplyr::ungroup()
+    subsampled <- TRUE
+  }
 
   h3_cols <- intersect(h3_markers, names(rf_wide))
   predictor_cols <- c(h3_cols, pheno_cols)
@@ -291,7 +304,9 @@ run_random_forest <- function(data, target_var = "genotype",
     n_trees = n_trees,
     n_predictors = length(predictor_cols),
     predictor_names = predictor_cols,
-    roc = roc_data
+    roc = roc_data,
+    n_cells_used = nrow(rf_wide),
+    subsampled = subsampled
   )
 }
 
@@ -384,7 +399,8 @@ run_clustering <- function(data, h3_markers, n_clusters = 3,
 run_gbm <- function(data, target_var = "genotype",
                     h3_markers = NULL, phenotypic_markers = NULL,
                     selected_features = NULL,
-                    n_trees = 200, train_fraction = 0.7) {
+                    n_trees = 200, train_fraction = 0.7,
+                    max_cells = 50000) {
 
   if (!requireNamespace("xgboost", quietly = TRUE)) {
     return(list(error = "xgboost package not installed. Run: install.packages('xgboost')"))
@@ -400,6 +416,17 @@ run_gbm <- function(data, target_var = "genotype",
     dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
     tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
     tidyr::drop_na()
+
+  # Subsample if dataset is very large (memory protection)
+  subsampled <- FALSE
+  if (nrow(wide) > max_cells) {
+    set.seed(42)
+    wide <- wide %>%
+      dplyr::group_by(.data[[target_var]]) %>%
+      dplyr::slice_sample(n = min(dplyr::n(), ceiling(max_cells / dplyr::n_distinct(wide[[target_var]])))) %>%
+      dplyr::ungroup()
+    subsampled <- TRUE
+  }
 
   predictor_cols <- intersect(c(h3_markers, pheno_cols), names(wide))
 
@@ -468,7 +495,9 @@ run_gbm <- function(data, target_var = "genotype",
     n_trees = n_trees,
     n_predictors = length(predictor_cols),
     importance = importance,
-    levels = levels_map
+    levels = levels_map,
+    n_cells_used = nrow(wide),
+    subsampled = subsampled
   )
 }
 
@@ -522,13 +551,25 @@ compute_signatures <- function(data, target_var = "genotype", h3_markers = NULL)
 compute_signatures_diagnostic <- function(data, target_var = "genotype",
                                           h3_markers = NULL,
                                           stratify_by = NULL,
-                                          n_clusters = NULL) {
+                                          n_clusters = NULL,
+                                          max_cells = 50000) {
   if (is.null(h3_markers) || length(h3_markers) == 0) {
     return(list(error = "No H3-PTM markers available"))
   }
 
   groups <- sort(unique(data[[target_var]]))
   if (length(groups) < 2) return(list(error = "Need at least 2 groups"))
+
+  # Subsample if dataset is very large (memory protection)
+  if (dplyr::n_distinct(data$cell_id) > max_cells) {
+    set.seed(42)
+    keep_ids <- data %>%
+      dplyr::distinct(cell_id, .data[[target_var]]) %>%
+      dplyr::group_by(.data[[target_var]]) %>%
+      dplyr::slice_sample(n = min(dplyr::n(), ceiling(max_cells / length(groups)))) %>%
+      dplyr::pull(cell_id)
+    data <- data %>% dplyr::filter(cell_id %in% keep_ids)
+  }
 
   # Build wide matrix for multivariate analysis
   cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
