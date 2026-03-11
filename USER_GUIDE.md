@@ -285,6 +285,18 @@ Every statistical result has a **Download CSV** button: LMM results, positivity 
 
 ---
 
+## License
+
+EpiFlow D3 is open-source software licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). You are free to use, modify, and redistribute under the AGPL-3.0. Any modified versions deployed as a web service must also be released under AGPL-3.0 with full source code.
+
+All copies and derivative works must retain the original attribution:
+
+> "EpiFlow D3 was originally developed by Dr. Maria A. Serrano at the Serrano Lab, Center for Regenerative Medicine (CReM), Boston University."
+
+Source code: https://github.com/SerranoLab/epiflow-d3
+
+---
+
 ## Citation
 
 If you use EpiFlow D3 in your research, please cite:
@@ -299,4 +311,4 @@ If you use EpiFlow D3 in your research, please cite:
 
 **Maria Serrano, PhD**
 Serrano Laboratory · CReM · Boston University School of Medicine
-Email: maserr@bu.edu · Web: https://serranolab.org
+Email: maserr@bu.edu · Web: https://serranolab.github.io/online/

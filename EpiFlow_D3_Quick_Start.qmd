@@ -1,0 +1,255 @@
+---
+title: "EpiFlow D3 — Quick Start"
+subtitle: "Get from data to results in 10 minutes"
+author: "Serrano Lab · Boston University"
+date: today
+format:
+  pdf:
+    toc: false
+    number-sections: false
+    pdf-engine: xelatex
+    documentclass: article
+    geometry: 
+      - margin=0.8in
+      - top=0.9in
+    include-in-header:
+      text: |
+        \usepackage{fontspec}
+        \renewcommand{\familydefault}{\sfdefault}
+        \IfFontExistsTF{Helvetica Neue}{
+          \setsansfont{Helvetica Neue}[Scale = 0.95]
+          \setmainfont{Helvetica Neue}[Scale = 0.95]
+        }{
+          \IfFontExistsTF{Arial}{
+            \setsansfont{Arial}[Scale = 0.95]
+            \setmainfont{Arial}[Scale = 0.95]
+          }{
+            \usepackage{helvet}
+            \renewcommand{\familydefault}{\sfdefault}
+          }
+        }
+        \setmonofont{Courier New}[Scale=0.85]
+
+        \usepackage{fancyhdr}
+        \pagestyle{fancy}
+        \fancyhf{}
+        \fancyhead[L]{\footnotesize\color{gray}\textbf{EPIFLOW D3 — QUICK START}}
+        \fancyhead[R]{\footnotesize\color{gray}Serrano Lab}
+        \fancyfoot[C]{\footnotesize\color{gray}\thepage}
+        \renewcommand{\headrulewidth}{0.5pt}
+        \setlength{\headheight}{14pt}
+
+        \usepackage[table,dvipsnames]{xcolor}
+        \definecolor{oiblue}{HTML}{0072B2}
+        \definecolor{oivermillion}{HTML}{D55E00}
+        \definecolor{oigreen}{HTML}{009E73}
+        \definecolor{oiorange}{HTML}{E69F00}
+        \definecolor{oiskyblue}{HTML}{56B4E9}
+        \definecolor{darkgray}{HTML}{333333}
+        \definecolor{mediumgray}{HTML}{666666}
+        \definecolor{lightgray}{HTML}{F5F5F5}
+
+        \usepackage{titlesec}
+        \titleformat{\section}
+          {\color{oiblue}\normalfont\Large\bfseries}
+          {\thesection}{0em}{}[\color{oiblue}\titlerule]
+        \titleformat{\subsection}
+          {\color{darkgray}\normalfont\large\bfseries}
+          {}{0em}{}
+        \titlespacing*{\section}{0pt}{12pt}{6pt}
+        \titlespacing*{\subsection}{0pt}{8pt}{4pt}
+
+        \usepackage{booktabs}
+        \usepackage{array}
+        \usepackage{colortbl}
+        \arrayrulecolor{mediumgray}
+        \renewcommand{\arraystretch}{1.3}
+        \rowcolors{2}{white}{lightgray}
+
+        \usepackage{tcolorbox}
+        \tcbuselibrary{skins,breakable}
+
+        \newtcolorbox{stepbox}[1][]{
+          colback=oiskyblue!8,
+          colframe=oiblue,
+          fonttitle=\bfseries\large,
+          coltitle=oiblue,
+          colbacktitle=white,
+          title=#1,
+          boxrule=1.5pt,
+          arc=4pt,
+          toptitle=3pt,
+          bottomtitle=3pt,
+          left=8pt,
+          right=8pt,
+          breakable
+        }
+
+        \newtcolorbox{tipbox}[1][]{
+          colback=oigreen!8,
+          colframe=oigreen,
+          colbacktitle=oigreen,
+          coltitle=white,
+          fonttitle=\bfseries,
+          title=#1,
+          boxrule=1pt,
+          arc=3pt,
+          breakable
+        }
+
+        \newtcolorbox{warnbox}[1][]{
+          colback=oiorange!8,
+          colframe=oiorange,
+          colbacktitle=oiorange,
+          coltitle=white,
+          fonttitle=\bfseries,
+          title=#1,
+          boxrule=1pt,
+          arc=3pt,
+          breakable
+        }
+
+        \usepackage{enumitem}
+        \setlist[enumerate]{leftmargin=*, itemsep=4pt, parsep=2pt}
+        \setlist[itemize]{leftmargin=*, itemsep=2pt, parsep=2pt}
+---
+
+\begin{center}
+{\LARGE\bfseries\color{oiblue} EpiFlow D3 --- Quick Start Guide}\\[6pt]
+{\large Analyze your spectral flow cytometry data in 10 minutes}\\[4pt]
+{\color{mediumgray}\url{https://epiflow.serranolab.org}}
+\end{center}
+
+\vspace{6pt}
+
+\begin{stepbox}[Step 1: Prepare Your Data]
+
+Your data needs to be in \texttt{.rds} format. Use the \textbf{OMIQ $\rightarrow$ EpiFlow Converter} Shiny app to convert your OMIQ CSV export.
+
+\textbf{What you need from OMIQ:}
+\begin{itemize}
+\item Export your analyzed data as CSV (include all channels)
+\item Open the converter app in RStudio/Positron
+\item Map your columns (genotype, replicate, identity)
+\item Set up cell cycle gating (DNA channel + threshold)
+\item Click Process $\rightarrow$ Download \texttt{.rds}
+\end{itemize}
+
+\textbf{Your .rds file contains:} cell IDs, genotype, replicate, identity, cell cycle phase, H3-PTM values (long format), and any phenotypic markers (wide format).
+\end{stepbox}
+
+\vspace{4pt}
+
+\begin{stepbox}[Step 2: Upload and Explore]
+
+\begin{enumerate}
+\item Go to \textcolor{oiblue}{\textbf{https://epiflow.serranolab.org}}
+\item Click \textbf{Choose .rds File} and upload your file
+\item The \textbf{Overview} tab loads automatically --- check:
+  \begin{itemize}
+  \item Are all genotypes present?
+  \item Are replicates balanced?
+  \item Does cell cycle distribution look reasonable?
+  \item Do marker box plots show expected ranges?
+  \end{itemize}
+\item Try \textbf{Ridge Plots}: select a marker, see how distributions differ between groups
+\item Try \textbf{Violin Plots}: same data, different view --- good for comparing medians
+\end{enumerate}
+\end{stepbox}
+
+\vspace{4pt}
+
+\begin{stepbox}[Step 3: Run Statistics]
+
+\begin{enumerate}
+\item Go to the \textbf{Statistics} tab
+\item Click \textbf{Run All Markers} --- this fits a linear mixed model for every H3-PTM
+\item The model accounts for biological replicates: \texttt{value $\sim$ group + (1|replicate)}
+\item Review results:
+  \begin{itemize}
+  \item \textbf{Forest Plot}: effect sizes with confidence intervals across all markers
+  \item \textbf{Volcano Plot}: significance vs.\ fold-change --- top corners are the hits
+  \item \textbf{Violin Plots}: now show p-values and effect sizes on each plot
+  \end{itemize}
+\item \textbf{Stratify by cell cycle}: re-run with ``Stratify by $\rightarrow$ Cell Cycle'' to find phase-specific effects
+\end{enumerate}
+
+\begin{tipbox}[What to report]
+For each significant marker, report: the \textbf{adjusted p-value} (FDR-corrected), the \textbf{Cohen's d} effect size, and the \textbf{direction} of change. Include the forest plot and representative violin plots in your figures.
+\end{tipbox}
+\end{stepbox}
+
+\vspace{4pt}
+
+\begin{stepbox}[Step 4: Go Deeper (Optional)]
+
+Pick the analyses that match your question:
+
+\begin{center}
+\rowcolors{2}{white}{lightgray}
+\begin{tabular}{p{4cm}p{9cm}}
+\toprule
+\textbf{I want to\ldots} & \textbf{Use this tab} \\
+\midrule
+See if groups separate in marker space & \textbf{PCA} or \textbf{UMAP} (Dimensionality Reduction) \\
+Find which markers best distinguish groups & \textbf{Random Forest} (ML tab) --- check feature importance \\
+Discover co-regulation changes & \textbf{Correlation} --- run differential correlation \\
+Determine marker positivity rates & \textbf{Positivity} --- GMM thresholding per replicate \\
+Gate on two markers & \textbf{Quadrant Gating} --- define populations, filter by them \\
+Find cell subpopulations & \textbf{Clustering} --- k-means, Louvain, or Leiden \\
+Phase-specific analysis & \textbf{Cell Cycle} tab --- per-phase marker comparisons \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{stepbox}
+
+\vspace{4pt}
+
+\begin{stepbox}[Step 5: Export Your Results]
+
+\textbf{Figures:} Every plot has SVG and PNG (2x) export buttons in the top-right corner. Use SVG for publications (vector, editable).
+
+\textbf{Multi-panel figures:} Use the \textbf{Figure Composer} to assemble panels with automatic A/B/C labels.
+
+\textbf{Statistics:} Every result table has a \textbf{Download CSV} button.
+
+\textbf{Full report:} Click \textbf{Generate Report} for an HTML document with all visualizations.
+
+\textbf{Reproducibility:} Click \textbf{Save Session} to download a JSON file. Anyone can \textbf{Load Session} to reproduce your exact analysis.
+\end{stepbox}
+
+\vspace{8pt}
+
+\begin{warnbox}[Common Mistakes to Avoid]
+\begin{itemize}
+\item \textbf{Don't use t-tests} on single-cell data --- cells from the same replicate are not independent. EpiFlow's LMM handles this correctly.
+\item \textbf{Don't skip filtering} --- always check Overview first. Garbage in = garbage out.
+\item \textbf{Don't ignore effect sizes} --- a tiny p-value with Cohen's d $<$ 0.2 is not biologically meaningful.
+\item \textbf{Don't forget to save your session} --- the server doesn't persist data between visits.
+\item \textbf{Always report adjusted p-values} --- EpiFlow corrects for multiple testing (Benjamini-Hochberg). Never report raw p-values.
+\end{itemize}
+\end{warnbox}
+
+\vspace{8pt}
+
+\begin{tipbox}[Recommended First Analysis Checklist]
+\begin{enumerate}
+\item[$\square$] Upload .rds and check Overview
+\item[$\square$] Run All Markers LMM
+\item[$\square$] Screenshot the Forest Plot
+\item[$\square$] Check top hits in Violin Plots
+\item[$\square$] Run PCA or UMAP to see group separation
+\item[$\square$] Run Random Forest --- does ML agree with statistics?
+\item[$\square$] Export figures (SVG) and tables (CSV)
+\item[$\square$] Save Session (JSON)
+\end{enumerate}
+\end{tipbox}
+
+\vspace{10pt}
+
+\begin{center}
+\textcolor{mediumgray}{\footnotesize
+\textbf{EpiFlow D3} | Serrano Lab, Center for Regenerative Medicine (CReM), Boston University\\
+\url{https://serranolab.github.io/online/} | AGPL-3.0 License | \url{https://github.com/SerranoLab/epiflow-d3}
+}
+\end{center}

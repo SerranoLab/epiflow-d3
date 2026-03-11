@@ -1,0 +1,542 @@
+---
+title: "EpiFlow D3"
+subtitle: "User Guide — Practical Walkthrough"
+author: "Serrano Laboratory - Boston University School of Medicine"
+date: today
+format:
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    pdf-engine: xelatex
+    documentclass: article
+    geometry: 
+      - margin=1in
+      - top=1.2in
+    include-in-header:
+      text: |
+        \usepackage{fontspec}
+        \renewcommand{\familydefault}{\sfdefault}
+
+        \IfFontExistsTF{Helvetica Neue}{
+          \setsansfont{Helvetica Neue}[Scale = 0.95]
+          \setmainfont{Helvetica Neue}[Scale = 0.95]
+        }{
+          \IfFontExistsTF{Arial}{
+            \setsansfont{Arial}[Scale = 0.95]
+            \setmainfont{Arial}[Scale = 0.95]
+          }{
+            \usepackage{helvet}
+            \renewcommand{\familydefault}{\sfdefault}
+          }
+        }
+
+        \setmonofont{Courier New}[Scale=0.85]
+        
+        \usepackage{fancyhdr}
+        \usepackage{lastpage}
+        \pagestyle{fancy}
+        \fancyhf{}
+        \fancyhead[L]{\footnotesize\color{gray}\textbf{EPIFLOW D3 USER GUIDE}}
+        \fancyhead[R]{\footnotesize\color{gray}\leftmark}
+        \fancyfoot[C]{\footnotesize\color{gray}Page \thepage\ of \pageref{LastPage}}
+        \renewcommand{\headrulewidth}{0.5pt}
+        \setlength{\headheight}{14pt}
+        
+        % Colors — Okabe-Ito accessible palette
+        \usepackage[table,dvipsnames]{xcolor}
+        \definecolor{oiblue}{HTML}{0072B2}
+        \definecolor{oivermillion}{HTML}{D55E00}
+        \definecolor{oigreen}{HTML}{009E73}
+        \definecolor{oiorange}{HTML}{E69F00}
+        \definecolor{oiskyblue}{HTML}{56B4E9}
+        \definecolor{oipurple}{HTML}{CC79A7}
+        \definecolor{darkgray}{HTML}{333333}
+        \definecolor{mediumgray}{HTML}{666666}
+        \definecolor{lightgray}{HTML}{F7F7F7}
+        
+        \usepackage{titlesec}
+        \titleformat{\section}
+          {\color{oiblue}\normalfont\LARGE\bfseries}
+          {\thesection}{1em}{}[\color{oiblue}\titlerule]
+        \titleformat{\subsection}
+          {\color{darkgray}\normalfont\Large\bfseries}
+          {\thesubsection}{0.8em}{}
+        \titleformat{\subsubsection}
+          {\color{mediumgray}\normalfont\large\bfseries}
+          {\thesubsubsection}{0.8em}{}
+        
+        \usepackage{booktabs}
+        \usepackage{array}
+        \usepackage{colortbl}
+        \usepackage{longtable}
+        \arrayrulecolor{mediumgray}
+        \renewcommand{\arraystretch}{1.3}
+        \rowcolors{2}{white}{lightgray}
+        
+        \usepackage{tcolorbox}
+        \tcbuselibrary{skins,breakable}
+        
+        \newtcolorbox{infobox}[1][]{
+          colback=oiskyblue!10,
+          colframe=oiblue,
+          colbacktitle=oiblue,
+          coltitle=white,
+          fonttitle=\bfseries,
+          title=#1,
+          boxrule=1pt,
+          arc=3pt,
+          breakable
+        }
+        
+        \newtcolorbox{warningbox}[1][]{
+          colback=oiorange!10,
+          colframe=oiorange,
+          colbacktitle=oiorange,
+          coltitle=white,
+          fonttitle=\bfseries,
+          title=#1,
+          boxrule=1pt,
+          arc=3pt,
+          breakable
+        }
+        
+        \newtcolorbox{tipbox}[1][]{
+          colback=oigreen!10,
+          colframe=oigreen,
+          colbacktitle=oigreen,
+          coltitle=white,
+          fonttitle=\bfseries,
+          title=#1,
+          boxrule=1pt,
+          arc=3pt,
+          breakable
+        }
+        
+        \usepackage{enumitem}
+        \setlist[itemize]{leftmargin=*, itemsep=2pt, parsep=2pt}
+        \setlist[enumerate]{leftmargin=*, itemsep=2pt, parsep=2pt}
+---
+
+\newpage
+
+# Getting Started
+
+## What is EpiFlow D3?
+
+EpiFlow D3 is a web-based platform for analyzing spectral flow cytometry data, built for simultaneous quantification of multiple histone H3 post-translational modifications (PTMs) with single-cell and cell-cycle resolution. It runs in your browser at:
+
+\begin{center}
+\textbf{\textcolor{oiblue}{https://epiflow.serranolab.org}}
+\end{center}
+
+## Typical Workflow
+
+```text
+Upload .rds --> Filter --> Explore --> Analyze --> Export
+     |             |          |           |          |
+  OMIQ data    Genotype   Overview    LMM stats   SVG/PNG
+  converter    Identity   Ridge       PCA/UMAP    CSV tables
+               Phase      Violin      ML/RF       HTML report
+               Metadata   Heatmap     Clustering   Sessions
+```
+
+## Preparing Your Data
+
+EpiFlow D3 accepts `.rds` files in long format. Use the **OMIQ $\rightarrow$ EpiFlow Converter** Shiny app to transform raw OMIQ CSV exports into this format.
+
+### Required Columns
+
+| Column | Description | Example Values |
+|--------|-------------|----------------|
+| `cell_id` | Unique cell identifier | 1, 2, 3, ... |
+| `genotype` | Primary comparison group | WT, KO |
+| `replicate` | Biological replicate | R1, R2, R3 |
+| `identity` | Cell population / gate | G0G1, G2 Phase |
+| `cell_cycle` | Cell cycle phase | G0/G1, S, G2, G2/M, M |
+| `H3PTM` | Histone modification name | H3K27ac, H3K4me1 |
+| `value` | Fluorescence intensity | 5.83, 6.12 |
+
+### Optional Columns
+
+| Column | Description |
+|--------|-------------|
+| `FxCycle` | DNA channel intensity |
+| `phH3` | Phospho-H3 intensity |
+| `timepoint` | Timepoint metadata |
+| `condition` | Treatment/condition metadata |
+| `cell_type` | Cell type metadata |
+| Phenotypic markers | Any numeric columns (PAX6, Ki67, NeuN, etc.) |
+
+Optional columns appear as additional grouping/stratification variables throughout the platform.
+
+\newpage
+
+# Upload and Filter
+
+## Uploading Data
+
+1. Open **https://epiflow.serranolab.org** in your browser
+2. Click **Choose .rds File** and select your EpiFlow-format file
+3. The platform loads and displays: detected H3 markers, phenotypic markers, genotypes, identities, cell cycle phases, and any additional metadata columns
+
+\begin{infobox}[Supported File Size]
+The platform handles files up to 200 MB. For very large datasets (500K+ cells), initial upload may take 10--20 seconds. All subsequent analyses use the server-side data.
+\end{infobox}
+
+## Sidebar Filters
+
+The left sidebar contains all filtering controls. Filters are cumulative --- unchecking items in any category restricts all analyses.
+
+### Core Filters
+
+- **Genotype**: Check/uncheck groups to include (e.g., WT, KO)
+- **Identity**: Check/uncheck cell populations
+- **Cell Cycle**: Check/uncheck phases (G0/G1, S, G2/M, M)
+
+### Additional Metadata Filters
+
+Any optional metadata columns (timepoint, condition, cell\_type) automatically appear as additional filter sections.
+
+### Comparison Variable
+
+The **Comparison Variable** dropdown selects which column is used as the primary grouping axis for all statistical tests. Default is `genotype`.
+
+### Reference Level
+
+The **Reference Level** dropdown selects the baseline group for statistical comparisons (e.g., WT as reference when comparing WT vs KO).
+
+### Special Filters (Dynamic)
+
+Two additional filter sections appear when activated:
+
+- **Quadrant Gate Population**: After running quadrant gating, filter all analyses to specific gated populations
+- **Cluster Identity**: After naming clusters, filter by cluster identity
+
+### Applying Filters
+
+After adjusting any checkboxes, click **Apply Filters**. The filtered cell count updates in the summary bar. All tabs then analyze only the filtered subset.
+
+\begin{tipbox}[Tip: Filter Strategy]
+Start with all data to get an overview, then progressively filter to focus on specific populations, phases, or conditions. For example: first view all cells, then filter to G0/G1 only to see quiescent-state histone PTM differences.
+\end{tipbox}
+
+\newpage
+
+# Exploration Tabs
+
+## Overview
+
+The Overview tab provides a bird's-eye view of your dataset after filtering:
+
+- **Cell counts by genotype**: Total cells per comparison group
+- **Cells by identity**: Distribution across populations
+- **Cells by replicate**: Replicate balance check
+- **Cell cycle distribution**: Phase proportions per genotype
+- **Marker summaries**: Box-and-whisker plots for each H3-PTM and phenotypic marker
+
+This is the first place to look for data quality issues --- unbalanced replicates, unexpected cell cycle distributions, or outlier markers.
+
+## Ridge Plots
+
+Kernel density distributions for a selected marker, overlaid by group.
+
+**Controls:**
+
+- **Marker**: Select which H3-PTM or phenotypic marker to plot
+- **Group by**: Primary axis (genotype, identity, cell\_cycle, or any metadata column)
+- **Color by**: Color the densities by a second variable
+
+Ridge plots are ideal for comparing distribution shapes --- bimodality, shifts, or spread differences that summary statistics miss.
+
+## Violin Plots
+
+Grouped violin plots with embedded box plots, median lines, and optional inline statistics.
+
+**Controls:**
+
+- **Marker**: Select marker
+- **Group by**: Primary grouping variable
+
+When LMM results are available (from the Statistics tab), violin plots display p-values and Cohen's d effect sizes directly on the plot.
+
+## Heatmap
+
+Clustered mean-expression heatmap across all H3-PTMs.
+
+**Controls:**
+
+- **Group by**: Choose how rows are organized
+
+The heatmap shows all markers simultaneously, making it easy to spot coordinate changes in the epigenetic landscape across conditions.
+
+\newpage
+
+# Statistical Analysis
+
+## Linear Mixed Models (LMM)
+
+The primary statistical method in EpiFlow D3. Accessible from the **Statistics** tab.
+
+### Model
+
+For each marker, EpiFlow fits:
+
+$$\text{value} \sim \text{group} + (1|\text{replicate})$$
+
+This accounts for the nested structure of cells within biological replicates, avoiding pseudoreplication. P-values use Satterthwaite degrees of freedom and are corrected using Benjamini-Hochberg FDR.
+
+### Running LMM
+
+1. Go to the **Statistics** tab
+2. Select a single marker for detailed results, or click **Run All Markers** for a comprehensive analysis
+3. Optionally set **Stratify by** to run separate models within subgroups (e.g., per cell cycle phase)
+
+### Interpreting Results
+
+- **Estimate**: Difference in means between groups
+- **Std. Error**: Precision of the estimate
+- **p-value**: Significance after FDR correction
+- **Cohen's d**: Effect size magnitude
+
+\begin{warningbox}[Pseudoreplication]
+Never use a standard t-test on single-cell data --- cells from the same replicate are not independent observations. EpiFlow's LMM accounts for this by modeling replicate as a random effect. This is the statistically correct approach for nested biological data.
+\end{warningbox}
+
+## Forest Plot
+
+Visualizes effect sizes with 95\% confidence intervals across all markers simultaneously. Generated from the **Run All Markers** results. Markers are sorted by effect size, making it easy to identify the strongest responders.
+
+**Stratification**: Use the stratify dropdown to generate separate forest plots per cell cycle phase, identity, or other variable.
+
+## Volcano Plot
+
+Log$_2$ fold-change vs. $-$log$_{10}$ adjusted p-value. Markers in the upper corners are both statistically significant and biologically meaningful. Threshold lines indicate significance and fold-change cutoffs.
+
+## Cell Cycle Analysis
+
+The **Cell Cycle** tab provides phase-specific marker comparisons:
+
+- **Phase distribution**: Stacked bar chart and summary heatmap of cell cycle proportions per genotype
+- **Per-phase markers**: Select a phase to see marker expression within that phase only
+- **Phase-resolved heatmap**: H3-PTM expression across all phases and genotypes
+
+\newpage
+
+# Advanced Analysis
+
+## Correlation Analysis
+
+Marker-marker Pearson correlation matrices, computed per group.
+
+- **Full matrix**: Correlation heatmap with hierarchical clustering
+- **Differential correlation**: Tests whether correlations differ between groups --- identifies rewired epigenetic relationships
+
+\begin{tipbox}[When to Use Differential Correlation]
+Correlation rewiring is often more informative than mean differences. Two groups may have similar mean H3K27ac but completely different H3K27ac--H3K4me1 correlations, indicating altered co-regulation.
+\end{tipbox}
+
+## Positivity Analysis
+
+Gaussian Mixture Model (GMM) thresholding determines positive/negative status for each marker per cell. Fraction-positive values are computed per replicate, and group comparisons use replicate-level t-tests.
+
+## Quadrant Gating
+
+Biaxial gating on two selected markers with customizable thresholds and population labels.
+
+1. Select X and Y markers (H3-PTMs or phenotypic)
+2. Adjust threshold crosshairs
+3. Label each quadrant (e.g., H3K27ac+ H3K4me1+)
+4. Click **Apply as Metacolumn** to use populations as a filter/grouping variable across all tabs
+
+## PCA
+
+Principal Component Analysis on per-cell marker profiles.
+
+- **2D PCA**: Interactive scatter plot colored by genotype, identity, or cell cycle
+- **3D PCA**: Rotatable 3D scatter (Three.js)
+- **Loadings**: Which markers drive each principal component
+
+## UMAP
+
+Nonlinear dimensionality reduction with adjustable parameters:
+
+- **n\_neighbors**: Local neighborhood size (default 15)
+- **min\_dist**: Minimum distance between points (default 0.1)
+- **metric**: Distance metric (euclidean, cosine, manhattan)
+
+## Clustering
+
+Unsupervised cell grouping with multiple algorithms:
+
+| Method | Description |
+|--------|-------------|
+| **K-means** | Fast, assumes spherical clusters |
+| **Hierarchical** | Dendrogram-based (Ward, complete, average linkage) |
+| **Louvain** | Graph-based community detection |
+| **Leiden** | Improved graph-based (recommended for large datasets) |
+
+### Workflow
+
+1. Choose method and number of clusters (or use the **Elbow Plot** to determine optimal k)
+2. Run clustering
+3. View UMAP-embedded cluster scatter plot and cross-tabulation
+4. **Rename clusters**: Enter biologically meaningful names (e.g., "Stem Cells", "Progenitors")
+5. **Apply names**: Cluster identities become available as a grouping/stratification variable across all tabs and appear as a sidebar filter
+
+\begin{infobox}[Cluster Identities Propagate]
+After applying cluster names, a new \textbf{Cluster Identity} option appears in all group-by, color-by, stratify-by, and comparison variable dropdowns across every tab. You can generate ridge plots grouped by cluster identity, run LMMs stratified by cluster, or filter the entire analysis to specific clusters.
+\end{infobox}
+
+\newpage
+
+# Machine Learning
+
+## Random Forest
+
+Classification with train/test split, feature importance ranking, ROC/AUC, and confusion matrices.
+
+1. Go to the **ML** tab
+2. Select features (H3-PTMs and/or phenotypic markers)
+3. Click **Run Random Forest**
+4. Review: accuracy, OOB error, feature importance bar chart, ROC curve, confusion matrix
+
+\begin{infobox}[Automatic Subsampling]
+For datasets larger than 50,000 cells, EpiFlow automatically subsamples before fitting the model. This prevents memory issues on the server while preserving statistical power --- 50K cells is more than sufficient for robust classification.
+\end{infobox}
+
+## Gradient Boosted Models (GBM)
+
+XGBoost-based classification with the same interface as Random Forest. GBM often achieves higher accuracy on complex epigenetic signatures. Also automatically subsampled at 50K cells.
+
+## Epigenetic Signatures
+
+Group-specific H3-PTM signature extraction with z-score heatmaps. Identifies the marker profile that defines each group --- useful for biomarker discovery and diagnostic assessment.
+
+## Diagnostic Assessment
+
+Comprehensive multivariate profiling:
+
+- **MANOVA**: Tests whether groups differ across all markers simultaneously
+- **LDA**: Linear Discriminant Analysis projection
+- **LMM consistency matrix**: Cross-marker significance patterns
+- **Stratified signatures**: Signatures within cell cycle phases or other strata
+- **K-means validation**: Whether unsupervised clustering recovers known groups
+
+\newpage
+
+# Exporting Results
+
+## Figure Export
+
+Every chart in EpiFlow D3 has export buttons in the top-right corner:
+
+- **SVG**: Vector format for publication (scalable, editable in Illustrator/Inkscape)
+- **PNG (2x)**: High-resolution raster at 2x device pixel ratio
+
+## Figure Composer
+
+Assemble multi-panel figures directly in EpiFlow:
+
+1. Generate individual plots across tabs
+2. Open the **Figure Composer**
+3. Select grid layout (1x1 through 3x3)
+4. Drag plots into panels
+5. Panel labels (A, B, C...) are added automatically
+6. Export as a single SVG or PNG
+
+## CSV Tables
+
+Every statistical result has a **Download CSV** button:
+
+- LMM results (estimates, p-values, effect sizes)
+- Positivity fractions
+- Gating assignments
+- Correlation matrices
+- ML feature importances
+- Diagnostic assessments
+
+## HTML Report
+
+Click **Generate Report** to create a comprehensive HTML report containing all active visualizations and statistics from the current session.
+
+## Session Save/Load
+
+- **Save Session**: Downloads a JSON file capturing all current settings, filters, and analysis state
+- **Load Session**: Restores a previous session for reproducibility
+
+\begin{tipbox}[Reproducibility]
+Always save your session after completing an analysis. The JSON file records every filter, parameter, and threshold --- anyone can reload it to reproduce your exact analysis.
+\end{tipbox}
+
+\newpage
+
+# Tips and Best Practices
+
+## Analysis Workflow Recommendations
+
+1. **Start with Overview**: Check data quality, replicate balance, and cell cycle distributions
+2. **Filter progressively**: Begin with all cells, then narrow by phase or population
+3. **Run All Markers LMM first**: This gives you the statistical foundation for interpreting all other plots
+4. **Use stratification**: Run LMMs stratified by cell cycle to find phase-specific effects
+5. **Check correlations**: Differential correlation often reveals biology that mean comparisons miss
+6. **Validate with ML**: If LMMs show significant differences, RF/GBM confirms how separable the groups are
+7. **Name your clusters**: Always assign biological identities to clusters before exporting
+
+## Statistical Considerations
+
+- **Replicate requirement**: LMMs need $\geq$ 2 replicates per group. With only 1 replicate, the random effect cannot be estimated.
+- **Multiple testing**: All p-values are FDR-corrected across markers. Report adjusted p-values.
+- **Effect sizes**: Cohen's d $<$ 0.2 is small, 0.2--0.5 medium, $>$ 0.8 large. Always report effect sizes alongside p-values.
+- **Subsampling**: ML models subsample to 50K cells. This does not affect LMMs, correlation, or visualization --- only RF, GBM, and diagnostic assessment.
+
+## Performance Tips
+
+- **Large datasets** (100K+ cells): Plots may take a few seconds. UMAP and clustering are the slowest operations.
+- **Browser**: Chrome or Firefox recommended. Safari works but may be slower for 3D plots.
+- **Session timeout**: The server keeps your data in memory. If you leave the page for an extended time, you may need to re-upload.
+
+\newpage
+
+# License
+
+EpiFlow D3 is open-source software licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). You are free to use, modify, and redistribute this software under the terms of the AGPL-3.0. Any modified versions deployed as a web service must also be released under AGPL-3.0 with full source code.
+
+All copies, substantial portions, and derivative works must retain the original copyright notice and the following attribution:
+
+\begin{quote}
+EpiFlow D3 was originally developed by Dr.\ Maria A.\ Serrano at the Serrano Lab, Center for Regenerative Medicine (CReM), Boston University.
+\end{quote}
+
+Source code: \textcolor{oiblue}{https://github.com/SerranoLab/epiflow-d3}
+
+\newpage
+
+# Citation
+
+If you use EpiFlow D3 in your research, please cite:
+
+\begin{quote}
+EpiFlow D3: A spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification profiling. Serrano Lab, Center for Regenerative Medicine (CReM), Boston University. https://epiflow.serranolab.org
+\end{quote}
+
+## Methods Paragraph
+
+\begin{quote}
+Spectral flow cytometry data were analyzed using EpiFlow D3 v1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University; https://epiflow.serranolab.org). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value $\sim$ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d. Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.
+\end{quote}
+
+## Contact
+
+**Maria Serrano, PhD**\
+Serrano Laboratory\
+Center for Regenerative Medicine (CReM)\
+Boston University School of Medicine\
+Email: maserr@bu.edu\
+Web: https://serranolab.github.io/online/
+
+\vfill
+
+\begin{center}
+\textcolor{mediumgray}{\footnotesize Document Version 1.0 | EpiFlow D3 v1.0 | Last Updated 2025}
+\end{center}
