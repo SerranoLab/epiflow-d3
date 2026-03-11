@@ -32,7 +32,11 @@ Upload .rds → Filter → Explore → Analyze → Export
 
 ### Preparing Your Data
 
-EpiFlow D3 accepts `.rds` files in long format. Use the **OMIQ → EpiFlow Converter** Shiny app to transform raw OMIQ CSV exports into this format.
+EpiFlow D3 accepts `.rds` files in long format. Use the **OMIQ → EpiFlow Converter** to transform raw OMIQ CSV exports into this format:
+
+**https://serranolab.shinyapps.io/File_EpiFlow_converter/**
+
+The converter handles column detection, metadata extraction from OMIQ filenames, DNA transformation, cell cycle gating (G0/G1, S, G2, G2/M, M phase assignment with flexible thresholding), outlier removal, and long-format conversion.
 
 **Required columns:**
 

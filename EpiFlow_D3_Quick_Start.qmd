@@ -124,18 +124,28 @@ format:
 
 \begin{stepbox}[Step 1: Prepare Your Data]
 
-Your data needs to be in \texttt{.rds} format. Use the \textbf{OMIQ $\rightarrow$ EpiFlow Converter} Shiny app to convert your OMIQ CSV export.
+Your data needs to be in \texttt{.rds} format. Use the \textbf{OMIQ $\rightarrow$ EpiFlow Converter} to convert your OMIQ CSV export:
 
-\textbf{What you need from OMIQ:}
+\begin{center}
+\textcolor{oiblue}{\url{https://serranolab.shinyapps.io/File_EpiFlow_converter/}}
+\end{center}
+
+\textbf{What the converter does:}
 \begin{itemize}
-\item Export your analyzed data as CSV (include all channels)
-\item Open the converter app in RStudio/Positron
-\item Map your columns (genotype, replicate, identity)
-\item Set up cell cycle gating (DNA channel + threshold)
-\item Click Process $\rightarrow$ Download \texttt{.rds}
+\item Extracts metadata (genotype, replicate) from OMIQ filenames automatically
+\item Detects H3-PTM and phenotypic marker columns
+\item \textbf{Gates cell cycle phases} (G0/G1, S, G2, G2/M, M) using DNA content with flexible thresholding per group
+\item Transforms and exports your data in EpiFlow-compatible long format
 \end{itemize}
 
-\textbf{Your .rds file contains:} cell IDs, genotype, replicate, identity, cell cycle phase, H3-PTM values (long format), and any phenotypic markers (wide format).
+\textbf{Quick converter workflow:}
+\begin{itemize}
+\item Open the converter (link above or locally in RStudio/Positron)
+\item Upload your OMIQ CSV export
+\item Map columns and edit file metadata
+\item Configure cell cycle gating (DNA channel, threshold method, optional phH3 for M-phase)
+\item Click Process $\rightarrow$ Download \texttt{.rds}
+\end{itemize}
 \end{stepbox}
 
 \vspace{4pt}
