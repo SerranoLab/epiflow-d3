@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
     libtiff5-dev \
     libgit2-dev \
+    libglpk-dev \
     zlib1g-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -45,6 +46,9 @@ RUN install2.r --error --skipinstalled \
     mclust \
     uwot \
     xgboost \
+    igraph \
+    leiden \
+    viridisLite \
     && rm -rf /tmp/downloaded_packages
 
 # Create app directory
