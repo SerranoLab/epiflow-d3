@@ -2,7 +2,7 @@
 // api.js — Communication layer with the R Plumber backend
 // ============================================================================
 
-const API_BASE = '';
+const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:8000' : '';
 
 // Global utility: always returns an array regardless of auto_unbox
 function ensureArray(val) {
