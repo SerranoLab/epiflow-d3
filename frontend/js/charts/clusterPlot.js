@@ -20,12 +20,34 @@ const ClusterPlot = {
 
     const colorBy = options.colorBy || 'cluster';
     const margin = { top: 40, right: 140, bottom: 55, left: 65 };
-    const width = Math.max(200, container.clientWidth - margin.left - margin.right);
-    const height = 380;
+
+    // Equal-aspect plot dimensions — PC1 and PC2 (or UMAP1/UMAP2 when this
+    // scatter renders embedding coordinates) share the same unit, so we
+    // must use equal pixels-per-unit on both axes to avoid distorting clusters.
+    const xExtent = d3.extent(viz, d => d.PC1);
+    const yExtent = d3.extent(viz, d => d.PC2);
+    const xPad = (xExtent[1] - xExtent[0]) * 0.05 || 1;
+    const yPad = (yExtent[1] - yExtent[0]) * 0.05 || 1;
+    const xRange = (xExtent[1] - xExtent[0]) + 2 * xPad;
+    const yRange = (yExtent[1] - yExtent[0]) + 2 * yPad;
+
+    const maxW = Math.max(200, container.clientWidth - margin.left - margin.right);
+    const maxH = 480;
+    const dataAspect = xRange / yRange;
+    const boxAspect = maxW / maxH;
+    let width, height;
+    if (dataAspect > boxAspect) {
+      width = maxW;
+      height = Math.max(280, maxW / dataAspect);
+    } else {
+      height = maxH;
+      width = Math.max(280, maxH * dataAspect);
+    }
 
     const svg = d3.select(`#${containerId}`).append('svg')
       .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom);
+      .attr('height', height + margin.top + margin.bottom)
+      .style('display', 'block').style('margin', '0 auto');
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
     svg.append('text').attr('class', 'chart-title')
@@ -36,11 +58,6 @@ const ClusterPlot = {
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 32)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#94a3b8')
       .text(`${data.n_cells?.toLocaleString() || '?'} cells · silhouette = ${Number(data.silhouette).toFixed(3)}`);
-
-    const xExtent = d3.extent(viz, d => d.PC1);
-    const yExtent = d3.extent(viz, d => d.PC2);
-    const xPad = (xExtent[1] - xExtent[0]) * 0.05 || 1;
-    const yPad = (yExtent[1] - yExtent[0]) * 0.05 || 1;
 
     const xScale = d3.scaleLinear().domain([xExtent[0] - xPad, xExtent[1] + xPad]).range([0, width]);
     const yScale = d3.scaleLinear().domain([yExtent[0] - yPad, yExtent[1] + yPad]).range([height, 0]);

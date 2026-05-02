@@ -31,6 +31,19 @@ const EpiFlowAPI = {
     return data;
   },
 
+  async loadExample(opts = {}) {
+    const resp = await fetch(`${API_BASE}/api/example`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts)
+    });
+    if (!resp.ok) throw new Error(`Example load failed: ${resp.statusText}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    this.sessionId = data.session_id;
+    return data;
+  },
+
   async filter(params) {
     return this._post(`/api/filter/${this.sessionId}`, params);
   },
@@ -80,7 +93,7 @@ const EpiFlowAPI = {
 
   // ---- Internal helpers ----
   async _post(endpoint, body = {}) {
-    if (!this.sessionId && !endpoint.includes('/upload') && !endpoint.includes('/health')) {
+    if (!this.sessionId && !endpoint.includes('/upload') && !endpoint.includes('/example') && !endpoint.includes('/health')) {
       throw new Error('No data loaded. Upload a file first.');
     }
 

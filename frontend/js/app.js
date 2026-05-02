@@ -16,7 +16,7 @@ const App = {
     this.bindChartControls();
     this.bindExports();
     this.bindOptions();
-    console.log('EpiFlow D3 v1.0 initialized');
+    console.log('EpiFlow D3 v1.1.0 initialized');
   },
 
   // ===== DATA UPLOAD =====
@@ -25,6 +25,7 @@ const App = {
     const fileInput = document.getElementById('file-input');
     const uploadBtn = document.getElementById('upload-btn');
     const uploadArea = document.getElementById('upload-area');
+    const exampleBtn = document.getElementById('example-btn');
 
     uploadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (e) => {
@@ -36,6 +37,23 @@ const App = {
       e.preventDefault(); uploadArea.classList.remove('dragover');
       if (e.dataTransfer.files.length > 0) this.handleUpload(e.dataTransfer.files[0]);
     });
+
+    if (exampleBtn) {
+      exampleBtn.addEventListener('click', () => this.handleExample());
+    }
+
+    // Update the hint text when preset dropdown changes
+    const presetSel = document.getElementById('example-preset');
+    const presetHint = document.getElementById('example-preset-hint');
+    if (presetSel && presetHint) {
+      const hints = {
+        'ipsc_npc':   'Synthetic NPC differentiation<br>(2 genotypes × 3 reps × 5 H3-PTMs)',
+        'pbmc_kat6a': 'Synthetic PBMC, KAT6A haploinsufficiency<br>(2 groups × 3 reps × 5 H3-PTMs · 6 immune cell types)'
+      };
+      presetSel.addEventListener('change', () => {
+        presetHint.innerHTML = hints[presetSel.value] || hints['ipsc_npc'];
+      });
+    }
   },
 
   async handleUpload(file) {
@@ -47,6 +65,35 @@ const App = {
       this.onDataLoaded(result);
     } catch (err) {
       alert('Upload failed: ' + err.message);
+      console.error(err);
+    } finally {
+      this.hideLoading();
+    }
+  },
+
+  async handleExample() {
+    const presetSel = document.getElementById('example-preset');
+    const preset = presetSel ? presetSel.value : 'ipsc_npc';
+    const labelMap = {
+      'ipsc_npc':   'iPSC-NPC · KMT2D-KO',
+      'pbmc_kat6a': 'PBMC · KAT6A haploinsufficiency'
+    };
+    this.showLoading(`Generating ${labelMap[preset] || 'example'} dataset...`);
+    try {
+      const result = await EpiFlowAPI.loadExample({ preset });
+      DataManager.init(result);
+      this.onDataLoaded(result);
+      // Surface the demo banner so users know they're not on real data.
+      const status = document.getElementById('data-status');
+      if (status) {
+        const badge = document.createElement('span');
+        badge.style.cssText = 'margin-left:8px;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:10px;font-size:10px;font-weight:600;';
+        const presetLabel = result.preset === 'pbmc_kat6a' ? 'PBMC DEMO' : 'NPC DEMO';
+        badge.innerHTML = '<i class="fas fa-flask"></i> ' + presetLabel;
+        status.appendChild(badge);
+      }
+    } catch (err) {
+      alert('Failed to load example: ' + err.message);
       console.error(err);
     } finally {
       this.hideLoading();
@@ -784,6 +831,24 @@ const App = {
     });
     document.getElementById('run-lmm-btn').addEventListener('click', () => this.runLMM());
     document.getElementById('run-all-markers-btn').addEventListener('click', () => this.runAllMarkers());
+
+    // Marker heatmap metric toggle (EMD/IQR ↔ KS D-stat)
+    const setMarkerHeatmapMetric = (metric) => {
+      this._markerHeatmapMetric = metric;
+      const emdBtn = document.getElementById('metric-emd-btn');
+      const ksBtn  = document.getElementById('metric-ks-btn');
+      if (emdBtn && ksBtn) {
+        emdBtn.classList.toggle('btn-primary', metric === 'emd_norm');
+        ksBtn.classList.toggle('btn-primary',  metric === 'ks_d');
+      }
+      if (this.allMarkersResults && this.allMarkersResults.length) {
+        MarkerHeatmap.render('marker-heatmap-chart', this.allMarkersResults, { metric });
+      }
+    };
+    const emdBtnEl = document.getElementById('metric-emd-btn');
+    const ksBtnEl  = document.getElementById('metric-ks-btn');
+    if (emdBtnEl) emdBtnEl.addEventListener('click', () => setMarkerHeatmapMetric('emd_norm'));
+    if (ksBtnEl)  ksBtnEl.addEventListener('click',  () => setMarkerHeatmapMetric('ks_d'));
     document.getElementById('run-cellcycle-btn').addEventListener('click', () => this.runCellCycle());
     document.getElementById('run-correlation-btn').addEventListener('click', () => this.runCorrelation());
     document.getElementById('run-rf-btn').addEventListener('click', () => this.runRandomForest());
@@ -999,12 +1064,34 @@ const App = {
     container.innerHTML = '';
     const refPts = allPoints || points;
     const margin = { top: 40, right: isMarker ? 80 : 140, bottom: 55, left: 65 };
-    const width = Math.max(200, Math.min(700, container.clientWidth - margin.left - margin.right));
-    const height = Math.max(300, 420);
+
+    // Compute data extents and equal-aspect plot dimensions. UMAP1 and UMAP2
+    // are unitless coordinates with the same scale, so they must be plotted
+    // with equal pixels-per-unit or cluster shapes get distorted.
+    const xExt = d3.extent(refPts, d => d.UMAP1);
+    const yExt = d3.extent(refPts, d => d.UMAP2);
+    const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
+    const xRange = (xExt[1] - xExt[0]) + 2 * xPad;
+    const yRange = (yExt[1] - yExt[0]) + 2 * yPad;
+
+    const maxW = Math.max(200, Math.min(700, container.clientWidth - margin.left - margin.right));
+    const maxH = 480;  // taller cap so square-ish UMAPs aren't tiny
+    const dataAspect = xRange / yRange;
+    const boxAspect = maxW / maxH;
+    let width, height;
+    if (dataAspect > boxAspect) {
+      width = maxW;
+      height = Math.max(280, maxW / dataAspect);
+    } else {
+      height = maxH;
+      width = Math.max(280, maxH * dataAspect);
+    }
 
     const svg = d3.select('#' + containerId).append('svg')
       .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom);
+      .attr('height', height + margin.top + margin.bottom)
+      .style('display', 'block').style('margin', '0 auto');
     const g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
 
     svg.append('text').attr('class', 'chart-title')
@@ -1012,10 +1099,6 @@ const App = {
       .attr('text-anchor', 'middle').attr('font-size', '13px').attr('font-weight', '600')
       .text(title + (isMarker ? ' \u2014 ' + colorBy : ' \u2014 by ' + colorBy));
 
-    const xExt = d3.extent(refPts, d => d.UMAP1);
-    const yExt = d3.extent(refPts, d => d.UMAP2);
-    const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
-    const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
     const xScale = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
     const yScale = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
 
@@ -1386,6 +1469,20 @@ const App = {
       this.renderStatsTable(results);
       VolcanoPlot.render('volcano-chart', results);
       ForestPlot.render('forest-chart', results);
+
+      // Render distribution-metric heatmap (EMD/IQR by default, KS toggle).
+      // Only show if we have at least some valid distribution metrics.
+      const hasEMD = results.some(r => r.emd_normalized != null && !isNaN(Number(r.emd_normalized)));
+      const heatmapSection = document.getElementById('marker-heatmap-section');
+      if (heatmapSection) {
+        if (hasEMD) {
+          heatmapSection.style.display = '';
+          const metric = this._markerHeatmapMetric || 'emd_norm';
+          MarkerHeatmap.render('marker-heatmap-chart', results, { metric });
+        } else {
+          heatmapSection.style.display = 'none';
+        }
+      }
 
       // Display caution notes (LMM low-replicate warning, Cohen's d CI caveat)
       if (data.caution_notes && data.caution_notes.length > 0) {
@@ -2566,6 +2663,9 @@ const App = {
       'std.error': Number(r['std.error']),
       'p.value': Number(r['p.value']),
       cohens_d: r.cohens_d != null ? Number(r.cohens_d) : null,
+      emd_normalized: r.emd_normalized != null ? Number(r.emd_normalized) : null,
+      emd_interpretation: Array.isArray(r.emd_interpretation) ? r.emd_interpretation[0] : (r.emd_interpretation || null),
+      ks_d: r.ks_d != null ? Number(r.ks_d) : null,
       n_cells: r.n_cells ? Number(r.n_cells) : null,
       n_reps: r.n_reps ? Number(r.n_reps) : null,
       marker: Array.isArray(r.marker) ? r.marker[0] : (r.marker || ''),
@@ -2582,7 +2682,9 @@ const App = {
         <thead><tr>
           <th>Marker</th><th>Subset</th><th>Contrast</th>
           <th>β</th><th>SE</th><th>p-value</th>
-          <th>Cohen's d</th><th>n cells</th><th>n reps</th>
+          <th>Cohen's d</th>
+          <th>EMD/IQR</th><th>KS D</th>
+          <th>n cells</th><th>n reps</th>
           <th>Significant</th><th>Direction</th><th>Model</th>
         </tr></thead>
         <tbody>
@@ -2591,6 +2693,10 @@ const App = {
             const sigLabel = pSig ? '✓ Yes' : '✗ No';
             const sigClass = pSig ? 'sig' : 'ns';
             const dir = r.direction || (r.estimate > 0 ? 'higher in ' + r.contrast_level : r.estimate < 0 ? 'lower in ' + r.contrast_level : '—');
+            const emdCell = (r.emd_normalized != null && !isNaN(r.emd_normalized))
+              ? r.emd_normalized.toFixed(3) + (r.emd_interpretation ? ` <span style="font-size:9px;color:#94a3b8;">(${r.emd_interpretation})</span>` : '')
+              : '-';
+            const ksCell = (r.ks_d != null && !isNaN(r.ks_d)) ? r.ks_d.toFixed(3) : '-';
             return `
             <tr>
               <td><strong>${r.marker}</strong></td>
@@ -2600,6 +2706,8 @@ const App = {
               <td>${!isNaN(r['std.error']) ? r['std.error'].toFixed(4) : '-'}</td>
               <td class="${sigClass}">${!isNaN(r['p.value']) ? r['p.value'].toExponential(2) : '-'}</td>
               <td>${r.cohens_d != null && !isNaN(r.cohens_d) ? r.cohens_d.toFixed(3) : '-'}</td>
+              <td>${emdCell}</td>
+              <td>${ksCell}</td>
               <td>${r.n_cells ? r.n_cells.toLocaleString() : '-'}</td>
               <td>${r.n_reps ? r.n_reps : '-'}</td>
               <td class="${sigClass}" style="font-weight:600;">${sigLabel}</td>
@@ -2724,17 +2832,33 @@ const App = {
         }
 
         // CELL-LEVEL TESTS (exploratory)
+        const emd = Number(t.emd);
+        const emdSigned = Number(t.emd_signed);
+        const emdNorm = Number(t.emd_normalized);
+        const emdInterp = t.emd_interpretation || '—';
+        const emdDir = !isNaN(emdSigned) && emdSigned !== 0
+          ? (emdSigned > 0 ? `${groups[1]} shifted higher` : `${groups[0]} shifted higher`)
+          : '';
+
         html += `<div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px;">
-          <strong style="font-size:13px;">Cell-Level Tests (${groups[0]} vs ${groups[1]})</strong>
-          <span style="font-size:10px;color:#f59e0b;margin-left:8px;">exploratory</span><br>
+          <strong style="font-size:13px;">Distribution comparison (${groups[0]} vs ${groups[1]})</strong>
+          <span style="font-size:10px;color:#f59e0b;margin-left:8px;">cell-level — exploratory</span><br>
           ${t.cell_level_note ? '<span style="font-size:10px;color:#64748b;">' + t.cell_level_note + '</span><br>' : ''}
           <br>
+          <div style="padding:8px 10px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:4px;margin-bottom:8px;">
+            <strong style="color:#4338ca;">Earth Mover's Distance (Wasserstein-1)</strong>
+            <span style="font-size:10px;color:#64748b;margin-left:6px;">recommended for distribution shape</span><br>
+            <strong>EMD</strong> = ${!isNaN(emd) ? emd.toFixed(4) : '—'}
+            ${!isNaN(emdNorm) ? '· <strong>EMD/IQR</strong> = ' + emdNorm.toFixed(3) + ' <span style="color:#64748b;">(' + emdInterp + ')</span>' : ''}
+            ${emdDir ? '<br><span style="font-size:10px;color:#64748b;">' + emdDir + '</span>' : ''}
+          </div>
           <strong>Wilcoxon rank-sum</strong>: W = ${Number(t.wilcoxon_statistic).toFixed(0)},
           p = ${wp < 0.001 ? wp.toExponential(2) : wp.toFixed(4)}<br>
           <strong>KS test</strong>: D = ${Number(t.ks_statistic).toFixed(4)},
-          p = ${kp < 0.001 ? kp.toExponential(2) : kp.toFixed(4)}<br>
-          <strong>Fisher’s exact</strong>: p = ${!isNaN(fp) ? (fp < 0.001 ? fp.toExponential(2) : fp.toFixed(4)) : '—'}<br>
-          <strong>Cliff’s delta</strong>: δ = ${!isNaN(cd) ? cd.toFixed(3) : '—'}
+          p = ${kp < 0.001 ? kp.toExponential(2) : kp.toFixed(4)}
+          <span style="font-size:10px;color:#64748b;">(misses pure shape changes — see EMD)</span><br>
+          <strong>Fisher's exact</strong>: p = ${!isNaN(fp) ? (fp < 0.001 ? fp.toExponential(2) : fp.toFixed(4)) : '—'}<br>
+          <strong>Cliff's delta</strong>: δ = ${!isNaN(cd) ? cd.toFixed(3) : '—'}
           <span style="color:#64748b;">(${cdInterp}${cd > 0 ? ', ' + groups[1] + ' higher' : cd < 0 ? ', ' + groups[0] + ' higher' : ''})</span><br>
           <strong>Δ fraction positive</strong>: ${(Number(t.delta_fraction) * 100).toFixed(1)} percentage points
         </div>`;
@@ -3142,6 +3266,7 @@ const App = {
     bindExportPair('cluster-export-svg', 'cluster-export-png', 'cluster-scatter-chart', 'epiflow-clustering');
     bindExportPair('volcano-export-svg', 'volcano-export-png', 'volcano-chart', 'epiflow-volcano');
     bindExportPair('forest-export-svg', 'forest-export-png', 'forest-chart', 'epiflow-forest');
+    bindExportPair('marker-heatmap-export-svg', 'marker-heatmap-export-png', 'marker-heatmap-chart', 'epiflow-marker-heatmap');
     bindExportPair('cellcycle-export-svg', 'cellcycle-export-png', 'cellcycle-chart', 'epiflow-cellcycle');
     bindExportPair('correlation-export-svg', 'correlation-export-png', 'correlation-chart', 'epiflow-correlation');
     bindExportPair('positivity-export-svg', 'positivity-export-png', 'positivity-chart', 'epiflow-positivity');
@@ -3327,7 +3452,7 @@ const App = {
       ], stats: ['overview-table'] },
       { id: 'panel-ridge', title: 'Ridge Plots', charts: ['ridge-chart'] },
       { id: 'panel-violin', title: 'Violin Plots', charts: ['violin-chart'], stats: ['violin-stats'] },
-      { id: 'panel-statistics', title: 'Statistical Analysis (LMM)', charts: ['forest-chart', 'volcano-chart'], stats: ['stats-results', 'stats-caution-notes'] },
+      { id: 'panel-statistics', title: 'Statistical Analysis (LMM)', charts: ['forest-chart', 'volcano-chart', 'marker-heatmap-chart'], stats: ['stats-results', 'stats-caution-notes'] },
       { id: 'panel-cellcycle', title: 'Cell Cycle', charts: ['cellcycle-chart'], stats: ['cellcycle-stats'] },
       { id: 'panel-correlation', title: 'Correlation', charts: ['correlation-chart', 'corr-diff-chart'], stats: ['corr-diff-table'] },
       { id: 'panel-positivity', title: 'Positivity Analysis', charts: ['positivity-chart'], stats: ['positivity-stats'] },
@@ -3388,7 +3513,7 @@ const App = {
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding was used to determine marker positivity. Replicate-level fraction-positive t-tests serve as the primary inference; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Fisher z-transform was used to compare per-group Pearson/Spearman correlations, with replicate-level N used by default for the standard error calculation.</p>
         <p><strong>Machine learning:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Note: cell-level train/test splits may overestimate accuracy due to replicate leakage; leave-one-replicate-out CV is recommended for rigorous validation.</p>
-        <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.0 · © 2025 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
+        <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.1.0 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
       </div>
     `);
 
@@ -3490,7 +3615,7 @@ ${sections.join('\n')}
     const year = new Date().getFullYear();
     const date = new Date().toISOString().slice(0, 10);
     const citation = `EpiFlow D3: A spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification profiling. Serrano Lab, Center for Regenerative Medicine (CReM), Boston University. https://serranolab.github.io/online/. Accessed ${date}.`;
-    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d. Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.`;
+    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d. Distribution shifts are quantified by 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016). Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.`;
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
@@ -3565,7 +3690,7 @@ ${sections.join('\n')}
 
     const session = {
       _epiflow_session: true,
-      version: '1.0',
+      version: '1.1.0',
       timestamp: new Date().toISOString(),
       dataFile: DataManager.metadata.filename || 'unknown',
 

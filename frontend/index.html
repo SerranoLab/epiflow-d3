@@ -127,7 +127,7 @@
   <header class="top-bar">
     <div class="top-bar-left">
       <span class="logo-text">EpiFlow</span>
-      <span class="version-badge">D3 v1.0</span>
+      <span class="version-badge">D3 v1.1.0</span>
     </div>
     <div class="top-bar-center" id="data-status">
       <span class="status-dot inactive"></span>
@@ -149,6 +149,20 @@
             <i class="fas fa-file-upload"></i> Upload .rds
           </button>
           <p class="upload-hint">Drag & drop or click to upload</p>
+        </div>
+        <div class="example-load-area" style="margin-top:8px;">
+          <p style="font-size:11px;color:#94a3b8;margin:8px 0 6px;text-align:center;">— or —</p>
+          <select id="example-preset" class="select-input" style="width:100%;font-size:11px;margin-bottom:6px;">
+            <option value="ipsc_npc">iPSC-NPC · KMT2D-KO (default)</option>
+            <option value="pbmc_kat6a">PBMC · KAT6A haploinsufficiency</option>
+          </select>
+          <button class="btn btn-block btn-sm" id="example-btn"
+                  style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;">
+            <i class="fas fa-flask"></i> Try Example Data
+          </button>
+          <p id="example-preset-hint" style="font-size:10px;color:#94a3b8;margin:4px 0 0;line-height:1.3;text-align:center;">
+            Synthetic NPC differentiation<br>(2 genotypes × 3 reps × 5 H3-PTMs)
+          </p>
         </div>
         <div id="data-summary" class="data-summary hidden"></div>
       </section>
@@ -282,7 +296,7 @@
             <p><strong>EpiFlow D3</strong> — Spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification (PTM) profiling.</p>
             <p><strong>Statistical approach:</strong> Biological replicates are the unit of inference. Linear mixed models (LMM) account for cell-level nesting within replicates. Cell-level tests (KS, Wilcoxon, chi-square) are flagged as exploratory. Effect sizes (Cohen's d, Cliff's δ, Cramér's V) are prioritized over p-values. BH correction is applied for multiple comparisons.</p>
             <p><strong>ML caution:</strong> RF, GBM, and LDA train/test splits are at the cell level. Accuracy may be optimistic due to replicate leakage. Leave-one-replicate-out CV is recommended for rigorous validation.</p>
-            <p><strong>Version:</strong> EpiFlow D3 v1.0 · © 2025 Serrano Lab, Center for Regenerative Medicine (CReM), Boston University</p>
+            <p><strong>Version:</strong> EpiFlow D3 v1.1.0 · © 2025–2026 Serrano Lab, Center for Regenerative Medicine (CReM), Boston University</p>
             <p style="font-size:9px;color:#94a3b8;">Licensed under AGPL-3.0. Built with R/plumber + D3.js. Contact: Serrano Lab, BU Chobanian & Avedisian School of Medicine.</p>
           </div>
         </div>
@@ -469,6 +483,29 @@
           </div>
           <div id="stats-message" class="inline-message" style="display:none;"></div>
           <div id="stats-results" class="stats-results"></div>
+
+          <!-- Distribution-metric heatmap (markers × subsets) -->
+          <div class="overview-section" id="marker-heatmap-section" style="margin-top:20px;display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+              <h3 style="margin:0;"><i class="fas fa-th"></i> Distribution divergence heatmap</h3>
+              <div class="panel-controls" style="margin:0;">
+                <span style="font-size:11px;color:#64748b;font-weight:600;margin-right:4px;">Metric:</span>
+                <button class="btn btn-sm btn-primary" id="metric-emd-btn" data-metric="emd_norm">
+                  <i class="fas fa-water"></i> EMD/IQR
+                </button>
+                <button class="btn btn-sm" id="metric-ks-btn" data-metric="ks_d">
+                  <i class="fas fa-chart-line"></i> KS D
+                </button>
+                <button class="btn btn-sm" id="marker-heatmap-export-svg"><i class="fas fa-download"></i> SVG</button>
+                <button class="btn btn-sm" id="marker-heatmap-export-png"><i class="fas fa-image"></i> PNG</button>
+              </div>
+            </div>
+            <div class="help-panel" style="margin-bottom:8px;">
+              <i class="fas fa-info-circle"></i>
+              <strong>EMD / pooled IQR</strong> (default) is the recommended metric — Earth Mover's Distance integrates the gap between ECDFs across the whole distribution, capturing both location and shape changes (Orlova et al., PLOS ONE 2016). It catches multimodal redistributions that the <strong>Kolmogorov-Smirnov</strong> D-statistic, which measures only the maximum ECDF gap, can underestimate. KS is kept available for backward comparison with previous analyses. Star annotations use BH-adjusted LMM p-values for the EMD view and BH-adjusted KS p-values for the KS view.
+            </div>
+            <div class="chart-container" id="marker-heatmap-chart"></div>
+          </div>
         </div>
 
         <!-- Heatmap -->
@@ -565,8 +602,9 @@
           </div>
           <div class="help-panel"><i class="fas fa-info-circle"></i>
             Fits a 2-component Gaussian Mixture Model (GMM) to identify <strong>positive</strong> (high) vs <strong>negative</strong> (low) subpopulations for each H3-PTM mark.
-            The threshold is set at the GMM crossover point. Compares fraction-positive between genotypes using Fisher's exact test, and assesses distribution shifts via KS test.
-            Leave "Manual threshold" blank for automatic GMM-based detection. This is key for marks with bimodal distributions (e.g. H3K27me3).
+            The threshold is set at the GMM crossover point. Fraction-positive is compared between groups using a replicate-level t-test (primary inference) and Fisher's exact test (cell-level, exploratory).
+            Distribution shifts are quantified by <strong>Earth Mover's Distance (Wasserstein-1)</strong>, which captures both location and shape changes — including multimodal redistribution that the KS test misses (Orlova et al., PLOS ONE 2016).
+            Leave "Manual threshold" blank for automatic GMM-based detection.
           </div>
           <div class="chart-container" id="positivity-chart"></div>
           <div id="positivity-stats" style="margin-top:16px;"></div>
@@ -900,7 +938,7 @@
   </div>
 
   <footer class="app-footer">
-    EpiFlow D3 v1.0 · © 2025 <a href="https://serranolab.github.io/online/" target="_blank">Serrano Lab</a>, <a href="https://crem.bu.edu/" target="_blank">Center for Regenerative Medicine (CReM)</a>, Boston University · <span style="color:#b0b8c4;">AGPL-3.0</span>
+    EpiFlow D3 v1.1.0 · © 2025–2026 <a href="https://serranolab.github.io/online/" target="_blank">Serrano Lab</a>, <a href="https://crem.bu.edu/" target="_blank">Center for Regenerative Medicine (CReM)</a>, Boston University · <span style="color:#b0b8c4;">AGPL-3.0</span>
   </footer>
 
   <!-- Figure Composer Modal -->
@@ -1009,6 +1047,7 @@
   <script src="js/charts/heatmap.js"></script>
   <script src="js/charts/forestPlot.js"></script>
   <script src="js/charts/volcanoPlot.js"></script>
+  <script src="js/charts/markerHeatmap.js"></script>
   <script src="js/charts/positivityPlot.js"></script>
   <script src="js/charts/gatingPlot.js"></script>
   <script src="js/charts/cellCyclePlot.js"></script>

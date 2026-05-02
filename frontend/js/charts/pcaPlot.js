@@ -13,17 +13,10 @@ const PCAPlot = {
     }
 
     const margin = { top: 40, right: 140, bottom: 60, left: 70 };
-    const width = Math.max(100, container.clientWidth - margin.left - margin.right);
-    const height = 420;
 
-    const svg = d3.select(`#${containerId}`)
-      .append('svg')
-      .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom);
-
-    const g = svg.append('g')
-      .attr('transform', `translate(${margin.left},${margin.top})`);
-
+    // Equal-aspect plot dimensions — PC scores are in equivalent units,
+    // so equal pixels-per-unit on both axes preserves the relative variance
+    // structure (PC1 with more variance naturally shows wider spread).
     const colorBy = options.colorBy || 'genotype';
     const pcX = options.pcX || 'PC1';
     const pcY = options.pcY || 'PC2';
@@ -31,6 +24,40 @@ const PCAPlot = {
     const pcYIdx = parseInt(pcY.replace('PC', '')) - 1;
     const pcXVar = data.variance.proportion[pcXIdx] ? (data.variance.proportion[pcXIdx] * 100).toFixed(1) : '?';
     const pcYVar = data.variance.proportion[pcYIdx] ? (data.variance.proportion[pcYIdx] * 100).toFixed(1) : '?';
+
+    const scores = data.scores;
+    const xExtent = d3.extent(scores, d => d[pcX]);
+    const yExtent = d3.extent(scores, d => d[pcY]);
+    if (!xExtent[0] && xExtent[0] !== 0 || !yExtent[0] && yExtent[0] !== 0) {
+      container.innerHTML = `<p style="padding:20px;color:#94a3b8;">No data for ${pcX}/${pcY}</p>`;
+      return;
+    }
+    const xPad = (xExtent[1] - xExtent[0]) * 0.05;
+    const yPad = (yExtent[1] - yExtent[0]) * 0.05;
+    const xRange = (xExtent[1] - xExtent[0]) + 2 * xPad;
+    const yRange = (yExtent[1] - yExtent[0]) + 2 * yPad;
+
+    const maxW = Math.max(100, container.clientWidth - margin.left - margin.right);
+    const maxH = 480;
+    const dataAspect = xRange / yRange;
+    const boxAspect = maxW / maxH;
+    let width, height;
+    if (dataAspect > boxAspect) {
+      width = maxW;
+      height = Math.max(280, maxW / dataAspect);
+    } else {
+      height = maxH;
+      width = Math.max(280, maxH * dataAspect);
+    }
+
+    const svg = d3.select(`#${containerId}`)
+      .append('svg')
+      .attr('width', width + margin.left + margin.right)
+      .attr('height', height + margin.top + margin.bottom)
+      .style('display', 'block').style('margin', '0 auto');
+
+    const g = svg.append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
 
     // Title
     svg.append('text')
@@ -41,16 +68,6 @@ const PCAPlot = {
       .text(`PCA — ${pcX} vs ${pcY} — ${data.feature_label} (${data.n_cells.toLocaleString()} cells)`);
 
     // Scales
-    const scores = data.scores;
-    const xExtent = d3.extent(scores, d => d[pcX]);
-    const yExtent = d3.extent(scores, d => d[pcY]);
-    if (!xExtent[0] && xExtent[0] !== 0 || !yExtent[0] && yExtent[0] !== 0) {
-      container.innerHTML = `<p style="padding:20px;color:#94a3b8;">No data for ${pcX}/${pcY}</p>`;
-      return;
-    }
-    const xPad = (xExtent[1] - xExtent[0]) * 0.05;
-    const yPad = (yExtent[1] - yExtent[0]) * 0.05;
-
     const xScale = d3.scaleLinear()
       .domain([xExtent[0] - xPad, xExtent[1] + xPad])
       .range([0, width]);

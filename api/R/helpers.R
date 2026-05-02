@@ -941,3 +941,366 @@ compute_cycle_marker_analysis <- function(data, phase = NULL, comparison_var = "
     groups = safe_I(as.character(groups))
   )
 }
+
+# ============================================================================
+# EXAMPLE / DEMO DATA GENERATOR
+# ============================================================================
+
+#' Generate a small synthetic EpiFlow dataset for demoing the app.
+#'
+#' Mirrors the structure of a real iPSC-derived NPC differentiation experiment:
+#' two genotypes (WT, KMT2D_KO), three biological replicates each, three
+#' cell-type identities (NPC, mesPC, ncPC), three cell-cycle phases, five
+#' H3-PTMs in long format, plus a handful of phenotypic markers. Designed to
+#' produce biologically plausible distributions (KMT2D loss → primary H3K4me1
+#' decrease, secondary H3K27ac decrease, modest H3K27me3 gain) so that all
+#' app modules — GMM positivity, ridge plots, LMM, UMAP, statistical tests —
+#' return meaningful, interpretable output.
+#'
+#' Deterministic by default (seed = 4242) so every "Try Example" click loads
+#' the same dataset.
+#'
+#' @param seed Integer RNG seed.
+#' @param cells_per_rep Cells per genotype × replicate combination.
+#' @return A long-format data.frame ready for load_epiflow_data().
+generate_example_data <- function(seed = 4242, cells_per_rep = 600) {
+  set.seed(seed)
+
+  genotypes <- c("WT", "KMT2D_KO")
+  reps      <- paste0("rep", 1:3)
+  ids       <- c("NPC", "mesPC", "ncPC")
+  cycles    <- c("G0G1", "S", "G2M")
+  h3_marks  <- c("H3K4me1", "H3K4me3", "H3K27ac", "H3K9ac", "H3K27me3")
+
+  # Identity × cycle proportions (slightly different per genotype to mimic
+  # cell cycle redistribution under KMT2D loss)
+  cycle_probs <- list(
+    WT       = c(G0G1 = 0.55, S = 0.30, G2M = 0.15),
+    KMT2D_KO = c(G0G1 = 0.50, S = 0.28, G2M = 0.22)  # mild G2/M accumulation
+  )
+  identity_probs <- list(
+    WT       = c(NPC = 0.55, mesPC = 0.25, ncPC = 0.20),
+    KMT2D_KO = c(NPC = 0.45, mesPC = 0.30, ncPC = 0.25)
+  )
+
+  # Per-marker mean / sd by genotype (arcsinh-transformed scale)
+  # KMT2D primary target is H3K4me1; secondary effect on H3K27ac.
+  h3_params <- list(
+    H3K4me1  = list(WT = c(mu = 4.5, sd = 0.9), KO = c(mu = 3.7, sd = 1.0)),  # primary ↓
+    H3K4me3  = list(WT = c(mu = 4.2, sd = 0.8), KO = c(mu = 4.0, sd = 0.9)),  # mild ↓
+    H3K27ac  = list(WT = c(mu = 4.8, sd = 1.0), KO = c(mu = 4.3, sd = 1.1)),  # secondary ↓
+    H3K9ac   = list(WT = c(mu = 3.9, sd = 0.9), KO = c(mu = 3.8, sd = 0.9)),  # unchanged
+    H3K27me3 = list(WT = c(mu = 3.2, sd = 1.4), KO = c(mu = 3.6, sd = 1.5))   # mild ↑, bimodal
+  )
+
+  # Identity-level offsets (e.g. ncPC has lower H3K4me1, mesPC has higher H3K27ac)
+  identity_offsets <- list(
+    NPC   = c(H3K4me1 =  0.0, H3K4me3 =  0.0, H3K27ac =  0.0, H3K9ac =  0.0, H3K27me3 =  0.0),
+    mesPC = c(H3K4me1 =  0.2, H3K4me3 =  0.0, H3K27ac =  0.4, H3K9ac =  0.1, H3K27me3 = -0.3),
+    ncPC  = c(H3K4me1 = -0.4, H3K4me3 = -0.1, H3K27ac = -0.2, H3K9ac = -0.1, H3K27me3 =  0.5)
+  )
+
+  # Cycle-level offsets (S phase has more transcription-coupled marks)
+  cycle_offsets <- list(
+    G0G1 = c(H3K4me1 =  0.0, H3K4me3 =  0.0, H3K27ac =  0.0, H3K9ac =  0.0, H3K27me3 =  0.2),
+    S    = c(H3K4me1 =  0.2, H3K4me3 =  0.3, H3K27ac =  0.3, H3K9ac =  0.2, H3K27me3 = -0.1),
+    G2M  = c(H3K4me1 = -0.1, H3K4me3 = -0.1, H3K27ac = -0.1, H3K9ac = -0.1, H3K27me3 =  0.0)
+  )
+
+  rows_list <- list()
+
+  cell_global <- 0L
+  for (geno in genotypes) {
+    for (rep_id in reps) {
+      n <- cells_per_rep
+      ident <- sample(ids, n, replace = TRUE,
+                      prob = identity_probs[[geno]])
+      cyc <- sample(cycles, n, replace = TRUE,
+                    prob = cycle_probs[[geno]])
+      rep_offset <- stats::rnorm(1, 0, 0.10)
+
+      cell_ids_block <- sprintf("cell_%05d", cell_global + seq_len(n))
+      cell_global <- cell_global + n
+
+      # Build a vectorised long block for this rep × genotype: n cells × 5 marks
+      n_total <- n * length(h3_marks)
+      cell_id_v <- rep(cell_ids_block, times = length(h3_marks))
+      H3PTM_v   <- rep(h3_marks, each = n)
+      ident_v   <- rep(ident, times = length(h3_marks))
+      cyc_v     <- rep(cyc, times = length(h3_marks))
+
+      # Compute marker values vectorized per H3PTM
+      vals <- numeric(n_total)
+      for (mi in seq_along(h3_marks)) {
+        mark <- h3_marks[mi]
+        p <- h3_params[[mark]]
+        base <- if (geno == "WT") p$WT else p$KO
+        id_off <- vapply(ident, function(x) identity_offsets[[x]][mark], numeric(1))
+        cy_off <- vapply(cyc, function(x) cycle_offsets[[x]][mark], numeric(1))
+        mu <- base["mu"] + id_off + cy_off + rep_offset
+        sd <- base["sd"]
+
+        if (mark == "H3K27me3") {
+          # Bimodal: 30% draws come from a "silenced/high" mode
+          high_idx <- stats::runif(n) < 0.30
+          v <- numeric(n)
+          v[high_idx]  <- stats::rnorm(sum(high_idx), mu[high_idx] + 1.8, sd * 0.7)
+          v[!high_idx] <- stats::rnorm(sum(!high_idx), mu[!high_idx], sd)
+        } else {
+          v <- stats::rnorm(n, mu, sd)
+        }
+        idx <- (mi - 1L) * n + seq_len(n)
+        vals[idx] <- v
+      }
+
+      block <- data.frame(
+        cell_id    = cell_id_v,
+        genotype   = geno,
+        replicate  = paste0(geno, "_", rep_id),
+        identity   = ident_v,
+        cell_cycle = cyc_v,
+        H3PTM      = H3PTM_v,
+        value      = as.numeric(vals),
+        stringsAsFactors = FALSE
+      )
+      rows_list[[length(rows_list) + 1L]] <- block
+    }
+  }
+
+  long <- do.call(rbind, rows_list)
+
+  # Phenotypic markers — one per cell, attached as wide columns
+  uniq_cells <- long[!duplicated(long$cell_id),
+                     c("cell_id", "genotype", "identity", "cell_cycle", "replicate")]
+  n_uniq <- nrow(uniq_cells)
+
+  # PAX6 (NPC marker), FxCycle (DNA), phS10H3 (mitosis), Caspase3 (apoptosis)
+  pax6 <- numeric(n_uniq); fxc <- numeric(n_uniq)
+  ph3  <- numeric(n_uniq); cas <- numeric(n_uniq)
+  for (i in seq_len(n_uniq)) {
+    id <- uniq_cells$identity[i]
+    cy <- uniq_cells$cell_cycle[i]
+    geno <- uniq_cells$genotype[i]
+
+    # PAX6: high in NPCs, lower in mesPC/ncPC; modest decrease in KO
+    pax6_mu <- if (id == "NPC") 4.5 else if (id == "mesPC") 2.8 else 2.5
+    if (geno == "KMT2D_KO") pax6_mu <- pax6_mu - 0.4
+    pax6[i] <- stats::rnorm(1, pax6_mu, 0.7)
+
+    # FxCycle: bimodal by cycle
+    fxc[i] <- if (cy == "G0G1") stats::rnorm(1, 5.0, 0.3)
+              else if (cy == "S") stats::rnorm(1, 5.5, 0.3)
+              else stats::rnorm(1, 6.0, 0.3)
+
+    # phS10H3: high only in G2M
+    ph3[i] <- if (cy == "G2M") stats::rnorm(1, 4.0, 0.8)
+              else stats::rnorm(1, 1.5, 0.5)
+
+    # Caspase3: low except occasional apoptotic cells (slightly higher in KO)
+    cas[i] <- if (stats::runif(1) < (if (geno == "KMT2D_KO") 0.07 else 0.04))
+                stats::rnorm(1, 4.0, 0.6) else stats::rnorm(1, 1.0, 0.4)
+  }
+
+  pheno_df <- data.frame(
+    cell_id  = uniq_cells$cell_id,
+    PAX6     = pax6,
+    FxCycle  = fxc,
+    phS10H3  = ph3,
+    Caspase3 = cas,
+    stringsAsFactors = FALSE
+  )
+
+  long <- merge(long, pheno_df, by = "cell_id", all.x = TRUE, sort = FALSE)
+  rownames(long) <- NULL
+  long
+}
+
+# ----------------------------------------------------------------------------
+# PBMC preset — KAT6A haploinsufficiency
+# ----------------------------------------------------------------------------
+
+#' Generate a synthetic PBMC dataset modelling KAT6A haploinsufficiency
+#' (Arboleda-Tham syndrome). Mirrors the structure of a real spectral flow
+#' dataset on PBMCs from KAT6A patients vs unaffected controls — the
+#' experimental system underlying the KAT6 Foundation biobank work.
+#'
+#' Built-in biology:
+#'   * KAT6A primary substrate is H3K23ac → large decrease in patients
+#'   * KAT6A also acetylates H3K9 / H3K14 modestly → small-to-medium decrease
+#'   * H3K4me3 (KMT2D-dependent) and H3K27me3 (PRC2-dependent) are controls
+#'     and should NOT change between groups
+#'   * Resting PBMCs are mostly G0/G1; S and G2/M fractions are small
+#'   * Effect sizes are largest in T cells (where KAT6A is most expressed),
+#'     intermediate in B cells, and small in monocytes — matching what's
+#'     reported in the KAT6 literature
+#'
+#' Identity column uses standard PBMC immunophenotypes:
+#'   T_CD4, T_CD8, B_cell, NK, Monocyte, Dendritic
+#'
+#' Phenotypic markers are the classic PBMC immunophenotyping panel: CD4, CD8,
+#' CD19, CD56, CD14 — all simulated as bimodal lineage markers (high on the
+#' relevant subset, near-zero elsewhere).
+#'
+#' Deterministic by default (seed = 7373).
+#'
+#' @param seed Integer RNG seed.
+#' @param cells_per_rep Cells per group × replicate.
+#' @return A long-format data.frame ready for load_epiflow_data().
+generate_example_pbmc <- function(seed = 7373, cells_per_rep = 600) {
+  set.seed(seed)
+
+  groups <- c("Control", "KAT6A_haplo")
+  reps <- paste0("rep", 1:3)
+  ids <- c("T_CD4", "T_CD8", "B_cell", "NK", "Monocyte", "Dendritic")
+  cycles <- c("G0G1", "S", "G2M")
+  h3_marks <- c("H3K23ac", "H3K9ac", "H3K14ac", "H3K4me3", "H3K27me3")
+
+  # PBMC identity proportions — typical peripheral blood composition.
+  # Slightly skewed in patients (mild lymphopenia is reported in KAT6A).
+  identity_probs <- list(
+    Control     = c(T_CD4 = 0.32, T_CD8 = 0.18, B_cell = 0.10,
+                    NK = 0.10, Monocyte = 0.25, Dendritic = 0.05),
+    KAT6A_haplo = c(T_CD4 = 0.28, T_CD8 = 0.16, B_cell = 0.09,
+                    NK = 0.11, Monocyte = 0.30, Dendritic = 0.06)
+  )
+
+  # PBMCs are predominantly resting → mostly G0/G1.
+  cycle_probs <- list(
+    Control     = c(G0G1 = 0.93, S = 0.04, G2M = 0.03),
+    KAT6A_haplo = c(G0G1 = 0.92, S = 0.05, G2M = 0.03)
+  )
+
+  # Per-marker mean / sd by group (arcsinh-transformed).
+  # KAT6A acetylates H3K23 (primary), H3K9, H3K14. Other marks unchanged.
+  h3_params <- list(
+    H3K23ac  = list(Control = c(mu = 4.6, sd = 1.0), KAT6A = c(mu = 3.6, sd = 1.1)),  # primary, large
+    H3K9ac   = list(Control = c(mu = 4.2, sd = 0.9), KAT6A = c(mu = 3.8, sd = 0.9)),  # secondary, medium
+    H3K14ac  = list(Control = c(mu = 4.0, sd = 0.9), KAT6A = c(mu = 3.7, sd = 1.0)),  # secondary, medium
+    H3K4me3  = list(Control = c(mu = 4.4, sd = 0.8), KAT6A = c(mu = 4.4, sd = 0.8)),  # control, no change
+    H3K27me3 = list(Control = c(mu = 3.4, sd = 1.4), KAT6A = c(mu = 3.4, sd = 1.4))   # control, bimodal
+  )
+
+  # Cell-type-specific modulation of the KAT6A effect: largest in T cells,
+  # smaller in monocytes (KAT6A expression varies by lineage).
+  cell_effect_scale <- c(T_CD4 = 1.10, T_CD8 = 1.05, B_cell = 0.85,
+                         NK = 0.75, Monocyte = 0.55, Dendritic = 0.70)
+
+  # Identity-level baseline offsets — small biological variation.
+  identity_offsets <- list(
+    T_CD4     = c(H3K23ac =  0.1, H3K9ac =  0.0, H3K14ac =  0.1, H3K4me3 =  0.0, H3K27me3 = -0.1),
+    T_CD8     = c(H3K23ac =  0.1, H3K9ac =  0.1, H3K14ac =  0.0, H3K4me3 =  0.0, H3K27me3 = -0.1),
+    B_cell    = c(H3K23ac =  0.0, H3K9ac =  0.0, H3K14ac =  0.0, H3K4me3 =  0.2, H3K27me3 =  0.0),
+    NK        = c(H3K23ac =  0.0, H3K9ac =  0.0, H3K14ac =  0.0, H3K4me3 = -0.1, H3K27me3 =  0.1),
+    Monocyte  = c(H3K23ac = -0.2, H3K9ac = -0.1, H3K14ac = -0.1, H3K4me3 = -0.1, H3K27me3 =  0.3),
+    Dendritic = c(H3K23ac = -0.1, H3K9ac =  0.0, H3K14ac = -0.1, H3K4me3 =  0.1, H3K27me3 =  0.1)
+  )
+
+  # Cycle-level offsets — small in PBMCs (most cells G0/G1)
+  cycle_offsets <- list(
+    G0G1 = c(H3K23ac =  0.0, H3K9ac =  0.0, H3K14ac =  0.0, H3K4me3 =  0.0, H3K27me3 =  0.0),
+    S    = c(H3K23ac =  0.2, H3K9ac =  0.2, H3K14ac =  0.2, H3K4me3 =  0.2, H3K27me3 = -0.1),
+    G2M  = c(H3K23ac =  0.0, H3K9ac =  0.0, H3K14ac =  0.0, H3K4me3 = -0.1, H3K27me3 =  0.0)
+  )
+
+  rows_list <- list()
+  cell_global <- 0L
+  for (grp in groups) {
+    for (rep_id in reps) {
+      n <- cells_per_rep
+      ident <- sample(ids, n, replace = TRUE, prob = identity_probs[[grp]])
+      cyc <- sample(cycles, n, replace = TRUE, prob = cycle_probs[[grp]])
+      rep_offset <- stats::rnorm(1, 0, 0.10)
+
+      cell_ids_block <- sprintf("pbmc_%05d", cell_global + seq_len(n))
+      cell_global <- cell_global + n
+
+      n_total <- n * length(h3_marks)
+      cell_id_v <- rep(cell_ids_block, times = length(h3_marks))
+      H3PTM_v   <- rep(h3_marks, each = n)
+      ident_v   <- rep(ident, times = length(h3_marks))
+      cyc_v     <- rep(cyc, times = length(h3_marks))
+
+      vals <- numeric(n_total)
+      for (mi in seq_along(h3_marks)) {
+        mark <- h3_marks[mi]
+        p <- h3_params[[mark]]
+        ctrl_base <- p$Control
+        kat6_base <- p$KAT6A
+
+        if (grp == "Control") {
+          base_mu <- ctrl_base["mu"]
+          base_sd <- ctrl_base["sd"]
+        } else {
+          # Per-cell: scale the KAT6A effect by cell type
+          scales <- vapply(ident, function(x) cell_effect_scale[[x]], numeric(1))
+          per_cell_delta <- (kat6_base["mu"] - ctrl_base["mu"]) * scales
+          base_mu <- ctrl_base["mu"] + per_cell_delta
+          base_sd <- kat6_base["sd"]
+        }
+
+        id_off <- vapply(ident, function(x) identity_offsets[[x]][mark], numeric(1))
+        cy_off <- vapply(cyc, function(x) cycle_offsets[[x]][mark], numeric(1))
+        mu <- base_mu + id_off + cy_off + rep_offset
+        sd <- base_sd
+
+        if (mark == "H3K27me3") {
+          # Bimodal control mark: 30% in silenced/high mode (unchanged in KAT6A)
+          high_idx <- stats::runif(n) < 0.30
+          v <- numeric(n)
+          v[high_idx]  <- stats::rnorm(sum(high_idx), mu[high_idx] + 1.8, sd * 0.7)
+          v[!high_idx] <- stats::rnorm(sum(!high_idx), mu[!high_idx], sd)
+        } else {
+          v <- stats::rnorm(n, mu, sd)
+        }
+        idx <- (mi - 1L) * n + seq_len(n)
+        vals[idx] <- v
+      }
+
+      block <- data.frame(
+        cell_id    = cell_id_v,
+        genotype   = grp,
+        replicate  = paste0(grp, "_", rep_id),
+        identity   = ident_v,
+        cell_cycle = cyc_v,
+        H3PTM      = H3PTM_v,
+        value      = as.numeric(vals),
+        stringsAsFactors = FALSE
+      )
+      rows_list[[length(rows_list) + 1L]] <- block
+    }
+  }
+
+  long <- do.call(rbind, rows_list)
+
+  # Phenotypic markers — classic PBMC immunophenotyping panel.
+  # Each lineage marker is bimodal: ~6 in its target subset, ~1 elsewhere.
+  uniq_cells <- long[!duplicated(long$cell_id),
+                     c("cell_id", "genotype", "identity", "cell_cycle", "replicate")]
+  n_uniq <- nrow(uniq_cells)
+
+  cd4_v  <- numeric(n_uniq); cd8_v  <- numeric(n_uniq)
+  cd19_v <- numeric(n_uniq); cd56_v <- numeric(n_uniq)
+  cd14_v <- numeric(n_uniq)
+  for (i in seq_len(n_uniq)) {
+    id <- uniq_cells$identity[i]
+    cd4_v[i]  <- if (id == "T_CD4")    stats::rnorm(1, 5.8, 0.6) else stats::rnorm(1, 1.0, 0.5)
+    cd8_v[i]  <- if (id == "T_CD8")    stats::rnorm(1, 5.8, 0.6) else stats::rnorm(1, 1.0, 0.5)
+    cd19_v[i] <- if (id == "B_cell")   stats::rnorm(1, 5.5, 0.6) else stats::rnorm(1, 0.8, 0.5)
+    cd56_v[i] <- if (id == "NK")       stats::rnorm(1, 5.4, 0.7) else stats::rnorm(1, 0.9, 0.5)
+    cd14_v[i] <- if (id == "Monocyte") stats::rnorm(1, 6.0, 0.5) else stats::rnorm(1, 1.0, 0.5)
+  }
+
+  pheno_df <- data.frame(
+    cell_id = uniq_cells$cell_id,
+    CD4     = cd4_v,
+    CD8     = cd8_v,
+    CD19    = cd19_v,
+    CD56    = cd56_v,
+    CD14    = cd14_v,
+    stringsAsFactors = FALSE
+  )
+
+  long <- merge(long, pheno_df, by = "cell_id", all.x = TRUE, sort = FALSE)
+  rownames(long) <- NULL
+  long
+}

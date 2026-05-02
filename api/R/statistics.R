@@ -198,6 +198,93 @@ run_all_markers_lmm <- function(data, markers, comparison_var = "genotype",
   combined
 }
 
+# ---- Distribution metrics per (marker, subset, contrast) ----
+# Adds EMD (Wasserstein-1), normalized EMD (÷ pooled IQR), an effect-size
+# interpretation band, and KS D-statistic + p-value to each row of the LMM
+# results. Lets the frontend offer a heatmap toggleable between EMD/IQR
+# (recommended; captures shape changes KS misses) and KS D (kept for
+# backward comparison with old analyses).
+#
+# Helpers used (defined in phase2.R, resolved at call time):
+#   emd_signed_1d() — signed Wasserstein-1
+#   emd_interpret() — magnitude band on EMD/IQR scale
+add_distribution_metrics <- function(lmm_results, data,
+                                     comparison_var = "genotype",
+                                     stratify_by = NULL,
+                                     h3_markers = NULL) {
+  if (is.null(lmm_results) || nrow(lmm_results) == 0) return(lmm_results)
+
+  n <- nrow(lmm_results)
+  emd_v       <- rep(NA_real_, n)
+  emd_signed_v<- rep(NA_real_, n)
+  emd_norm_v  <- rep(NA_real_, n)
+  emd_interp_v<- rep("undefined", n)
+  ks_d_v      <- rep(NA_real_, n)
+  ks_p_v      <- rep(NA_real_, n)
+  pooled_iqr_v<- rep(NA_real_, n)
+  n_ref_v     <- rep(NA_integer_, n)
+  n_alt_v     <- rep(NA_integer_, n)
+
+  for (i in seq_len(n)) {
+    marker   <- as.character(lmm_results$marker[i])
+    contrast <- as.character(lmm_results$contrast_level[i])
+    ref      <- as.character(lmm_results$ref_level[i])
+    subset_v <- if ("subset" %in% names(lmm_results)) {
+                  as.character(lmm_results$subset[i])
+                } else { "All cells" }
+
+    # Filter to this row's stratum
+    sub_data <- data
+    if (!is.null(stratify_by) && stratify_by != "None" && subset_v != "All cells" &&
+        stratify_by %in% names(sub_data)) {
+      sub_data <- sub_data[as.character(sub_data[[stratify_by]]) == subset_v, , drop = FALSE]
+    }
+
+    is_h3 <- !is.null(h3_markers) && marker %in% h3_markers
+    if (is_h3) {
+      sub_data <- sub_data[sub_data$H3PTM == marker & !is.na(sub_data$value), , drop = FALSE]
+      g_ref <- sub_data$value[as.character(sub_data[[comparison_var]]) == ref]
+      g_alt <- sub_data$value[as.character(sub_data[[comparison_var]]) == contrast]
+    } else if (marker %in% names(sub_data)) {
+      sub_data <- sub_data[!duplicated(sub_data$cell_id) & !is.na(sub_data[[marker]]), , drop = FALSE]
+      g_ref <- sub_data[[marker]][as.character(sub_data[[comparison_var]]) == ref]
+      g_alt <- sub_data[[marker]][as.character(sub_data[[comparison_var]]) == contrast]
+    } else {
+      next
+    }
+
+    if (length(g_ref) < 2 || length(g_alt) < 2) next
+
+    e_signed <- tryCatch(emd_signed_1d(g_ref, g_alt), error = function(e) NA_real_)
+    pooled   <- stats::IQR(c(g_ref, g_alt), na.rm = TRUE)
+    e_abs    <- if (is.na(e_signed)) NA_real_ else abs(e_signed)
+    e_norm   <- if (!is.na(e_abs) && pooled > 0) e_abs / pooled else NA_real_
+    ks       <- tryCatch(suppressWarnings(stats::ks.test(g_ref, g_alt)),
+                         error = function(e) list(statistic = NA_real_, p.value = NA_real_))
+
+    emd_v[i]        <- e_abs
+    emd_signed_v[i] <- e_signed
+    emd_norm_v[i]   <- e_norm
+    emd_interp_v[i] <- tryCatch(emd_interpret(e_norm), error = function(e) "undefined")
+    ks_d_v[i]       <- unname(ks$statistic)
+    ks_p_v[i]       <- ks$p.value
+    pooled_iqr_v[i] <- pooled
+    n_ref_v[i]      <- length(g_ref)
+    n_alt_v[i]      <- length(g_alt)
+  }
+
+  lmm_results$emd                <- emd_v
+  lmm_results$emd_signed         <- emd_signed_v
+  lmm_results$emd_normalized     <- emd_norm_v
+  lmm_results$emd_interpretation <- emd_interp_v
+  lmm_results$ks_d               <- ks_d_v
+  lmm_results$ks_p_value         <- ks_p_v
+  lmm_results$pooled_iqr         <- pooled_iqr_v
+  lmm_results$n_ref              <- n_ref_v
+  lmm_results$n_alt              <- n_alt_v
+  lmm_results
+}
+
 # ---- Random Forest ----
 run_random_forest <- function(data, target_var = "genotype",
                               h3_markers = NULL, phenotypic_markers = NULL,

@@ -13,6 +13,49 @@ suppressPackageStartupMessages({
 # 1. POSITIVITY / GMM ANALYSIS
 # ============================================================================
 
+#' Earth Mover's Distance (Wasserstein-1) between two 1D empirical samples.
+#' Closed-form: integral of |F_x(t) - F_y(t)| dt across the support.
+#' Captures both proportion of cells whose expression has changed AND magnitude
+#' of change — fixes the KS failure mode where shape changes (multimodal
+#' redistribution) cancel out at the ECDF maximum.
+#' Reference: Orlova et al. 2016 PLOS ONE 11(3): e0151859.
+#' @param x Numeric vector (group 1 values).
+#' @param y Numeric vector (group 2 values).
+#' @return Non-negative scalar in marker units.
+emd_1d <- function(x, y) {
+  x <- x[!is.na(x)]; y <- y[!is.na(y)]
+  if (length(x) < 2 || length(y) < 2) return(NA_real_)
+  pts <- sort(unique(c(x, y)))
+  if (length(pts) < 2) return(0)
+  Fx <- stats::ecdf(x)(pts)
+  Fy <- stats::ecdf(y)(pts)
+  dx <- diff(pts)
+  # ECDFs are step functions; sum |F_x - F_y| × interval-width over each step.
+  sum(abs(Fx[-length(Fx)] - Fy[-length(Fy)]) * dx)
+}
+
+#' Signed EMD: positive if y is shifted "right" of x (mass needs to move up to
+#' transform x into y), negative if shifted left. The sign is the sign of
+#' (mean(y) - mean(x)); the magnitude is the standard 1D Wasserstein distance.
+emd_signed_1d <- function(x, y) {
+  e <- emd_1d(x, y)
+  if (is.na(e)) return(NA_real_)
+  s <- sign(mean(y, na.rm = TRUE) - mean(x, na.rm = TRUE))
+  if (s == 0) s <- 1
+  s * e
+}
+
+#' Interpret EMD magnitude relative to pooled spread. For arcsinh-transformed
+#' flow data, normalising by pooled IQR gives a unitless quantity comparable
+#' across markers (same spirit as Cohen's d for distribution shape).
+emd_interpret <- function(emd_norm) {
+  if (is.na(emd_norm)) return("undefined")
+  if (emd_norm < 0.10) return("negligible")
+  if (emd_norm < 0.25) return("small")
+  if (emd_norm < 0.50) return("medium")
+  "large"
+}
+
 #' Fit 2-component GMM to a marker's distribution, compute fraction-positive
 #' @param data Long-format dataset
 #' @param marker H3-PTM marker name
@@ -200,6 +243,14 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
       dom / (length(s1) * length(s2))
     }, error = function(e) NA_real_)
 
+    # Earth Mover's Distance (Wasserstein-1) — captures shape AND location
+    # shifts that KS can miss. Normalize by pooled IQR for cross-marker
+    # comparison (similar role to Cohen's d for distributions).
+    emd_raw <- emd_signed_1d(g1, g2)
+    pooled_iqr <- stats::IQR(c(g1, g2), na.rm = TRUE)
+    emd_norm <- if (!is.na(emd_raw) && pooled_iqr > 0) abs(emd_raw) / pooled_iqr else NA_real_
+    emd_interp <- emd_interpret(emd_norm)
+
     distribution_tests <- list(
       groups = groups,
       ks_statistic = unname(ks$statistic),
@@ -209,7 +260,12 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
       fisher_p_value = if (!is.null(fisher)) fisher$p.value else NA,
       cliffs_delta = cliffs_delta,
       delta_fraction = frac2 - frac1,
-      cell_level_note = "Cell-level tests (exploratory): p-values reflect technical precision with inflated N, not biological replicability."
+      emd = abs(emd_raw),
+      emd_signed = emd_raw,
+      emd_normalized = emd_norm,
+      emd_interpretation = emd_interp,
+      pooled_iqr = pooled_iqr,
+      cell_level_note = "Cell-level tests (exploratory): p-values reflect technical precision with inflated N, not biological replicability. EMD is reported as a metric (effect size), not a p-value."
     )
 
     # ---- REPLICATE-LEVEL tests (primary inference) ----

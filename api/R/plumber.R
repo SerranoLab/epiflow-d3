@@ -45,7 +45,7 @@ function(req, res) {
 function() {
   list(
     status = "ok",
-    version = "1.0.0",
+    version = "1.1.0",
     app = "EpiFlow D3.js API",
     r_version = R.version.string,
     timestamp = Sys.time()
@@ -159,6 +159,93 @@ function(session_id) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
   store$metadata
+}
+
+#* Load a built-in synthetic example dataset for demoing the app.
+#* Generates the data on the fly (deterministic), runs it through the same
+#* validation pipeline as a user upload, and returns the standard payload.
+#*
+#* Body parameters:
+#*   preset           "ipsc_npc" (default) — KMT2D-KO iPSC neural differentiation
+#*                    "pbmc_kat6a" — KAT6A haploinsufficiency in PBMCs
+#*   seed             RNG seed (per-preset default)
+#*   cells_per_rep    Cells per group × replicate (default 600)
+#*
+#* @post /api/example
+#* @serializer json list(auto_unbox = TRUE)
+function(req) {
+  body <- if (!is.null(req$body)) req$body else list()
+  preset <- if (!is.null(body$preset)) as.character(body$preset) else "ipsc_npc"
+  cells_per_rep <- if (!is.null(body$cells_per_rep)) as.integer(body$cells_per_rep) else 600L
+
+  # Per-preset defaults (label, generator, default seed)
+  preset_meta <- switch(preset,
+    "ipsc_npc" = list(
+      label = "EpiFlow Demo: iPSC-NPC Differentiation, KMT2D-KO (synthetic)",
+      generator = generate_example_data,
+      default_seed = 4242L
+    ),
+    "pbmc_kat6a" = list(
+      label = "EpiFlow Demo: PBMC, KAT6A Haploinsufficiency (synthetic)",
+      generator = generate_example_pbmc,
+      default_seed = 7373L
+    ),
+    NULL
+  )
+  if (is.null(preset_meta)) {
+    return(list(error = paste0("Unknown preset: '", preset,
+                               "'. Valid options: 'ipsc_npc', 'pbmc_kat6a'.")))
+  }
+  seed <- if (!is.null(body$seed)) as.integer(body$seed) else preset_meta$default_seed
+
+  example_df <- tryCatch(
+    preset_meta$generator(seed = seed, cells_per_rep = cells_per_rep),
+    error = function(e) NULL
+  )
+  if (is.null(example_df)) {
+    return(list(error = "Failed to generate example dataset."))
+  }
+
+  # Save to a tempfile and route through load_epiflow_data() so the example
+  # uses the exact same validation/normalization path as a real upload.
+  tmp_path <- tempfile(fileext = ".rds")
+  saveRDS(example_df, tmp_path)
+
+  result <- tryCatch(load_epiflow_data(tmp_path),
+                     error = function(e) list(error = e$message))
+  if ("error" %in% names(result)) {
+    return(list(error = result[["error"]]))
+  }
+
+  session_id <- paste0("ex_", format(Sys.time(), "%Y%m%d%H%M%S"), "_",
+                       sample(1000:9999, 1))
+  data_store[[session_id]] <- list(
+    raw_data = result$data,
+    filtered_data = result$data,
+    metadata = result[setdiff(names(result), "data")]
+  )
+
+  response <- list(
+    session_id = session_id,
+    is_example = TRUE,
+    preset = preset,
+    example_label = preset_meta$label,
+    n_cells = result$n_cells,
+    h3_markers = result$h3_markers,
+    phenotypic_markers = result$phenotypic_markers,
+    genotype_levels = result$genotype_levels,
+    identities = result$identities,
+    cell_cycles = result$cell_cycles,
+    replicates = result$replicates,
+    available_meta = result$available_meta,
+    palette = result$palette
+  )
+  meta_level_names <- grep("_levels$", names(result), value = TRUE)
+  meta_level_names <- setdiff(meta_level_names, "genotype_levels")
+  for (nm in meta_level_names) {
+    response[[nm]] <- result[[nm]]
+  }
+  response
 }
 
 # ===========================================================================
@@ -649,6 +736,25 @@ function(session_id, req) {
 
   if ("error" %in% names(result)) return(result)
   if (is.null(result)) return(list(error = "No models could be fit — check that the comparison variable has at least 2 levels in the filtered data."))
+
+  # Add EMD + KS distribution metrics per (marker, subset, contrast) for the
+  # heatmap toggle. Cheap (sub-second for typical datasets); always computed.
+  result <- tryCatch(
+    add_distribution_metrics(
+      result, store$filtered_data,
+      comparison_var = params$comparison_var %||% "genotype",
+      stratify_by    = params$stratify_by,
+      h3_markers     = store$metadata$h3_markers
+    ),
+    error = function(e) {
+      cat("Distribution metrics failed:", e$message, "\n"); result
+    }
+  )
+
+  # BH adjustment on KS p-values too, parallel to LMM p_adj
+  if ("ks_p_value" %in% names(result) && sum(!is.na(result$ks_p_value)) > 1) {
+    result$ks_p_adj <- p.adjust(result$ks_p_value, method = "BH")
+  }
 
   # Determine replicate counts for caution notes
   caution_notes <- list()
