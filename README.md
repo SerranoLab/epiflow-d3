@@ -1,5 +1,8 @@
 # EpiFlow D3
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20026122.svg)](https://doi.org/10.5281/zenodo.20026122)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 **Multiparametric histone PTM profiling by spectral flow cytometry**
 
 EpiFlow D3 is an interactive web-based analysis platform for spectral flow cytometry data, purpose-built for simultaneous quantification of multiple histone H3 post-translational modifications (PTMs) with single-cell and cell-cycle resolution.
