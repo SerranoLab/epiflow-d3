@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "EpiFlow D3: Browser-based analysis platform for spectral flow cytometry of histone modifications"
+authors:
+  - family-names: "Serrano"
+    given-names: "Maria A."
+    affiliation: "Center for Regenerative Medicine, Boston University Chobanian & Avedisian School of Medicine"
+    orcid: "https://orcid.org/0000-0002-4318-3746"
+version: 1.1.0
+date-released: 2026-05-04
+license: AGPL-3.0
+repository-code: "https://github.com/SerranoLab/epiflow-d3"
+url: "https://epiflow.serranolab.org"
+doi: "10.5281/zenodo.20026122"
+type: software
+keywords:
+  - spectral flow cytometry
+  - histone modifications
+  - epigenetics
+  - chromatin
+  - Kabuki syndrome
+  - KMT2D
+  - KAT6A
+  - Arboleda-Tham syndrome
+  - single-cell analysis
+  - linear mixed models
+  - Earth Mover's Distance
+  - Wasserstein distance
