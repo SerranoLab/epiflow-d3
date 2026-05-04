@@ -1,0 +1,41 @@
+{
+  "title": "EpiFlow D3: Browser-based analysis platform for spectral flow cytometry of histone modifications",
+  "description": "EpiFlow D3 is a browser-based interactive analysis platform for spectral flow cytometry data, designed for multiparametric profiling of histone H3 post-translational modifications (H3-PTMs) at single-cell resolution. Built as a JavaScript/D3.js frontend with an R/plumber backend, it provides automated quality control, dimensionality reduction (PCA, UMAP), unsupervised clustering, marker positivity assessment via Gaussian Mixture Models, and statistical inference using linear mixed models that account for nested data structure. The platform supports flexible group comparisons, stratified analyses across cell types and cell-cycle phases, and quantification of distribution shifts using Earth Mover's Distance (Wasserstein-1).",
+  "license": "AGPL-3.0",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Serrano, Maria A.",
+      "affiliation": "Center for Regenerative Medicine, Boston University Chobanian & Avedisian School of Medicine",
+      "orcid": "0000-0002-4318-3746"
+    }
+  ],
+  "keywords": [
+    "spectral flow cytometry",
+    "histone modifications",
+    "epigenetics",
+    "chromatin",
+    "Kabuki syndrome",
+    "KMT2D",
+    "KAT6A",
+    "Arboleda-Tham syndrome",
+    "single-cell analysis",
+    "linear mixed models",
+    "Earth Mover's Distance",
+    "Wasserstein distance",
+    "R",
+    "D3.js"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.1080/28361512.2025.2599802",
+      "relation": "isSupplementTo",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "10.1101/2024.10.03.616268",
+      "relation": "isSupplementTo",
+      "scheme": "doi"
+    }
+  ]
+}
