@@ -115,16 +115,21 @@ const MarkerHeatmap = {
       .attr('x', totalW / 2).attr('y', 20).attr('text-anchor', 'middle')
       .text(titleText);
 
-    const refContrast = rows.find(r => r.ref && r.contrast);
-    const subtitle = refContrast
-      ? `${refContrast.contrast} vs ${refContrast.ref}` +
-        (metric === 'emd_norm'
-          ? ' · diverging palette: red = shifted higher in contrast, blue = shifted lower'
-          : ' · KS measures only the maximum ECDF gap — misses shape changes (compare with EMD)')
-      : '';
+    // The reference is consistent (every contrast is vs the LMM reference), but
+    // with >2 groups the CONTRAST GROUP differs per cell — so don't imply a
+    // single comparison across the whole grid.
+    const refName = (rows.find(r => r.ref) || {}).ref || 'reference';
+    const contrastsShown = [...new Set(rows.filter(r => r.contrast).map(r => r.contrast))];
+    const multiContrast = contrastsShown.length > 1;
+    const compText = multiContrast
+      ? `Each cell = strongest contrast vs ${refName} (hover for the specific group)`
+      : `${contrastsShown[0] || 'contrast'} vs ${refName}`;
+    const colorText = metric === 'emd_norm'
+      ? ` · color = direction & size: red = higher than ${refName}, blue = lower`
+      : ' · KS = max ECDF gap only (misses shape changes — compare with EMD)';
     svg.append('text')
       .attr('x', totalW / 2).attr('y', 38).attr('text-anchor', 'middle')
-      .attr('font-size', '10px').attr('fill', '#94a3b8').text(subtitle);
+      .attr('font-size', '10px').attr('fill', '#94a3b8').text(compText + colorText);
 
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
@@ -287,13 +292,13 @@ const MarkerHeatmap = {
     if (metric === 'emd_norm') {
       const dom = colorScale.domain();
       g.append('text').attr('x', legendX).attr('y', legendY + legendH + 14)
-        .attr('font-size', '10px').attr('fill', '#475569').text(`shift ↓: ${(-dom[0]).toFixed(2)}`);
+        .attr('font-size', '10px').attr('fill', '#475569').text(`lower than ${refName} (${(-dom[0]).toFixed(2)})`);
       g.append('text').attr('x', legendX + legendW / 2).attr('y', legendY + legendH + 14)
         .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#475569').text('0');
       g.append('text').attr('x', legendX + legendW).attr('y', legendY + legendH + 14)
-        .attr('text-anchor', 'end').attr('font-size', '10px').attr('fill', '#475569').text(`shift ↑: ${dom[0].toFixed(2)}`);
+        .attr('text-anchor', 'end').attr('font-size', '10px').attr('fill', '#475569').text(`higher (${dom[0].toFixed(2)})`);
       g.append('text').attr('x', legendX).attr('y', legendY - 4)
-        .attr('font-size', '10px').attr('fill', '#64748b').text('EMD/IQR (signed)');
+        .attr('font-size', '10px').attr('fill', '#64748b').text('EMD/IQR (signed, vs reference)');
     } else {
       g.append('text').attr('x', legendX).attr('y', legendY + legendH + 14)
         .attr('font-size', '10px').attr('fill', '#475569').text('0');

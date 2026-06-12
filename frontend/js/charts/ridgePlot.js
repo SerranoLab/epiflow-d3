@@ -12,6 +12,18 @@ const RidgePlot = {
       return;
     }
 
+    // Put the reference group's row first (no-op when rows aren't the
+    // comparison variable, e.g. grouping by marker or identity).
+    if (data.ref_level) {
+      const ds = ensureArray(data.densities);
+      if (ds.some(d => d.group === data.ref_level)) {
+        data.densities = [
+          ...ds.filter(d => d.group === data.ref_level),
+          ...ds.filter(d => d.group !== data.ref_level)
+        ];
+      }
+    }
+
     const margin = { top: 45, right: 140, bottom: 60, left: 150 };
     const width = Math.max(100, container.clientWidth - margin.left - margin.right);
     const rowHeight = 65;
@@ -110,12 +122,16 @@ const RidgePlot = {
 
     // Sub-color scale (for overlay genotype curves)
     let subColorScale = null;
+    let manyCurves = false;
     if (hasSubColors) {
-      const subLevels = [...new Set(
+      const subLevels = orderRefFirst([...new Set(
         data.densities.flatMap(d => (d.sub_colors || []).map(sc => sc.color_level))
-      )].sort();
+      )].sort(), data.ref_level);
       const subColorType = data.color_by || 'genotype';
       subColorScale = getColorScale(subColorType, subLevels, DataManager.serverPalette);
+      // Past ~5 overlaid curves the translucent fills turn to mud — draw
+      // outlines only so the shapes stay readable.
+      manyCurves = subLevels.length > 5;
     }
 
     // X axis
@@ -130,7 +146,7 @@ const RidgePlot = {
       .attr('text-anchor', 'middle')
       .attr('fill', '#64748b')
       .attr('font-size', '12px')
-      .text(data.marker + ' intensity');
+      .text(data.x_label || (data.marker + ' intensity'));
 
     // Tooltip
     const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])
@@ -160,12 +176,12 @@ const RidgePlot = {
             .y((_d, j) => baseY - yDensityScale(sc.y[j]))
             .curve(d3.curveBasis);
 
-          // Filled area (semi-transparent for overlap)
+          // Filled area (semi-transparent for overlap; outline-only past ~5)
           plotG.append('path')
             .datum(sc.x)
             .attr('d', area)
             .attr('fill', color)
-            .attr('fill-opacity', 0.25)
+            .attr('fill-opacity', manyCurves ? 0 : 0.25)
             .attr('stroke', 'none');
 
           // Outline

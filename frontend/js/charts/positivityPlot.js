@@ -45,8 +45,15 @@ const PositivityPlot = {
     const xScale = d3.scaleLinear()
       .domain([d3.min(densX), d3.max(densX)])
       .range([0, width]);
+    // y-domain must cover the tallest PER-GROUP curve, not just the pooled
+    // density — narrow group peaks (e.g. WTC11) were clipping off the top.
+    let yPeak = d3.max(densY) || 0;
+    ensureArray(data.group_stats).forEach(gs => {
+      const m = d3.max(ensureArray(gs.density_y).map(Number));
+      if (m != null && isFinite(m) && m > yPeak) yPeak = m;
+    });
     const yScale = d3.scaleLinear()
-      .domain([0, d3.max(densY) * 1.15])
+      .domain([0, yPeak * 1.12])
       .range([height, 0]);
 
     // Grid
@@ -68,7 +75,7 @@ const PositivityPlot = {
     // Per-group densities
     const palette = DataManager.serverPalette?.genotype || {};
     const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD'];
-    const groups = ensureArray(data.groups);
+    const groups = orderRefFirst(ensureArray(data.groups), data.ref_level);
     const colorScale = d3.scaleOrdinal()
       .domain(groups)
       .range(groups.map((gr, i) => palette[gr] || defaultColors[i % defaultColors.length]));

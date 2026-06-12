@@ -624,12 +624,44 @@ const App = {
   },
 
   async loadRidge() {
-    const marker = document.getElementById('ridge-marker').value;
     const groupBy = document.getElementById('ridge-groupby').value;
     const colorBySelect = document.getElementById('ridge-colorby').value;
-    const colorBy = colorBySelect === 'same' ? groupBy : colorBySelect;
+    const markerDim = groupBy === 'marker' || colorBySelect === 'marker';
+
+    // Show the PTM checklist only when a marker dimension is in play
+    const sel = document.getElementById('ridge-marker-select');
+    if (sel) sel.style.display = markerDim ? 'flex' : 'none';
+
+    if (markerDim) {
+      const markers = Array.from(
+        document.querySelectorAll('#ridge-marker-checks input:checked')
+      ).map(cb => cb.value);
+      if (markers.length === 0) {
+        document.getElementById('ridge-chart').innerHTML =
+          '<p style="padding:24px;color:#94a3b8;text-align:center;">Select at least one H3-PTM to overlay.</p>';
+        return;
+      }
+      let colorBy;
+      if (groupBy === 'marker') {
+        // rows = PTM; color by a metadata variable (default genotype)
+        colorBy = (colorBySelect === 'same' || colorBySelect === 'marker') ? 'genotype' : colorBySelect;
+      } else {
+        // rows = group metadata; one colored curve per selected PTM
+        colorBy = 'marker';
+      }
+      const scaleMode = (document.getElementById('ridge-scale') || {}).value || 'robust';
+      const data = await EpiFlowAPI.getRidgeData({ markers, group_by: groupBy, color_by: colorBy, scale_mode: scaleMode });
+      data.ref_level = this.getRefLevel();
+      RidgePlot.render('ridge-chart', data);
+      return;
+    }
+
+    // Single-marker mode (metadata × metadata) — original behavior
+    const marker = document.getElementById('ridge-marker').value;
     if (!marker) return;
+    const colorBy = colorBySelect === 'same' ? groupBy : colorBySelect;
     const data = await EpiFlowAPI.getRidgeData({ marker, group_by: groupBy, color_by: colorBy });
+    data.ref_level = this.getRefLevel();
     RidgePlot.render('ridge-chart', data);
   },
 
@@ -642,6 +674,7 @@ const App = {
     const params = { marker, group_by: groupBy };
     if (colorBy && colorBy !== groupBy) params.color_by = colorBy;
     const data = await EpiFlowAPI.getViolinData(params);
+    data.ref_level = this.getRefLevel();
     ViolinPlot.render('violin-chart', data);
   },
 
@@ -753,6 +786,18 @@ const App = {
       `).join('');
       forestBar.style.display = allFeatures.length > 0 ? 'flex' : 'none';
     }
+
+    // Ridge "overlay PTMs" checklist (used when Group-by or Color-by = H3-PTM)
+    const ridgeChecks = document.getElementById('ridge-marker-checks');
+    if (ridgeChecks) {
+      ridgeChecks.innerHTML = ensureArray(h3Markers).map(m =>
+        `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
+           <input type="checkbox" value="${m}" checked> ${m}</label>`
+      ).join('');
+      ridgeChecks.querySelectorAll('input[type="checkbox"]').forEach(cb =>
+        cb.addEventListener('change', () => { if (this.currentTab === 'ridge') this.loadRidge(); })
+      );
+    }
   },
 
   getSelectedFeatures(containerId) {
@@ -781,6 +826,7 @@ const App = {
     document.getElementById('ridge-marker').addEventListener('change', () => { if (this.currentTab === 'ridge') this.loadRidge(); });
     document.getElementById('ridge-groupby').addEventListener('change', () => { if (this.currentTab === 'ridge') this.loadRidge(); });
     document.getElementById('ridge-colorby').addEventListener('change', () => { if (this.currentTab === 'ridge') this.loadRidge(); });
+    document.getElementById('ridge-scale').addEventListener('change', () => { if (this.currentTab === 'ridge') this.loadRidge(); });
     document.getElementById('violin-marker').addEventListener('change', () => { if (this.currentTab === 'violin') this.loadViolin(); });
     document.getElementById('violin-groupby').addEventListener('change', () => { if (this.currentTab === 'violin') this.loadViolin(); });
     document.getElementById('violin-colorby').addEventListener('change', () => { if (this.currentTab === 'violin') this.loadViolin(); });
@@ -831,6 +877,7 @@ const App = {
     });
     document.getElementById('run-lmm-btn').addEventListener('click', () => this.runLMM());
     document.getElementById('run-all-markers-btn').addEventListener('click', () => this.runAllMarkers());
+    document.getElementById('marker-detail-btn').addEventListener('click', () => this.loadMarkerDetail());
 
     // Marker heatmap metric toggle (EMD/IQR ↔ KS D-stat)
     const setMarkerHeatmapMetric = (metric) => {
@@ -1040,16 +1087,27 @@ const App = {
 
     if (isSplit) {
       const genotypes = [...new Set(emb.map(d => d.genotype))].sort();
-      if (genotypes.length < 2) {
-        this._renderUMAPScatter('umap-chart-split-left', emb, colorBy, isMarker, dotSize,
-          genotypes[0] || 'All', emb);
-        document.getElementById('umap-chart-split-right').innerHTML =
-          '<p style="padding:20px;color:#94a3b8;text-align:center;">Only 1 genotype</p>';
+      const grid = document.getElementById('umap-split-grid');
+      grid.innerHTML = '';
+      if (!genotypes.length) {
+        grid.innerHTML = '<p style="padding:20px;color:#94a3b8;text-align:center;">No groups to display</p>';
       } else {
-        genotypes.slice(0, 2).forEach((g, i) => {
-          const subset = emb.filter(d => d.genotype === g);
-          const cid = i === 0 ? 'umap-chart-split-left' : 'umap-chart-split-right';
-          this._renderUMAPScatter(cid, subset, colorBy, isMarker, dotSize, g, emb);
+        // One panel per group (previously capped at the first 2). Column count
+        // scales with group count so panels stay legible; all panels share the
+        // full embedding as reference so axes AND colors are identical.
+        const n = genotypes.length;
+        const nCols = n <= 2 ? n : (n <= 6 ? 3 : 4);
+        grid.style.gridTemplateColumns = 'repeat(' + nCols + ', 1fr)';
+        const panelMinH = n > 4 ? '300px' : '400px';
+        genotypes.forEach((gName, i) => {
+          const cid = 'umap-chart-split-' + i;
+          const panel = document.createElement('div');
+          panel.className = 'chart-container';
+          panel.id = cid;
+          panel.style.minHeight = panelMinH;
+          grid.appendChild(panel);
+          const subset = emb.filter(d => d.genotype === gName);
+          this._renderUMAPScatter(cid, subset, colorBy, isMarker, dotSize, gName, emb);
         });
       }
     } else {
@@ -1514,6 +1572,96 @@ const App = {
     finally { this.hideLoading(); }
   },
 
+  async loadMarkerDetail() {
+    const marker = document.getElementById('stats-marker').value;
+    if (!marker) { alert('Select a marker first.'); return; }
+    this.showLoading('Computing pairwise + EMD for ' + marker + '...');
+    try {
+      const stratify = document.getElementById('stats-stratify').value;
+      const data = await EpiFlowAPI.runMarkerDetail({
+        marker,
+        stratify_by: stratify === 'None' ? null : stratify,
+        comparison_var: DataManager.getComparisonVar(),
+        ref_level: this.getRefLevel(),
+        use_cells_as_replicates: this.getCellsAsReplicates()
+      });
+      if (data.error) { alert('Detail error: ' + data.error); return; }
+      this.renderMarkerDetail(data);
+    } catch (err) { alert('Detail error: ' + err.message); }
+    finally { this.hideLoading(); }
+  },
+
+  renderMarkerDetail(data) {
+    const el = document.getElementById('stats-detail');
+    if (!el) return;
+    const fmtP = v => (v == null || isNaN(Number(v))) ? '-'
+      : (Number(v) < 0.001 ? Number(v).toExponential(2) : Number(v).toFixed(4));
+    const sigMark = v => (v != null && Number(v) < 0.05)
+      ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#94a3b8">ns</span>';
+    let html = `<h3 style="margin:6px 0;">Marker detail: ${data.marker}</h3>`;
+
+    // ---- All-pairwise LMM ----
+    const pw = ensureArray(data.pairwise);
+    if (pw.length) {
+      const omni = pw[0].omnibus_p;
+      html += `<div style="font-size:12px;margin-bottom:4px;"><strong>All-pairwise LMM contrasts</strong>`;
+      if (omni != null && !isNaN(Number(omni)))
+        html += ` &nbsp;·&nbsp; omnibus p = ${fmtP(omni)} ${sigMark(omni)}`;
+      html += `</div><table class="stats-table" style="font-size:11px;"><thead><tr>
+        <th>Subset</th><th>Comparison</th><th>Δ (a−b)</th><th>SE</th>
+        <th>p</th><th>p.adj</th><th></th><th>Direction</th></tr></thead><tbody>`;
+      pw.forEach(r => {
+        const padj = r.p_adj;
+        html += `<tr>
+          <td>${Array.isArray(r.subset) ? r.subset[0] : r.subset}</td>
+          <td>${r.comparison}</td>
+          <td>${r.estimate != null ? Number(r.estimate).toFixed(3) : '-'}</td>
+          <td>${r.se != null ? Number(r.se).toFixed(3) : '-'}</td>
+          <td>${fmtP(r['p.value'])}</td>
+          <td>${fmtP(padj)}</td>
+          <td>${sigMark(padj)}</td>
+          <td style="font-size:10px;">${Array.isArray(r.direction) ? r.direction[0] : (r.direction || '')}</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+    } else if (data.pairwise_note) {
+      html += `<p style="font-size:11px;color:#92400e;">${data.pairwise_note}</p>`;
+    }
+
+    // ---- Replicate-level EMD test ----
+    const emd = data.emd || {};
+    if (emd.error) {
+      html += `<p style="font-size:11px;color:#92400e;margin-top:8px;">EMD test: ${emd.error}</p>`;
+    } else if (emd.test) {
+      html += `<div style="margin-top:12px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;">
+        <strong>Replicate-level EMD test</strong> (ref = ${emd.ref_level})<br>
+        <span style="font-size:10px;color:#64748b;">${emd.note || ''}</span><br>
+        ${emd.test}: statistic = ${emd.statistic != null ? Number(emd.statistic).toFixed(2) : '-'},
+        p = ${fmtP(emd.p_value)} ${sigMark(emd.p_value)}`;
+      const pg = ensureArray(emd.per_group);
+      if (pg.length) {
+        html += `<table class="stats-table" style="font-size:11px;margin-top:6px;"><thead><tr>
+          <th>Group</th><th>Mean signed EMD</th><th>EMD/IQR</th><th>Effect</th><th>n reps</th></tr></thead><tbody>`;
+        pg.forEach(g => {
+          html += `<tr><td>${g.group}</td>
+            <td>${Number(g.mean_emd).toFixed(3)}</td>
+            <td>${Number(g.mean_emd_norm).toFixed(2)}</td>
+            <td>${g.effect}</td><td>${g.n_reps}</td></tr>`;
+        });
+        html += `</tbody></table>`;
+      }
+      const epw = ensureArray(emd.pairwise);
+      if (epw.length) {
+        html += `<div style="font-size:11px;margin-top:6px;"><strong>Pairwise (BH):</strong> ` +
+          epw.map(p => `${p.comparison}: p.adj=${fmtP(p.p_adj)}`).join(' &nbsp;·&nbsp; ') + `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    el.innerHTML = html;
+    this.addCSVExportButton('stats-detail', 'epiflow-marker-detail.csv');
+  },
+
   async runCellCycle() {
     this.showLoading('Analyzing cell cycle distribution...');
     try {
@@ -1952,6 +2100,17 @@ const App = {
     finally { this.hideLoading(); }
   },
 
+  _mlTargetBanner(data) {
+    const classes = ensureArray(data.classes);
+    const n = Number(data.n_classes) || classes.length;
+    if (!n) return '';
+    const tv = data.target_var || 'target';
+    const baseline = (100 / n).toFixed(1);
+    return `<div style="margin-bottom:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e3a5f;">
+      <strong>Classifying ${tv}</strong> — ${n} classes${classes.length ? ` (${classes.join(', ')})` : ''}
+      · chance baseline ≈ ${baseline}%</div>`;
+  },
+
   async runRandomForest() {
     this.showLoading('Training Random Forest — preparing data...');
     this.hideInlineMessage('ml-message');
@@ -1966,6 +2125,7 @@ const App = {
       }
 
       document.getElementById('ml-rf-results').innerHTML = `
+        ${this._mlTargetBanner(data)}
         <table class="stats-table">
           <tr><th>Metric</th><th>Value</th></tr>
           <tr><td>Train Accuracy</td><td>${(Number(data.train_accuracy) * 100).toFixed(1)}%</td></tr>
@@ -1998,6 +2158,7 @@ const App = {
       }
 
       document.getElementById('ml-gbm-results').innerHTML = `
+        ${this._mlTargetBanner(data)}
         <table class="stats-table">
           <tr><th>Metric</th><th>Value</th></tr>
           <tr><td>Train Accuracy</td><td>${(Number(data.train_accuracy) * 100).toFixed(1)}%</td></tr>
@@ -2095,6 +2256,7 @@ const App = {
       if (rfResult.status === 'fulfilled' && !rfResult.value.error) {
         const data = rfResult.value;
         document.getElementById('ml-rf-results').innerHTML = `
+          ${this._mlTargetBanner(data)}
           <table class="stats-table">
             <tr><th>Metric</th><th>Value</th></tr>
             <tr><td>Test Accuracy</td><td><strong>${(Number(data.test_accuracy) * 100).toFixed(1)}%</strong></td></tr>
@@ -2114,6 +2276,7 @@ const App = {
       if (gbmResult.status === 'fulfilled' && !gbmResult.value.error) {
         const data = gbmResult.value;
         document.getElementById('ml-gbm-results').innerHTML = `
+          ${this._mlTargetBanner(data)}
           <table class="stats-table">
             <tr><th>Metric</th><th>Value</th></tr>
             <tr><td>Test Accuracy</td><td><strong>${(Number(data.test_accuracy) * 100).toFixed(1)}%</strong></td></tr>
@@ -2662,6 +2825,7 @@ const App = {
       estimate: Number(r.estimate),
       'std.error': Number(r['std.error']),
       'p.value': Number(r['p.value']),
+      omnibus_p: r.omnibus_p != null ? Number(r.omnibus_p) : null,
       cohens_d: r.cohens_d != null ? Number(r.cohens_d) : null,
       emd_normalized: r.emd_normalized != null ? Number(r.emd_normalized) : null,
       emd_interpretation: Array.isArray(r.emd_interpretation) ? r.emd_interpretation[0] : (r.emd_interpretation || null),
@@ -2682,6 +2846,7 @@ const App = {
         <thead><tr>
           <th>Marker</th><th>Subset</th><th>Contrast</th>
           <th>β</th><th>SE</th><th>p-value</th>
+          <th title="Overall test that the comparison variable matters across ALL groups (per marker × subset)">Omnibus p</th>
           <th>Cohen's d</th>
           <th>EMD/IQR</th><th>KS D</th>
           <th>n cells</th><th>n reps</th>
@@ -2705,6 +2870,7 @@ const App = {
               <td>${!isNaN(r.estimate) ? r.estimate.toFixed(4) : '-'}</td>
               <td>${!isNaN(r['std.error']) ? r['std.error'].toFixed(4) : '-'}</td>
               <td class="${sigClass}">${!isNaN(r['p.value']) ? r['p.value'].toExponential(2) : '-'}</td>
+              <td>${r.omnibus_p != null && !isNaN(r.omnibus_p) ? r.omnibus_p.toExponential(2) : '-'}</td>
               <td>${r.cohens_d != null && !isNaN(r.cohens_d) ? r.cohens_d.toFixed(3) : '-'}</td>
               <td>${emdCell}</td>
               <td>${ksCell}</td>
@@ -2775,6 +2941,18 @@ const App = {
       const data = await EpiFlowAPI.runPositivity(params);
       if (data.error) throw new Error(data.error);
 
+      // Put the reference group first in the legend, table, and plot.
+      const refLevel = this.getRefLevel();
+      data.ref_level = refLevel;
+      const gname = o => Array.isArray(o.group) ? o.group[0] : o.group;
+      const gsArr = ensureArray(data.group_stats);
+      if (refLevel && gsArr.some(o => gname(o) === refLevel)) {
+        data.group_stats = [
+          ...gsArr.filter(o => gname(o) === refLevel),
+          ...gsArr.filter(o => gname(o) !== refLevel)
+        ];
+      }
+
       PositivityPlot.render('positivity-chart', data);
 
       // Stats summary
@@ -2799,6 +2977,45 @@ const App = {
         const cd = Number(t.cliffs_delta);
         const cdInterp = Math.abs(cd) < 0.147 ? 'negligible' : Math.abs(cd) < 0.33 ? 'small' : Math.abs(cd) < 0.474 ? 'medium' : 'large';
         const groups = ensureArray(t.groups);
+
+        if (t.multi_group) {
+          // ---- 3+ groups: omnibus ANOVA + Tukey HSD pairwise ----
+          const rt = t.replicate_test;
+          if (rt && rt.pairwise) {
+            const op = Number(rt.omnibus_p_value);
+            const kp2 = Number(rt.kruskal_p_value);
+            const osig = op < 0.05;
+            html += `<div style="margin-top:12px;padding:12px;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;font-size:12px;">
+              <strong style="font-size:13px;color:#15803d;">🧪 Multi-group replicate-level test (${groups.length} groups)</strong><br>
+              <span style="font-size:10px;color:#64748b;">${rt.note || 'Biological replicates are the unit of analysis.'}</span><br><br>
+              <strong>Omnibus one-way ANOVA</strong>: F(${rt.omnibus_df1}, ${rt.omnibus_df2}) = ${Number(rt.omnibus_F).toFixed(2)},
+              p = ${op < 0.001 ? op.toExponential(2) : op.toFixed(4)}
+              ${osig ? ' <span style="color:#16a34a">✓ significant</span>' : ' <span style="color:#94a3b8">ns</span>'}<br>
+              <span style="font-size:11px;color:#64748b;">Kruskal-Wallis (nonparametric backup): p = ${kp2 < 0.001 ? kp2.toExponential(2) : kp2.toFixed(4)}</span>
+            </div>`;
+            html += `<div style="margin-top:8px;font-size:12px;">
+              <strong>Tukey HSD pairwise (family-wise corrected)</strong>
+              <table class="stats-table" style="font-size:11px;margin-top:4px;">
+              <thead><tr><th>Comparison</th><th>Δ frac (pp)</th><th>95% CI</th><th>p.adj</th><th></th></tr></thead><tbody>`;
+            ensureArray(rt.pairwise).forEach(p => {
+              const padj = Number(p.p_adj);
+              const sig = padj < 0.05;
+              html += `<tr>
+                <td>${p.comparison}</td>
+                <td>${(Number(p.diff_frac) * 100).toFixed(1)}</td>
+                <td>${(Number(p.ci_lo) * 100).toFixed(1)} to ${(Number(p.ci_hi) * 100).toFixed(1)}</td>
+                <td>${padj < 0.001 ? padj.toExponential(2) : padj.toFixed(4)}</td>
+                <td>${sig ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#94a3b8">ns</span>'}</td>
+              </tr>`;
+            });
+            html += '</tbody></table></div>';
+          } else if (rt) {
+            html += `<div style="margin-top:12px;padding:8px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:11px;color:#92400e;">
+              <strong>⚠ Replicate-level test unavailable:</strong> ${rt.note || ''}
+            </div>`;
+          }
+          html += `<div style="margin-top:8px;font-size:10px;color:#64748b;">3+ groups: cell-level KS/Wilcoxon p-values are intentionally omitted (pseudoreplication). Inference is replicate-level.</div>`;
+        } else {
 
         // REPLICATE-LEVEL TEST (primary inference)
         if (t.replicate_test && t.replicate_test.p_value !== undefined) {
@@ -2862,6 +3079,7 @@ const App = {
           <span style="color:#64748b;">(${cdInterp}${cd > 0 ? ', ' + groups[1] + ' higher' : cd < 0 ? ', ' + groups[0] + ' higher' : ''})</span><br>
           <strong>Δ fraction positive</strong>: ${(Number(t.delta_fraction) * 100).toFixed(1)} percentage points
         </div>`;
+        }  // end else (2-group distribution tests)
       }
 
       // GMM info
@@ -3509,8 +3727,8 @@ const App = {
       <div class="report-section methods">
         <h2>Methods</h2>
         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
-        <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication.</p>
-        <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding was used to determine marker positivity. Replicate-level fraction-positive t-tests serve as the primary inference; cell-level distribution tests are flagged as exploratory.</p>
+        <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication.</p>
+        <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Fisher z-transform was used to compare per-group Pearson/Spearman correlations, with replicate-level N used by default for the standard error calculation.</p>
         <p><strong>Machine learning:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Note: cell-level train/test splits may overestimate accuracy due to replicate leakage; leave-one-replicate-out CV is recommended for rigorous validation.</p>
         <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.1.0 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
@@ -3615,7 +3833,7 @@ ${sections.join('\n')}
     const year = new Date().getFullYear();
     const date = new Date().toISOString().slice(0, 10);
     const citation = `EpiFlow D3: A spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification profiling. Serrano Lab, Center for Regenerative Medicine (CReM), Boston University. https://serranolab.github.io/online/. Accessed ${date}.`;
-    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d. Distribution shifts are quantified by 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016). Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.`;
+    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Effect sizes are reported as Cohen's d. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:10000;display:flex;align-items:center;justify-content:center;';

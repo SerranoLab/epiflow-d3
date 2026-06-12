@@ -113,6 +113,20 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
       td <- td %>% dplyr::mutate(p.value = 2 * stats::pnorm(-abs(statistic)))
     }
 
+    # Omnibus test for the comparison_group factor (overall effect across ALL
+    # levels). For >2 groups this is the test that should gate interpretation
+    # of the individual contrasts below. anova() gives a Satterthwaite F-test
+    # for the lmer fit and the standard F-test for the lm fit.
+    omni <- tryCatch({
+      at <- as.data.frame(stats::anova(m))
+      ridx <- grep("comparison_group", rownames(at))
+      if (length(ridx) == 0) ridx <- 1
+      Fc <- intersect(c("F value", "F"), names(at))
+      Pc <- intersect(c("Pr(>F)", "Pr(>Chisq)"), names(at))
+      list(F = if (length(Fc)) at[ridx[1], Fc[1]] else NA_real_,
+           p = if (length(Pc)) at[ridx[1], Pc[1]] else NA_real_)
+    }, error = function(e) list(F = NA_real_, p = NA_real_))
+
     n_cells_val <- nrow(model_df)
     n_reps_val <- dplyr::n_distinct(model_df$sample_id)
     pooled_sd_val <- tryCatch({
@@ -135,6 +149,8 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
         ref_level = ref_level,
         comparison_var = comparison_var,
         pooled_sd = pooled_sd_val,
+        omnibus_F = omni$F,
+        omnibus_p = omni$p,
         cohens_d = ifelse(!is.na(pooled_sd_val) & pooled_sd_val > 0,
                           estimate / pooled_sd_val, NA_real_),
         model_type = model_type_val,
@@ -165,6 +181,163 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
 
   if (length(results_list) == 0) return(NULL)
   dplyr::bind_rows(results_list)
+}
+
+# ---- All-pairwise Wald contrasts from a fitted single-factor model ----
+# Works for both lm and lmer fits with one reference-coded fixed factor
+# `comparison_group`. Returns EVERY pairwise group difference (not just
+# vs-reference) as a Wald z-test on a linear contrast of the fixed effects,
+# with Benjamini-Hochberg adjustment across the family of pairs.
+# Sign convention: estimate = mean(level_a) - mean(level_b).
+.pairwise_wald <- function(m, levels_all, ref_level) {
+  b <- if (inherits(m, "merMod") || inherits(m, "lmerModLmerTest")) {
+    lme4::fixef(m)
+  } else {
+    stats::coef(m)
+  }
+  V  <- as.matrix(stats::vcov(m))
+  nm <- names(b)
+  coef_name <- function(lv) {
+    if (identical(as.character(lv), as.character(ref_level))) NA_character_
+    else paste0("comparison_group", lv)
+  }
+  prs <- utils::combn(as.character(levels_all), 2, simplify = FALSE)
+  rows <- lapply(prs, function(pr) {
+    a <- pr[1]; bb <- pr[2]
+    cvec <- stats::setNames(rep(0, length(b)), nm)
+    ca <- coef_name(a); cb <- coef_name(bb)
+    if (!is.na(ca)) { if (!ca %in% nm) return(NULL); cvec[ca] <- cvec[ca] + 1 }
+    if (!is.na(cb)) { if (!cb %in% nm) return(NULL); cvec[cb] <- cvec[cb] - 1 }
+    est <- sum(cvec * b)
+    v   <- as.numeric(t(cvec) %*% V %*% cvec)
+    if (!is.finite(v) || v <= 0) return(NULL)
+    se <- sqrt(v); z <- est / se
+    tibble::tibble(
+      comparison = paste0(a, " - ", bb),
+      level_a = a, level_b = bb,
+      estimate = est, se = se, statistic = z,
+      p.value = 2 * stats::pnorm(-abs(z))
+    )
+  })
+  out <- dplyr::bind_rows(rows)
+  if (nrow(out) > 0) out$p_adj <- stats::p.adjust(out$p.value, method = "BH")
+  out
+}
+
+# ---- All-pairwise group comparison for one marker (drill-down) ----
+# Companion to fit_stratified_lmm() for the >2-group case: where that function
+# reports contrasts vs. a single reference, this returns the full pairwise
+# matrix plus the omnibus, so e.g. WT/KO/Rescue yields KO-WT, Rescue-WT AND
+# KO-Rescue. Same model and data prep as fit_stratified_lmm (kept in sync
+# deliberately; mirror any prep change here).
+lmm_pairwise <- function(data, marker, stratify_by = NULL,
+                         ref_level = NULL, comparison_var = "genotype",
+                         h3_marks = NULL, use_cells_as_replicates = FALSE) {
+  is_h3 <- FALSE
+  if (!is.null(h3_marks)) {
+    is_h3 <- marker %in% h3_marks
+  } else if ("H3PTM" %in% names(data)) {
+    is_h3 <- marker %in% unique(data$H3PTM)
+  }
+
+  if (is_h3) {
+    model_data <- data %>%
+      dplyr::filter(H3PTM == marker) %>%
+      dplyr::filter(!is.na(.data[[comparison_var]]), !is.na(replicate)) %>%
+      dplyr::mutate(
+        comparison_group = factor(.data[[comparison_var]]),
+        sample_id = if (use_cells_as_replicates) {
+          paste(.data[[comparison_var]], cell_id, sep = "_")
+        } else {
+          paste(.data[[comparison_var]], replicate, sep = "_")
+        }
+      )
+  } else {
+    if (!marker %in% names(data)) return(NULL)
+    model_data <- data %>%
+      dplyr::distinct(cell_id, .data[[comparison_var]], replicate,
+                      identity, cell_cycle, .data[[marker]]) %>%
+      dplyr::filter(!is.na(.data[[comparison_var]]), !is.na(replicate),
+                    !is.na(.data[[marker]])) %>%
+      dplyr::rename(value = !!marker) %>%
+      dplyr::mutate(
+        comparison_group = factor(.data[[comparison_var]]),
+        sample_id = if (use_cells_as_replicates) {
+          paste(.data[[comparison_var]], cell_id, sep = "_")
+        } else {
+          paste(.data[[comparison_var]], replicate, sep = "_")
+        }
+      )
+  }
+
+  if (dplyr::n_distinct(model_data$comparison_group) < 2) return(NULL)
+  if (is.null(ref_level) || !ref_level %in% levels(model_data$comparison_group)) {
+    ref_level <- levels(model_data$comparison_group)[1]
+  }
+
+  fit_one <- function(df, subset_label) {
+    df <- droplevels(df)
+    if (nrow(df) < 100 || dplyr::n_distinct(df$comparison_group) < 2) return(NULL)
+    # Effective reference: requested level if present in this subset, else first
+    eff_ref <- if (ref_level %in% levels(df$comparison_group)) ref_level
+               else levels(df$comparison_group)[1]
+    df$comparison_group <- stats::relevel(df$comparison_group, ref = eff_ref)
+
+    if (use_cells_as_replicates) {
+      m <- try(stats::lm(value ~ comparison_group, data = df), silent = TRUE)
+    } else {
+      m <- suppressMessages(suppressWarnings(try(
+        lmerTest::lmer(value ~ comparison_group + (1 | sample_id),
+                       data = df, REML = TRUE),
+        silent = TRUE
+      )))
+    }
+    if (inherits(m, "try-error")) return(NULL)
+
+    pw <- tryCatch(.pairwise_wald(m, levels(df$comparison_group), eff_ref),
+                   error = function(e) NULL)
+    if (is.null(pw) || nrow(pw) == 0) return(NULL)
+
+    omni <- tryCatch({
+      at <- as.data.frame(stats::anova(m))
+      ridx <- grep("comparison_group", rownames(at)); if (!length(ridx)) ridx <- 1
+      Fc <- intersect(c("F value", "F"), names(at))
+      Pc <- intersect(c("Pr(>F)", "Pr(>Chisq)"), names(at))
+      list(F = if (length(Fc)) at[ridx[1], Fc[1]] else NA_real_,
+           p = if (length(Pc)) at[ridx[1], Pc[1]] else NA_real_)
+    }, error = function(e) list(F = NA_real_, p = NA_real_))
+
+    pw %>% dplyr::mutate(
+      subset = subset_label,
+      marker = marker,
+      ref_level = eff_ref,
+      comparison_var = comparison_var,
+      omnibus_F = omni$F,
+      omnibus_p = omni$p,
+      significant = ifelse(!is.na(p_adj) & p_adj < 0.05, "Yes", "No"),
+      direction = dplyr::case_when(
+        is.na(estimate) ~ "N/A",
+        estimate > 0 ~ paste0("higher in ", level_a),
+        estimate < 0 ~ paste0("higher in ", level_b),
+        TRUE ~ "no change"
+      )
+    )
+  }
+
+  res <- list()
+  if (is.null(stratify_by) || stratify_by == "None" ||
+      !stratify_by %in% names(model_data)) {
+    r <- fit_one(model_data, "All cells")
+    if (!is.null(r)) res[["overall"]] <- r
+  } else {
+    for (s in sort(unique(model_data[[stratify_by]]))) {
+      r <- fit_one(model_data[model_data[[stratify_by]] == s, , drop = FALSE],
+                   as.character(s))
+      if (!is.null(r)) res[[as.character(s)]] <- r
+    }
+  }
+  if (length(res) == 0) return(NULL)
+  dplyr::bind_rows(res)
 }
 
 # ---- Run all-marker analysis ----
@@ -379,6 +552,9 @@ run_random_forest <- function(data, target_var = "genotype",
   }
 
   list(
+    target_var = target_var,
+    classes = levels(rf_wide$target),
+    n_classes = nlevels(rf_wide$target),
     importance = importance_df,
     train_accuracy = train_acc,
     test_accuracy = test_acc,
@@ -545,22 +721,17 @@ run_gbm <- function(data, target_var = "genotype",
 
   model <- xgboost::xgb.train(params, dtrain, nrounds = n_trees, verbose = 0)
 
-  pred_probs <- predict(model, dtest)
-  if (n_class == 2) {
-    pred_class <- ifelse(pred_probs > 0.5, 1, 0)
-  } else {
-    pred_matrix <- matrix(pred_probs, ncol = n_class, byrow = TRUE)
-    pred_class <- apply(pred_matrix, 1, which.max) - 1
+  # Robust to xgboost version: multi:softprob returns a flat vector in 1.x but
+  # an (n x class) MATRIX in 2.x. Re-matrixing an already-matrix with byrow=TRUE
+  # scrambles every prediction (collapsing accuracy to ~chance), so detect shape.
+  to_class <- function(raw) {
+    if (n_class == 2) return(as.integer(raw > 0.5))
+    m <- if (is.matrix(raw)) raw else matrix(raw, ncol = n_class, byrow = TRUE)
+    max.col(m, ties.method = "first") - 1L
   }
-
-  test_accuracy <- mean(pred_class == y_test)
-  train_pred <- predict(model, dtrain)
-  if (n_class == 2) {
-    train_class <- ifelse(train_pred > 0.5, 1, 0)
-  } else {
-    train_matrix <- matrix(train_pred, ncol = n_class, byrow = TRUE)
-    train_class <- apply(train_matrix, 1, which.max) - 1
-  }
+  pred_class  <- to_class(predict(model, dtest))
+  train_class <- to_class(predict(model, dtrain))
+  test_accuracy  <- mean(pred_class == y_test)
   train_accuracy <- mean(train_class == y_train)
 
   # Importance
@@ -572,6 +743,9 @@ run_gbm <- function(data, target_var = "genotype",
 
   list(
     model_type = "GBM (xgboost)",
+    target_var = target_var,
+    classes = levels_map,
+    n_classes = n_class,
     train_accuracy = train_accuracy,
     test_accuracy = test_accuracy,
     n_trees = n_trees,

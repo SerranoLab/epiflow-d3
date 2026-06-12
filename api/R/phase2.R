@@ -56,6 +56,118 @@ emd_interpret <- function(emd_norm) {
   "large"
 }
 
+#' Replicate-level EMD test — the inferential complement to cell-level EMD.
+#' For each biological replicate, compute the signed 1D EMD between that
+#' replicate's marker distribution and the POOLED reference group (leave-one-out
+#' for reference replicates, so a replicate is never compared against itself),
+#' normalised by pooled IQR. Then test those per-replicate EMDs across
+#' conditions: Wilcoxon rank-sum for 2 groups, Kruskal-Wallis (+ BH-adjusted
+#' pairwise Wilcoxon) for 3+. Replicates are the unit of analysis, which fixes
+#' the pseudoreplication of the raw cell-level EMD/KS p-values.
+#' Reference: Orlova et al. 2016 PLOS ONE 11(3): e0151859.
+replicate_emd_test <- function(data, marker, comparison_var = "genotype",
+                               ref_level = NULL, h3_marks = NULL,
+                               min_cells = 20, min_reps = 2) {
+  is_h3 <- FALSE
+  if (!is.null(h3_marks)) {
+    is_h3 <- marker %in% h3_marks
+  } else if ("H3PTM" %in% names(data)) {
+    is_h3 <- marker %in% unique(data$H3PTM)
+  }
+
+  if (is_h3) {
+    df <- data %>%
+      dplyr::filter(H3PTM == marker, !is.na(value), !is.na(replicate),
+                    !is.na(.data[[comparison_var]])) %>%
+      dplyr::transmute(grp = as.character(.data[[comparison_var]]),
+                       replicate = as.character(replicate), value = value)
+  } else {
+    if (!marker %in% names(data)) return(list(error = "marker column not found"))
+    df <- data %>%
+      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+      dplyr::filter(!is.na(.data[[marker]]), !is.na(replicate),
+                    !is.na(.data[[comparison_var]])) %>%
+      dplyr::transmute(grp = as.character(.data[[comparison_var]]),
+                       replicate = as.character(replicate),
+                       value = .data[[marker]])
+  }
+
+  groups <- sort(unique(df$grp))
+  if (length(groups) < 2) return(list(error = "Need >= 2 groups for EMD test"))
+  if (is.null(ref_level) || !ref_level %in% groups) ref_level <- groups[1]
+
+  pooled_iqr <- stats::IQR(df$value, na.rm = TRUE)
+  if (!is.finite(pooled_iqr) || pooled_iqr <= 0) pooled_iqr <- 1
+  ref_df <- df %>% dplyr::filter(grp == ref_level)
+
+  rep_keys <- df %>% dplyr::distinct(grp, replicate)
+  recs <- lapply(seq_len(nrow(rep_keys)), function(i) {
+    g <- rep_keys$grp[i]; r <- rep_keys$replicate[i]
+    rep_vals <- df$value[df$grp == g & df$replicate == r]
+    ref_vals <- if (g == ref_level) ref_df$value[ref_df$replicate != r] else ref_df$value
+    if (length(rep_vals) < min_cells || length(ref_vals) < min_cells) return(NULL)
+    e <- emd_signed_1d(ref_vals, rep_vals)
+    if (is.na(e)) return(NULL)
+    data.frame(grp = g, replicate = r, emd = e, emd_norm = e / pooled_iqr,
+               n = length(rep_vals), stringsAsFactors = FALSE)
+  })
+  rep_emd <- dplyr::bind_rows(recs)
+  if (nrow(rep_emd) == 0) return(list(error = "No replicates with enough cells"))
+
+  reps_per <- table(rep_emd$grp)
+  usable <- names(reps_per)[reps_per >= min_reps]
+  if (length(usable) < 2) {
+    return(list(marker = marker, ref_level = ref_level, groups = groups,
+                test = "insufficient replicates",
+                note = paste0("Need >= ", min_reps, " replicates in >= 2 groups.")))
+  }
+  rep_emd <- rep_emd %>% dplyr::filter(grp %in% usable)
+  rep_emd$grp <- factor(rep_emd$grp)
+
+  per_group <- rep_emd %>%
+    dplyr::group_by(grp) %>%
+    dplyr::summarise(mean_emd = mean(emd), mean_emd_norm = mean(emd_norm),
+                     n_reps = dplyr::n(), .groups = "drop")
+  per_group_list <- lapply(seq_len(nrow(per_group)), function(i) list(
+    group = as.character(per_group$grp[i]),
+    mean_emd = per_group$mean_emd[i],
+    mean_emd_norm = per_group$mean_emd_norm[i],
+    effect = emd_interpret(abs(per_group$mean_emd_norm[i])),
+    n_reps = per_group$n_reps[i]
+  ))
+
+  out <- list(
+    marker = marker, ref_level = ref_level,
+    groups = as.character(levels(rep_emd$grp)),
+    pooled_iqr = pooled_iqr,
+    per_group = safe_I(per_group_list),
+    unit = "signed EMD vs reference, normalized by pooled IQR",
+    note = "Replicate-level: each replicate's distribution vs the reference (leave-one-out for reference reps); replicates are the unit of analysis."
+  )
+
+  if (nlevels(rep_emd$grp) == 2) {
+    w <- suppressWarnings(stats::wilcox.test(emd ~ grp, data = rep_emd))
+    out$test <- "Wilcoxon rank-sum on per-replicate EMD"
+    out$statistic <- unname(w$statistic)
+    out$p_value <- w$p.value
+  } else {
+    k <- suppressWarnings(stats::kruskal.test(emd ~ grp, data = rep_emd))
+    out$test <- "Kruskal-Wallis on per-replicate EMD"
+    out$statistic <- unname(k$statistic)
+    out$p_value <- k$p.value
+    pm <- suppressWarnings(stats::pairwise.wilcox.test(
+      rep_emd$emd, rep_emd$grp, p.adjust.method = "BH"))$p.value
+    pairs <- list()
+    for (rj in rownames(pm)) for (cj in colnames(pm)) {
+      v <- pm[rj, cj]
+      if (!is.na(v)) pairs[[length(pairs) + 1]] <- list(
+        comparison = paste0(rj, " vs ", cj), p_adj = unname(v))
+    }
+    out$pairwise <- safe_I(pairs)
+  }
+  out
+}
+
 #' Fit 2-component GMM to a marker's distribution, compute fraction-positive
 #' @param data Long-format dataset
 #' @param marker H3-PTM marker name
@@ -90,24 +202,49 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
   all_vals <- vals_df$value
   groups <- sort(unique(vals_df[[comparison_var]]))
 
-  # ---- GMM fitting (2-component) ----
+  # ---- GMM fitting (BIC-selected number of components, 1..4) ----
   gmm_result <- tryCatch({
     # Use mclust if available, otherwise simple EM
     if (requireNamespace("mclust", quietly = TRUE)) {
-      fit <- mclust::Mclust(all_vals, G = 2, verbose = FALSE)
-      means <- fit$parameters$mean
-      sds <- sqrt(fit$parameters$variance$sigmasq)
-      props <- fit$parameters$pro
+      fit <- mclust::Mclust(all_vals, G = 1:4, verbose = FALSE)
+      chosen_g <- fit$G
+      unimodal <- isTRUE(chosen_g == 1L)
 
-      # "Negative" = component with lower mean, "Positive" = higher
-      ord <- order(means)
+      # Thresholding needs >= 2 components; if BIC picked 1, refit forced-2
+      # purely to place a negative/positive gate (flagged as unimodal).
+      fit_t <- fit
+      if (unimodal) {
+        fit_t <- tryCatch(mclust::Mclust(all_vals, G = 2, verbose = FALSE),
+                          error = function(e) fit)
+      }
+
+      means <- as.numeric(fit_t$parameters$mean)
+      vars  <- fit_t$parameters$variance$sigmasq
+      if (length(vars) == 1L) vars <- rep(vars, length(means))  # equal-variance model
+      sds   <- sqrt(as.numeric(vars))
+      props <- as.numeric(fit_t$parameters$pro)
+      ord <- order(means); means <- means[ord]; sds <- sds[ord]; props <- props[ord]
+
+      comps <- lapply(seq_along(means), function(i)
+        list(mean = means[i], sd = sds[i], prop = props[i]))
+      has2 <- length(means) >= 2
+
+      # Negative = lowest component; positive gate = first valley (comp1 vs comp2).
+      # prop_pos_total = mass of ALL components above the negative one.
       list(
-        mean_neg = means[ord[1]], mean_pos = means[ord[2]],
-        sd_neg = sds[ord[1]], sd_pos = sds[ord[2]],
-        prop_neg = props[ord[1]], prop_pos = props[ord[2]],
+        mean_neg = means[1], sd_neg = sds[1], prop_neg = props[1],
+        mean_pos = if (has2) means[2] else means[1],
+        sd_pos   = if (has2) sds[2]   else sds[1],
+        prop_pos = if (has2) props[2] else props[1],
+        prop_pos_total = if (has2) sum(props[-1]) else 0,
         threshold = NULL,
-        bic = fit$bic,
-        method = "mclust"
+        bic = if (!is.null(fit$bic)) unname(fit$bic) else NA_real_,
+        n_components = length(means),
+        bic_g = chosen_g,
+        components = safe_I(comps),
+        unimodal = unimodal,
+        method = if (unimodal) "mclust (BIC chose 1; forced 2 for threshold)"
+                 else paste0("mclust (BIC chose ", chosen_g, " components)")
       )
     } else {
       # Simple EM fallback: find threshold at valley between two modes
@@ -317,6 +454,92 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
           n_reps_g1 = length(rmg1), n_reps_g2 = length(rmg2)
         )
       }
+    }
+  } else if (length(groups) >= 3 && has_replicate) {
+    # ---- Multi-group (>=3) inference ----
+    # Biological replicates are the unit of analysis. Omnibus across all
+    # groups (one-way ANOVA + non-parametric Kruskal-Wallis backup), then
+    # Tukey-HSD pairwise contrasts (family-wise error controlled). Base R
+    # only; no cell-level pseudoreplicated p-values are produced here.
+    rep_fracs <- vals_df %>%
+      dplyr::group_by(.data[[comparison_var]], replicate) %>%
+      dplyr::summarise(
+        n_total = dplyr::n(),
+        n_pos = sum(value > threshold),
+        frac_pos = n_pos / n_total,
+        .groups = "drop"
+      ) %>%
+      dplyr::rename(grp = !!rlang::sym(comparison_var)) %>%
+      dplyr::mutate(grp = factor(grp))
+
+    reps_per_grp <- table(rep_fracs$grp)
+    enough <- sum(reps_per_grp >= 2) >= 2 && dplyr::n_distinct(rep_fracs$grp) >= 2
+
+    distribution_tests <- list(
+      groups = groups,
+      multi_group = TRUE,
+      cell_level_note = "3+ groups: inference is replicate-level only. Cell-level KS/Wilcoxon p-values are intentionally omitted (inflated N)."
+    )
+
+    if (enough) {
+      aov_fit <- tryCatch(stats::aov(frac_pos ~ grp, data = rep_fracs),
+                          error = function(e) NULL)
+      omni_F <- NA_real_; omni_p <- NA_real_; omni_df1 <- NA_real_; omni_df2 <- NA_real_
+      if (!is.null(aov_fit)) {
+        atab <- summary(aov_fit)[[1]]
+        omni_F   <- atab[["F value"]][1]
+        omni_p   <- atab[["Pr(>F)"]][1]
+        omni_df1 <- atab[["Df"]][1]
+        omni_df2 <- atab[["Df"]][2]
+      }
+      kw <- tryCatch(suppressWarnings(stats::kruskal.test(frac_pos ~ grp, data = rep_fracs)),
+                     error = function(e) NULL)
+
+      # Tukey-HSD pairwise (adjusted p-values built in)
+      pairwise <- NULL
+      if (!is.null(aov_fit)) {
+        tk <- tryCatch(stats::TukeyHSD(aov_fit), error = function(e) NULL)
+        if (!is.null(tk) && !is.null(tk$grp)) {
+          tkm <- tk$grp
+          pairwise <- lapply(seq_len(nrow(tkm)), function(i) list(
+            comparison = rownames(tkm)[i],
+            diff_frac  = unname(tkm[i, "diff"]),
+            ci_lo      = unname(tkm[i, "lwr"]),
+            ci_hi      = unname(tkm[i, "upr"]),
+            p_adj      = unname(tkm[i, "p adj"])
+          ))
+        }
+      }
+
+      grp_means <- rep_fracs %>%
+        dplyr::group_by(grp) %>%
+        dplyr::summarise(mean_frac = mean(frac_pos, na.rm = TRUE),
+                         n_reps = dplyr::n(), .groups = "drop")
+      group_summary <- lapply(seq_len(nrow(grp_means)), function(i) list(
+        group = as.character(grp_means$grp[i]),
+        mean_frac = grp_means$mean_frac[i],
+        n_reps = grp_means$n_reps[i]
+      ))
+
+      distribution_tests$replicate_test <- list(
+        test = "One-way ANOVA + Tukey HSD on replicate fraction-positive",
+        omnibus_F = omni_F,
+        omnibus_df1 = omni_df1,
+        omnibus_df2 = omni_df2,
+        omnibus_p_value = omni_p,
+        kruskal_statistic = if (!is.null(kw)) unname(kw$statistic) else NA_real_,
+        kruskal_p_value   = if (!is.null(kw)) kw$p.value else NA_real_,
+        group_summary = group_summary,
+        pairwise = pairwise,
+        note = "Primary inferential test for 3+ groups: omnibus across all groups, then Tukey-adjusted pairwise. Replicates are the unit of analysis."
+      )
+    } else {
+      distribution_tests$replicate_test <- list(
+        test = "insufficient replicates",
+        note = paste0("Need >= 2 replicates in >= 2 groups. Reps per group: ",
+                      paste(names(reps_per_grp), as.integer(reps_per_grp),
+                            sep = "=", collapse = ", "), ".")
+      )
     }
   }
 

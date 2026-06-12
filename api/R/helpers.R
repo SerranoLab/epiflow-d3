@@ -52,11 +52,36 @@ palette_options <- list(
 
 # ---- Data loading and validation ----
 
+#' Generate a high-entropy session id. Replaces the old timestamp + 4-digit
+#' scheme, which was guessable (and session ids are effectively bearer tokens
+#' for the in-memory data store).
+generate_session_id <- function(prefix = "s_") {
+  paste0(prefix,
+         paste0(sample(c(letters, LETTERS, 0:9), 32, replace = TRUE), collapse = ""))
+}
+
+#' Strip a session id down to lookup/filesystem-safe characters. Returns "" when
+#' nothing safe remains; callers treat "" as not-found and never touch disk.
+#' Prevents path traversal via crafted session ids (e.g. "../../etc/x").
+sanitize_session_id <- function(id) {
+  if (is.null(id) || length(id) != 1 || is.na(id)) return("")
+  gsub("[^A-Za-z0-9_]", "", as.character(id))
+}
+
 #' Load and validate an EpiFlow .rds dataset
 #' @param path Path to .rds file
 #' @return List with data, h3_markers, phenotypic_markers, metadata
 load_epiflow_data <- function(path) {
   data <- readRDS(path)
+
+  # Reject anything that isn't a data frame up front, so untrusted uploads
+  # can't push arbitrary R objects through the rest of the pipeline.
+  if (!is.data.frame(data)) {
+    stop("Uploaded file must contain a data frame (got ", class(data)[1], ").")
+  }
+  if (nrow(data) > 5e7) {
+    stop("Dataset too large (", nrow(data), " rows); exceeds the 50M-row safety cap.")
+  }
 
   # Normalize identity column
   identity_candidates <- c("identity", "Identity", "Filter", "filter",
@@ -281,6 +306,115 @@ compute_ridge_data <- function(data, marker, group_by = "genotype",
     marker = marker,
     group_by = group_by,
     color_by = color_by,
+    densities = safe_I(Filter(Negate(is.null), densities))
+  )
+}
+
+#' Ridge densities when "marker" is one of the plot dimensions. Two modes:
+#'   group_by == "marker": rows = selected markers; within each, overlapping
+#'     curves split by `color_by` metadata level (e.g. genotype).
+#'   color_by == "marker": rows = `group_by` metadata levels (e.g. identity);
+#'     within each, one overlapping curve per selected marker (colored by PTM).
+#' Output shape mirrors compute_ridge_data() so RidgePlot renders it unchanged.
+#' `markers` is the user-selected PTM subset (NULL/empty => all H3-PTMs).
+#' Note: all rows share one x-axis; PTMs on different scales sit in different
+#' parts of the range (expected).
+compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
+                                  color_by = "marker", h3_markers = NULL,
+                                  bw = "auto", scale_mode = "robust") {
+  if (!"H3PTM" %in% names(data) || !"value" %in% names(data)) {
+    return(list(error = "Long-format H3PTM/value columns required"))
+  }
+  avail <- unique(data$H3PTM)
+  markers <- as.character(unlist(markers))
+  markers <- intersect(markers, avail)
+  if (length(markers) == 0) markers <- sort(avail)
+  if (length(markers) == 0) return(list(error = "No H3-PTM markers in data"))
+
+  # Per-marker robust standardization (median / MAD), pooled across ALL
+  # conditions so between-condition shifts are preserved. Applied uniformly to
+  # every cell of a marker. Falls back MAD -> SD -> 1 when MAD is degenerate.
+  if (identical(scale_mode, "robust")) {
+    mstats <- data %>%
+      dplyr::filter(H3PTM %in% markers, !is.na(value)) %>%
+      dplyr::group_by(H3PTM) %>%
+      dplyr::summarise(.center = median(value, na.rm = TRUE),
+                       .mad = stats::mad(value, na.rm = TRUE),
+                       .sd  = stats::sd(value, na.rm = TRUE),
+                       .groups = "drop") %>%
+      dplyr::mutate(.scale = dplyr::if_else(is.finite(.mad) & .mad > 0, .mad,
+                            dplyr::if_else(is.finite(.sd) & .sd > 0, .sd, 1)))
+    data <- data %>%
+      dplyr::left_join(dplyr::select(mstats, H3PTM, .center, .scale), by = "H3PTM") %>%
+      dplyr::mutate(value = dplyr::if_else(
+        is.finite(.center) & is.finite(.scale) & .scale > 0,
+        (value - .center) / .scale, value)) %>%
+      dplyr::select(-.center, -.scale)
+  }
+  x_label <- if (identical(scale_mode, "robust")) {
+    "Standardized intensity (per-marker, median/MAD)"
+  } else {
+    "arcsinh intensity"
+  }
+
+  dens <- function(v) {
+    h <- if (bw == "auto") tryCatch(stats::bw.nrd0(v), error = function(e) 0.5) else as.numeric(bw)
+    h <- max(h, 0.01)
+    d <- stats::density(v, bw = h, n = 256)
+    list(x = d$x, y = d$y)
+  }
+  row_entry <- function(group_label, env_vals, subs) {
+    dd <- dens(env_vals)
+    list(group = group_label, x = dd$x, y = dd$y, n = length(env_vals),
+         median = median(env_vals, na.rm = TRUE), mean = mean(env_vals, na.rm = TRUE),
+         sub_colors = if (length(subs)) safe_I(subs) else list())
+  }
+
+  if (identical(group_by, "marker")) {
+    # rows = markers; sub-curves = color_by metadata levels
+    has_color <- !identical(color_by, "marker") && color_by %in% names(data)
+    densities <- lapply(sort(markers), function(mk) {
+      md <- data %>% dplyr::filter(H3PTM == mk, !is.na(value))
+      if (nrow(md) < 10) return(NULL)
+      subs <- list()
+      if (has_color) {
+        subs <- Filter(Negate(is.null), lapply(sort(unique(md[[color_by]])), function(cl) {
+          s <- md %>% dplyr::filter(.data[[color_by]] == cl)
+          if (nrow(s) < 3) return(NULL)
+          dd <- dens(s$value)
+          list(color_level = cl, x = dd$x, y = dd$y, n = nrow(s),
+               median = median(s$value, na.rm = TRUE), mean = mean(s$value, na.rm = TRUE))
+        }))
+      }
+      row_entry(mk, md$value, subs)
+    })
+    color_out <- if (has_color) color_by else "marker"
+  } else {
+    # rows = group_by metadata levels; sub-curves = selected markers (color = PTM)
+    if (!group_by %in% names(data)) {
+      return(list(error = paste("group_by column not found:", group_by)))
+    }
+    densities <- lapply(sort(unique(data[[group_by]])), function(gr) {
+      gd <- data %>% dplyr::filter(.data[[group_by]] == gr, !is.na(value), H3PTM %in% markers)
+      if (nrow(gd) < 10) return(NULL)
+      subs <- Filter(Negate(is.null), lapply(sort(markers), function(mk) {
+        s <- gd %>% dplyr::filter(H3PTM == mk)
+        if (nrow(s) < 3) return(NULL)
+        dd <- dens(s$value)
+        list(color_level = mk, x = dd$x, y = dd$y, n = nrow(s),
+             median = median(s$value, na.rm = TRUE), mean = mean(s$value, na.rm = TRUE))
+      }))
+      row_entry(gr, gd$value, subs)
+    })
+    color_out <- "marker"
+  }
+
+  list(
+    marker = if (identical(group_by, "marker")) "H3-PTMs" else "Selected H3-PTMs",
+    group_by = group_by,
+    color_by = color_out,
+    x_label = x_label,
+    scale_mode = scale_mode,
     densities = safe_I(Filter(Negate(is.null), densities))
   )
 }

@@ -21,10 +21,24 @@ source("phase3.R")
 data_store <- new.env(parent = emptyenv())
 
 # ---- CORS configuration ----
+# EPIFLOW_CORS_ORIGIN: "*" (default, dev) or a comma-separated allowlist of
+# exact origins (production, e.g. "https://epiflow.serranolab.org"). When an
+# allowlist is set, only matching origins get an Access-Control-Allow-Origin
+# header; everything else is blocked by the browser.
 #* @filter cors
 function(req, res) {
-  origin <- Sys.getenv("EPIFLOW_CORS_ORIGIN", "*")
-  res$setHeader("Access-Control-Allow-Origin", origin)
+  allowed <- Sys.getenv("EPIFLOW_CORS_ORIGIN", "*")
+  if (identical(allowed, "*")) {
+    res$setHeader("Access-Control-Allow-Origin", "*")
+  } else {
+    origin <- req$HTTP_ORIGIN
+    allow_list <- trimws(strsplit(allowed, ",")[[1]])
+    if (!is.null(origin) && origin %in% allow_list) {
+      res$setHeader("Access-Control-Allow-Origin", origin)
+      res$setHeader("Vary", "Origin")
+    }
+    # else: no ACAO header is set -> the browser blocks the cross-origin read
+  }
   res$setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
   res$setHeader("Access-Control-Allow-Headers", "Content-Type, Accept")
 
@@ -117,14 +131,15 @@ function(req) {
   }
 
   # Generate session ID and store data
-  session_id <- paste0("s_", format(Sys.time(), "%Y%m%d%H%M%S"), "_",
-                       sample(1000:9999, 1))
+  session_id <- generate_session_id("s_")
 
   data_store[[session_id]] <- list(
     raw_data = result$data,
     filtered_data = result$data,
-    metadata = result[setdiff(names(result), "data")]
+    metadata = result[setdiff(names(result), "data")],
+    created = Sys.time()
   )
+  prune_data_store()
 
   # Session data is kept in memory only (data_store environment)
   # No disk persistence — sessions don't survive container restarts
@@ -217,13 +232,14 @@ function(req) {
     return(list(error = result[["error"]]))
   }
 
-  session_id <- paste0("ex_", format(Sys.time(), "%Y%m%d%H%M%S"), "_",
-                       sample(1000:9999, 1))
+  session_id <- generate_session_id("ex_")
   data_store[[session_id]] <- list(
     raw_data = result$data,
     filtered_data = result$data,
-    metadata = result[setdiff(names(result), "data")]
+    metadata = result[setdiff(names(result), "data")],
+    created = Sys.time()
   )
+  prune_data_store()
 
   response <- list(
     session_id = session_id,
@@ -608,14 +624,26 @@ function(session_id, req) {
 
   params <- req$body
   tryCatch(
-    compute_ridge_data(
-      store$filtered_data,
-      marker     = params$marker %||% store$metadata$h3_markers[1],
-      group_by   = params$group_by %||% "genotype",
-      color_by   = params$color_by %||% "genotype",
-      bw         = params$bandwidth %||% "auto",
-      h3_markers = store$metadata$h3_markers
-    ),
+    if (identical(params$group_by, "marker") || identical(params$color_by, "marker")) {
+      compute_ridge_overlay(
+        store$filtered_data,
+        markers    = params$markers,
+        group_by   = params$group_by %||% "genotype",
+        color_by   = params$color_by %||% "marker",
+        h3_markers = store$metadata$h3_markers,
+        bw         = params$bandwidth %||% "auto",
+        scale_mode = params$scale_mode %||% "robust"
+      )
+    } else {
+      compute_ridge_data(
+        store$filtered_data,
+        marker     = params$marker %||% store$metadata$h3_markers[1],
+        group_by   = params$group_by %||% "genotype",
+        color_by   = params$color_by %||% "genotype",
+        bw         = params$bandwidth %||% "auto",
+        h3_markers = store$metadata$h3_markers
+      )
+    },
     error = function(e) list(error = paste("Ridge computation failed:", e$message))
   )
 }
@@ -774,7 +802,44 @@ function(session_id, req) {
   list(results = result, caution_notes = caution_notes)
 }
 
-#* Run correlation analysis
+#* All-pairwise LMM contrasts + replicate-level EMD test for ONE marker.
+#* Surfaces lmm_pairwise() (every pairwise comparison, not just vs-reference)
+#* and replicate_emd_test() (per-replicate EMD + Wilcoxon/Kruskal).
+#* @post /api/stats/marker-detail/<session_id>
+#* @serializer json list(auto_unbox = TRUE)
+function(session_id, req) {
+  store <- get_session(session_id)
+  if (is.null(store)) return(list(error = "Session not found"))
+
+  params <- req$body
+  marker <- params$marker
+  if (is.null(marker)) return(list(error = "No marker specified"))
+  comp  <- params$comparison_var %||% "genotype"
+  ref   <- params$ref_level
+  strat <- if (!is.null(params$stratify_by) && params$stratify_by != "None") params$stratify_by else NULL
+
+  pw <- tryCatch(
+    lmm_pairwise(store$filtered_data, marker = marker, stratify_by = strat,
+                 ref_level = ref, comparison_var = comp,
+                 h3_marks = store$metadata$h3_markers,
+                 use_cells_as_replicates = isTRUE(params$use_cells_as_replicates)),
+    error = function(e) NULL)
+
+  emd <- tryCatch(
+    replicate_emd_test(store$filtered_data, marker = marker,
+                       comparison_var = comp, ref_level = ref,
+                       h3_marks = store$metadata$h3_markers),
+    error = function(e) list(error = e$message))
+
+  list(
+    marker = marker,
+    comparison_var = comp,
+    pairwise = if (is.data.frame(pw) && nrow(pw) > 0) pw else list(),
+    pairwise_note = if (!is.data.frame(pw) || nrow(pw) == 0)
+      "No pairwise result — need >= 2 groups with sufficient cells." else NULL,
+    emd = emd
+  )
+}
 #* @post /api/stats/correlation/<session_id>
 #* @serializer json list(auto_unbox = TRUE)
 function(session_id, req) {
@@ -1196,6 +1261,11 @@ function(session_id, req) {
 # ===========================================================================
 
 get_session <- function(session_id) {
+  # Reject anything outside [A-Za-z0-9_]; closes path traversal via the
+  # file.path() below and keeps lookups to safe keys only.
+  session_id <- sanitize_session_id(session_id)
+  if (!nzchar(session_id)) return(NULL)
+
   if (exists(session_id, envir = data_store)) {
     return(data_store[[session_id]])
   }
@@ -1209,11 +1279,26 @@ get_session <- function(session_id) {
       data_store[[session_id]] <- list(
         raw_data = result$data,
         filtered_data = result$data,
-        metadata = result[setdiff(names(result), "data")]
+        metadata = result[setdiff(names(result), "data")],
+        created = Sys.time()
       )
       return(data_store[[session_id]])
     }
   }
 
   NULL
+}
+
+#' Bound in-memory data store size (DoS guard): when the number of sessions
+#' exceeds max_sessions, drop the oldest by creation time.
+prune_data_store <- function(max_sessions = 100) {
+  ids <- ls(envir = data_store)
+  if (length(ids) <= max_sessions) return(invisible(NULL))
+  created <- vapply(ids, function(k) {
+    ct <- data_store[[k]]$created
+    if (is.null(ct)) 0 else as.numeric(ct)
+  }, numeric(1))
+  drop <- ids[order(created)][seq_len(length(ids) - max_sessions)]
+  if (length(drop)) rm(list = drop, envir = data_store)
+  invisible(NULL)
 }

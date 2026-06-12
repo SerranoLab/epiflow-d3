@@ -425,16 +425,26 @@
                 <option value="genotype">Group by Genotype</option>
                 <option value="identity">Group by Identity</option>
                 <option value="cell_cycle">Group by Cell Cycle</option>
+                <option value="marker">Group by H3-PTM</option>
               </select>
               <select id="ridge-colorby" class="select-input">
                 <option value="same">Color = Group</option>
                 <option value="genotype">Color by Genotype</option>
                 <option value="identity">Color by Identity</option>
                 <option value="cell_cycle">Color by Cell Cycle</option>
+                <option value="marker">Color by H3-PTM</option>
               </select>
               <button class="btn btn-sm" id="ridge-export-svg"><i class="fas fa-download"></i> SVG</button>
               <button class="btn btn-sm" id="ridge-export-png"><i class="fas fa-image"></i> PNG</button>
             </div>
+          </div>
+          <div id="ridge-marker-select" class="panel-controls" style="display:none;align-items:center;flex-wrap:wrap;gap:10px;padding:6px 0 2px;">
+            <span style="font-size:11px;color:#64748b;font-weight:600;">Overlay PTMs:</span>
+            <span id="ridge-marker-checks" style="display:flex;flex-wrap:wrap;gap:12px;font-size:12px;"></span>
+            <select id="ridge-scale" class="select-input" style="margin-left:auto;">
+              <option value="robust">Scale: per-marker (median/MAD)</option>
+              <option value="raw">Scale: raw (arcsinh)</option>
+            </select>
           </div>
           <div class="help-panel"><i class="fas fa-info-circle"></i> Ridge plots show full H3-PTM intensity distributions. <strong>Tip:</strong> Group by Identity, color by Genotype to reveal population-specific epigenetic shifts — overlapping curves show direct WT vs mutant comparisons within each cell population.</div>
           <div class="chart-container" id="ridge-chart"></div>
@@ -474,15 +484,17 @@
               </select>
               <button class="btn btn-primary btn-sm" id="run-lmm-btn"><i class="fas fa-play"></i> Run LMM</button>
               <button class="btn btn-accent btn-sm" id="run-all-markers-btn"><i class="fas fa-layer-group"></i> All Markers</button>
+              <button class="btn btn-sm" id="marker-detail-btn" title="All pairwise comparisons + replicate-level EMD test for the selected marker"><i class="fas fa-list-ul"></i> Pairwise + EMD</button>
             </div>
           </div>
-          <div class="help-panel"><i class="fas fa-info-circle"></i> LMM accounts for nested data structure (cells within replicates). Replicate = random effect to avoid pseudoreplication. Stratify by Identity/Cell Cycle to find population-specific effects.</div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> LMM accounts for nested data structure (cells within replicates). Replicate = random effect to avoid pseudoreplication. Stratify by Identity/Cell Cycle to find population-specific effects. <strong>Pairwise + EMD</strong> shows every group-pair (not just vs reference) plus a replicate-level EMD test for the selected marker.</div>
           <div class="feature-select-bar" id="stats-feature-bar" style="display:none;">
             <label style="font-weight:600;font-size:12px;margin-right:8px;"><i class="fas fa-filter"></i> Markers to include:</label>
             <div id="stats-marker-checkboxes" class="inline-checkbox-group"></div>
           </div>
           <div id="stats-message" class="inline-message" style="display:none;"></div>
           <div id="stats-results" class="stats-results"></div>
+          <div id="stats-detail" class="stats-results" style="margin-top:10px;"></div>
 
           <!-- Distribution-metric heatmap (markers × subsets) -->
           <div class="overview-section" id="marker-heatmap-section" style="margin-top:20px;display:none;">
@@ -735,10 +747,7 @@
             <div class="chart-container" id="umap-chart-main" style="min-height:480px;"></div>
           </div>
           <div id="umap-split-panel" style="display:none;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div class="chart-container" id="umap-chart-split-left" style="min-height:400px;"></div>
-              <div class="chart-container" id="umap-chart-split-right" style="min-height:400px;"></div>
-            </div>
+            <div id="umap-split-grid" style="display:grid;gap:8px;"></div>
           </div>
         </div>
 

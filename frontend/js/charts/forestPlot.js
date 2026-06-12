@@ -23,6 +23,8 @@ const ForestPlot = {
       marker: Array.isArray(r.marker) ? r.marker[0] : String(r.marker || ''),
       subset: r.subset ? (Array.isArray(r.subset) ? r.subset[0] : String(r.subset)) : null,
       contrast: Array.isArray(r.contrast) ? r.contrast[0] : String(r.contrast || ''),
+      contrast_level: Array.isArray(r.contrast_level) ? r.contrast_level[0] : String(r.contrast_level || ''),
+      ref_level: Array.isArray(r.ref_level) ? r.ref_level[0] : String(r.ref_level || ''),
     })).filter(r => !isNaN(r.estimate) && !isNaN(r['std.error']));
 
     // Filter to specific marker if requested
@@ -48,14 +50,21 @@ const ForestPlot = {
       significant: d['p.value'] < 0.05
     }));
 
-    data.sort((a, b) => a.estimate - b.estimate);
-
-    // Unique labels: "Marker · Subset" when stratified
+    // Each (marker × subset × contrast) is its own row — previously all
+    // contrasts for a marker collapsed onto one row and overplotted.
     data.forEach(d => {
-      d.label = d.subset ? `${d.marker} · ${d.subset}` : d.marker;
+      d.contrastStr = (d.contrast_level && d.ref_level)
+        ? `${d.contrast_level} vs ${d.ref_level}`
+        : (d.contrast_level || d.contrast || '');
+      d.label = [d.marker, d.subset, d.contrastStr].filter(Boolean).join(' · ');
     });
+    // Group a marker's contrasts together, ordered by effect size within marker
+    data.sort((a, b) =>
+      a.marker.localeCompare(b.marker) ||
+      (a.subset || '').localeCompare(b.subset || '') ||
+      a.estimate - b.estimate);
 
-    const margin = { top: 55, right: 120, bottom: 50, left: 200 };
+    const margin = { top: 60, right: 120, bottom: 72, left: 250 };
     const rowHeight = 28;
     const width = Math.max(100, container.clientWidth - margin.left - margin.right);
     const height = Math.max(120, data.length * rowHeight);
@@ -91,15 +100,21 @@ const ForestPlot = {
       .attr('text-anchor', 'middle')
       .text(options.title || titleText);
 
-    // Subtitle: show what the comparison is
-    const contrast = data[0]?.contrast || '';
+    // Subtitle + plain-language reading guide for non-statisticians
+    const refLevel = data[0]?.ref_level || 'reference';
     const subsetInfo = data[0]?.subset ? `Stratified by ${options.stratifyLabel || 'subset'}` : 'Unstratified (all cells)';
     svg.append('text')
       .attr('x', (width + margin.left + margin.right) / 2)
-      .attr('y', 35)
+      .attr('y', 34)
       .attr('text-anchor', 'middle')
       .attr('font-size', '11px').attr('fill', '#64748b')
-      .text(`Comparison: ${contrast || 'treatment vs reference'} · ${subsetInfo} · LMM: marker ~ genotype + (1|replicate)`);
+      .text(`Each row = one group vs ${refLevel} · ${subsetInfo}`);
+    svg.append('text')
+      .attr('x', (width + margin.left + margin.right) / 2)
+      .attr('y', 48)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', '10px').attr('fill', '#94a3b8')
+      .text('Dot = effect size (β); whiskers = 95% CI. A CI crossing the dashed line (β = 0) means not significant.');
 
     const xExtent = d3.extent(data.flatMap(d => [d.ci_lo, d.ci_hi]));
     const xPad = (xExtent[1] - xExtent[0]) * 0.1 || 1;
@@ -120,6 +135,16 @@ const ForestPlot = {
       .attr('x', width / 2).attr('y', height + 40)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
       .text('Effect size (β)');
+
+    // Directional guide so a reader knows which way is "more" / "less"
+    g.append('text')
+      .attr('x', 0).attr('y', height + 40)
+      .attr('text-anchor', 'start').attr('font-size', '10px').attr('fill', '#64748b')
+      .text(`\u2190 lower than ${refLevel}`);
+    g.append('text')
+      .attr('x', width).attr('y', height + 40)
+      .attr('text-anchor', 'end').attr('font-size', '10px').attr('fill', '#64748b')
+      .text(`higher than ${refLevel} \u2192`);
 
     // Zero line
     g.append('line')
@@ -191,6 +216,7 @@ const ForestPlot = {
           tooltip.transition().duration(100).style('opacity', 1);
           tooltip.html(`
             <strong>${d.marker}${d.subset ? ' · ' + d.subset : ''}</strong><br>
+            <span style="color:#cbd5e1;">${d.contrastStr}</span><br>
             β = ${d.estimate.toFixed(4)}<br>
             SE = ${d['std.error'].toFixed(4)}<br>
             95% CI: [${d.ci_lo.toFixed(3)}, ${d.ci_hi.toFixed(3)}]<br>

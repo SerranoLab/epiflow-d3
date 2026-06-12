@@ -66,7 +66,7 @@ const ViolinPlot = {
       .attr('text-anchor', 'middle')
       .text(options.title || `${data.marker} — by ${data.group_by}`);
 
-    const groups = data.violins.map(v => v.group);
+    const groups = orderRefFirst([...new Set(data.violins.map(v => v.group))], data.ref_level);
     const xScale = d3.scaleBand().domain(groups).range([0, width]).padding(0.2);
 
     const allVals = data.violins.flatMap(v => [Number(v.min), Number(v.max)]).filter(x => !isNaN(x));
@@ -104,8 +104,8 @@ const ViolinPlot = {
   renderGrouped(containerId, data, options) {
     const container = document.getElementById(containerId);
 
-    const outerGroups = [...new Set(data.violins.map(v => v.group))];
-    const colorLevels = [...new Set(data.violins.map(v => v.color_level))].sort();
+    const outerGroups = orderRefFirst([...new Set(data.violins.map(v => v.group))], data.ref_level);
+    const colorLevels = orderRefFirst([...new Set(data.violins.map(v => v.color_level))].sort(), data.ref_level);
 
     const margin = { top: 45, right: 140, bottom: 110, left: 70 };
     const width = Math.max(100, container.clientWidth - margin.left - margin.right);

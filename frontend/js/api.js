@@ -11,6 +11,15 @@ function ensureArray(val) {
   return [val];
 }
 
+// Global utility: reorder a list so the reference value comes first, with the
+// rest keeping their existing order. No-op when ref is absent (e.g. grouping by
+// a variable that isn't the comparison variable), so it's always safe to apply.
+function orderRefFirst(values, ref) {
+  const arr = ensureArray(values);
+  if (ref == null || !arr.includes(ref)) return arr;
+  return [ref, ...arr.filter(v => v !== ref)];
+}
+
 const EpiFlowAPI = {
   sessionId: null,
 
@@ -59,6 +68,7 @@ const EpiFlowAPI = {
   // ---- Statistics endpoints ----
   async runLMM(params) { return this._post(`/api/stats/lmm/${this.sessionId}`, params); },
   async runAllMarkers(params) { return this._post(`/api/stats/all-markers/${this.sessionId}`, params); },
+  async runMarkerDetail(params) { return this._post(`/api/stats/marker-detail/${this.sessionId}`, params); },
   async runCorrelation(params) { return this._post(`/api/stats/correlation/${this.sessionId}`, params); },
 
   // ---- Dimensionality reduction ----
