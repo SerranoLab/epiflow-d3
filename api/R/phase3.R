@@ -66,10 +66,14 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
     result_df[[col]] <- wide[[col]]
   }
 
-  # Downsample for JSON transfer
-  if (nrow(result_df) > 30000) {
+  # Downsample for JSON transfer and (chiefly) for rendering: the frontend draws
+  # one SVG <circle> per returned cell, which is the binding constraint on scatter
+  # responsiveness. 12k points already saturate a UMAP visually (heavy overplotting
+  # beyond that). Override with EPIFLOW_SCATTER_DISPLAY_CAP if a denser plot is needed.
+  scatter_cap <- as.integer(Sys.getenv("EPIFLOW_SCATTER_DISPLAY_CAP", "12000"))
+  if (nrow(result_df) > scatter_cap) {
     set.seed(seed)
-    result_df <- result_df[sample(nrow(result_df), 30000), ]
+    result_df <- result_df[sample(nrow(result_df), scatter_cap), ]
   }
 
   list(
@@ -127,9 +131,12 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
   meta_present <- intersect(meta_all, names(complete_data))
   scores_df <- dplyr::bind_cols(scores_df, complete_data[, meta_present])
 
-  if (nrow(scores_df) > 30000) {
+  # Subsample for rendering only (PCA itself was computed on all complete cases
+  # above). One SVG <circle> per point is the bottleneck; see UMAP note.
+  scatter_cap <- as.integer(Sys.getenv("EPIFLOW_SCATTER_DISPLAY_CAP", "12000"))
+  if (nrow(scores_df) > scatter_cap) {
     set.seed(42)
-    scores_df <- scores_df[sample(nrow(scores_df), 30000), ]
+    scores_df <- scores_df[sample(nrow(scores_df), scatter_cap), ]
   }
 
   loadings_df <- as.data.frame(pca_result$rotation[, 1:n_comp]) %>%
@@ -430,9 +437,12 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     cell_assignments <- setNames(as.character(wide$cluster), wide$cell_id)
   }
 
-  if (nrow(viz) > 25000) {
+  # Subsample the cluster scatter for rendering only (full cell->cluster mapping is
+  # captured above in cell_assignments). One SVG <circle> per point is the limit.
+  scatter_cap <- as.integer(Sys.getenv("EPIFLOW_SCATTER_DISPLAY_CAP", "12000"))
+  if (nrow(viz) > scatter_cap) {
     set.seed(seed)
-    idx <- sample(nrow(viz), 25000)
+    idx <- sample(nrow(viz), scatter_cap)
     viz <- viz[idx, ]
   }
 

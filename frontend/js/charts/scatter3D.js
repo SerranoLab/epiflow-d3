@@ -9,6 +9,10 @@ const Scatter3D = {
   render(containerId, points, options = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    // Tear down any previous scene for this container first. Otherwise each
+    // re-render leaks a WebGL context and a 60fps requestAnimationFrame loop that
+    // keeps running forever, which compounds into app-wide slowdown.
+    this.dispose(containerId);
     container.innerHTML = '';
 
     const colorBy = options.colorBy || 'genotype';

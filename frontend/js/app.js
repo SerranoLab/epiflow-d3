@@ -268,13 +268,9 @@ const App = {
       });
     }
 
-    // Update ref level when comparison var changes
-    if (compSelect) {
-      compSelect.addEventListener('change', () => {
-        // Ref level should reflect the levels of the selected comparison variable
-        // For now, keep genotype levels — could be extended
-      });
-    }
+    // The reference-level dropdown is kept in sync with the comparison variable
+    // by a single handler bound once in bindFilters() (avoids stacking listeners
+    // each time filters are repopulated).
 
     // Phase 2: Populate H3-PTM marker selectors
     const h3Markers = ensureArray(meta.h3_markers || []);
@@ -328,6 +324,16 @@ const App = {
   bindFilters() {
     document.getElementById('apply-filters-btn').addEventListener('click', () => this.applyFilters());
     document.getElementById('reset-filters-btn').addEventListener('click', () => this.resetFilters());
+
+    // Keep the reference (control) dropdown in sync with the comparison variable.
+    // Bound once here so it survives every populateFilters() repopulation without
+    // accumulating duplicate listeners.
+    const compSelect = document.getElementById('filter-comparison-var');
+    if (compSelect) {
+      compSelect.addEventListener('change', () => {
+        this.populateRefLevel(this._getLevelsForVar(compSelect.value));
+      });
+    }
     // Clear quadrant gate filter
     const clearQuadBtn = document.getElementById('clear-quadrant-filter');
     if (clearQuadBtn) {
@@ -557,6 +563,26 @@ const App = {
   getRefLevel() {
     const el = document.getElementById('filter-ref-level');
     return el && el.value ? el.value : null;
+  },
+
+  // Resolve the category levels for a given comparison variable so the reference
+  // (control) dropdown can offer them. Covers the core columns, any auto-detected
+  // metadata column (via `<col>_levels`), and the derived gate/cluster columns.
+  _getLevelsForVar(varName) {
+    const meta = DataManager.metadata || {};
+    if (varName === 'genotype')   return ensureArray(meta.genotype_levels);
+    if (varName === 'identity')   return ensureArray(meta.identities);
+    if (varName === 'cell_cycle') return ensureArray(meta.cell_cycles);
+    if (varName === 'gate_population') {
+      const labels = (DataManager.gatingMetadata && DataManager.gatingMetadata.labels) || {};
+      return [...new Set(Object.values(labels).filter(Boolean))];
+    }
+    if (varName === 'cluster_identity') {
+      const nm = DataManager.clusterNameMap || {};
+      return [...new Set(Object.values(nm).filter(Boolean))];
+    }
+    if (meta[varName + '_levels']) return ensureArray(meta[varName + '_levels']);
+    return [];
   },
 
   getCellsAsReplicates() {

@@ -286,6 +286,23 @@ function(session_id, req) {
     timepoints  = params$timepoints
   )
 
+  # Generic metadata-column filters. The frontend sends a `meta_filters` object
+  # keyed by column name (condition, timepoint, cell_type, treatment, and any
+  # auto-detected categorical column). Apply each against the matching column when
+  # present. Comparison uses character coercion so numeric levels (e.g. timepoint
+  # 0/24/48) match the string values arriving via JSON.
+  mf <- params$meta_filters
+  if (!is.null(mf) && length(mf) > 0) {
+    for (col in names(mf)) {
+      vals <- mf[[col]]
+      if (!is.null(vals) && length(vals) > 0 && col %in% names(filtered)) {
+        keep_vals <- as.character(unlist(vals))
+        filtered <- filtered %>%
+          dplyr::filter(as.character(.data[[col]]) %in% keep_vals)
+      }
+    }
+  }
+
   extra_grouping <- character(0)
 
   # ---- Gate population column + filtering ----

@@ -724,7 +724,8 @@ compute_per_group_correlation <- function(data, h3_markers, group_by = "genotype
 compute_gating <- function(data, marker_x, marker_y,
                            threshold_x = NULL, threshold_y = NULL,
                            comparison_var = "genotype",
-                           h3_markers = NULL, max_points = 15000) {
+                           h3_markers = NULL,
+                           max_points = as.integer(Sys.getenv("EPIFLOW_SCATTER_DISPLAY_CAP", "12000"))) {
 
   cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
 

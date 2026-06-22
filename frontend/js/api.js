@@ -58,12 +58,17 @@ const EpiFlowAPI = {
   },
 
   // ---- Visualization endpoints ----
-  async getRidgeData(params) { return this._post(`/api/viz/ridge/${this.sessionId}`, params); },
-  async getViolinData(params) { return this._post(`/api/viz/violin/${this.sessionId}`, params); },
-  async getHeatmapData(params) { return this._post(`/api/viz/heatmap/${this.sessionId}`, params); },
+  // These are pure reads of the current filtered dataset, so they are served from
+  // DataManager.cache when the same parameters recur within a filter state. The
+  // cache is cleared on every applyFilters(), so a stale result can never outlive
+  // a filter change. This removes a backend round-trip on every tab switch and
+  // option toggle (a major source of perceived sluggishness).
+  async getRidgeData(params) { return this._cachedPost(`/api/viz/ridge/${this.sessionId}`, params); },
+  async getViolinData(params) { return this._cachedPost(`/api/viz/violin/${this.sessionId}`, params); },
+  async getHeatmapData(params) { return this._cachedPost(`/api/viz/heatmap/${this.sessionId}`, params); },
   async getCellCycleData(params) { return this._post(`/api/viz/cellcycle/${this.sessionId}`, params); },
   async getCellCycleMarkers(params) { return this._post(`/api/viz/cellcycle-markers/${this.sessionId}`, params); },
-  async getOverview(params) { return this._post(`/api/data/overview/${this.sessionId}`, params || {}); },
+  async getOverview(params) { return this._cachedPost(`/api/data/overview/${this.sessionId}`, params || {}); },
 
   // ---- Statistics endpoints ----
   async runLMM(params) { return this._post(`/api/stats/lmm/${this.sessionId}`, params); },
@@ -102,6 +107,22 @@ const EpiFlowAPI = {
   async post(endpoint, body = {}) { return this._post(endpoint, body); },
 
   // ---- Internal helpers ----
+  // Cache-backed POST for pure read endpoints. Entries live in DataManager.cache,
+  // which is reset on every applyFilters(), so they are only reused within the
+  // current filter state. A shallow copy is returned so callers can annotate the
+  // result (e.g. setting data.ref_level for render-time ordering) without mutating
+  // the cached object.
+  async _cachedPost(endpoint, body = {}) {
+    const store = (typeof DataManager !== 'undefined') ? DataManager.cache : null;
+    const key = endpoint + '|' + JSON.stringify(body || {});
+    if (store && Object.prototype.hasOwnProperty.call(store, key)) {
+      return { ...store[key] };
+    }
+    const result = await this._post(endpoint, body);
+    if (store) store[key] = result;
+    return { ...result };
+  },
+
   async _post(endpoint, body = {}) {
     if (!this.sessionId && !endpoint.includes('/upload') && !endpoint.includes('/example') && !endpoint.includes('/health')) {
       throw new Error('No data loaded. Upload a file first.');

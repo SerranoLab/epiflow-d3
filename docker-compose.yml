@@ -24,6 +24,7 @@ services:
       - uploads:/app/uploads
     environment:
       - R_MAX_UPLOAD_SIZE=200  # MB
+      - EPIFLOW_CORS_ORIGIN=https://epiflow.serranolab.org
     # Internal only — nginx proxies to this
     expose:
       - "8000"
@@ -45,6 +46,10 @@ services:
       - ./frontend:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/nginx/certs:ro
+      # ACME webroot: certbot (on the host) writes challenge tokens here during
+      # renewal; nginx serves them over HTTP. Read-only for nginx is fine —
+      # only the host-side certbot writes to it.
+      - ./certbot-webroot:/var/www/certbot:ro
     depends_on:
       - api
 

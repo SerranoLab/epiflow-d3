@@ -37,12 +37,32 @@ const DataManager = {
     this.filters.cell_cycles = this._getCheckedValues('filter-cellcycles');
     this.filters.genotypes = this._getCheckedValues('filter-genotypes');
 
-    // Collect any dynamically created metadata filters
+    // Collect metadata-column filters (condition, timepoint, cell_type, treatment,
+    // and any auto-detected categorical column). The checkbox container is either
+    // the dynamic `filter-<col>` group OR, for the predefined groups in index.html,
+    // the inner `.checkbox-group` whose id is pluralized (e.g. `filter-conditions`
+    // inside `filter-condition-group`). We read whichever exists and send everything
+    // under a single `meta_filters` object so the backend applies it generically.
     const availMeta = ensureArray(this.metadata?.available_meta);
+    const metaFilters = {};
     availMeta.forEach(col => {
-      const vals = this._getCheckedValues(`filter-${col}`);
-      if (vals && vals.length) this.filters[col] = vals;
+      let vals = this._getCheckedValues(`filter-${col}`);
+      if (vals === null) {
+        const group = document.getElementById(`filter-${col}-group`);
+        const inner = group ? group.querySelector('.checkbox-group') : null;
+        if (inner) vals = this._getCheckedValues(inner.id);
+      }
+      // Only constrain when something is selected; an empty selection means
+      // "keep all", matching how the core identity/genotype filters behave.
+      if (vals && vals.length) metaFilters[col] = vals;
+      // Drop any stale top-level key written by earlier versions.
+      if (col in this.filters) delete this.filters[col];
     });
+    if (Object.keys(metaFilters).length) {
+      this.filters.meta_filters = metaFilters;
+    } else {
+      delete this.filters.meta_filters;
+    }
 
     // Always send gating metadata when active (for gate_population column + filtering)
     if (this.gatingMetadata) {
