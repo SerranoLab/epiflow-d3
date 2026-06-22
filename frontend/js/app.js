@@ -1137,8 +1137,13 @@ const App = {
         });
       }
     } else {
+      const umapAnalyzed = data.n_analyzed || data.n_cells || 0;
+      const umapShown = data.n_cells || 0;
+      const umapTitle = (umapShown < umapAnalyzed)
+        ? 'UMAP (' + umapAnalyzed.toLocaleString() + ' cells · showing ' + umapShown.toLocaleString() + ')'
+        : 'UMAP (' + umapAnalyzed.toLocaleString() + ' cells)';
       this._renderUMAPScatter('umap-chart-main', emb, colorBy, isMarker, dotSize,
-        'UMAP (' + (data.n_cells || 0).toLocaleString() + ' cells)');
+        umapTitle);
     }
   },
 
@@ -1312,10 +1317,15 @@ const App = {
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 18)
       .attr('text-anchor', 'middle').attr('font-size', '13px').attr('font-weight', '600')
       .text(data.method + ' Clustering (k=' + data.n_clusters + ') \u2014 ' + colorLabel);
+    const clAnalyzed = data.n_cells || 0;
+    const clShown = data.n_displayed || clAnalyzed;
+    const clCount = (clShown < clAnalyzed)
+      ? clAnalyzed.toLocaleString() + ' cells · showing ' + clShown.toLocaleString()
+      : clAnalyzed.toLocaleString() + ' cells';
     svg.append('text')
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 32)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text((data.n_cells || 0).toLocaleString() + ' cells \u00b7 silhouette = ' + Number(data.silhouette || 0).toFixed(3));
+      .text(clCount + ' \u00b7 silhouette = ' + Number(data.silhouette || 0).toFixed(3));
     const xExt = d3.extent(viz, d => d[xKey]);
     const yExt = d3.extent(viz, d => d[yKey]);
     const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;

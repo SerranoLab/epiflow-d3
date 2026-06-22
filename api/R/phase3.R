@@ -71,6 +71,7 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
   # responsiveness. 12k points already saturate a UMAP visually (heavy overplotting
   # beyond that). Override with EPIFLOW_SCATTER_DISPLAY_CAP if a denser plot is needed.
   scatter_cap <- as.integer(Sys.getenv("EPIFLOW_SCATTER_DISPLAY_CAP", "12000"))
+  n_analyzed <- nrow(result_df)   # cells embedded, before display subsample
   if (nrow(result_df) > scatter_cap) {
     set.seed(seed)
     result_df <- result_df[sample(nrow(result_df), scatter_cap), ]
@@ -78,7 +79,8 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
 
   list(
     embedding = result_df,
-    n_cells = nrow(result_df),
+    n_cells = nrow(result_df),      # points actually returned/rendered
+    n_analyzed = n_analyzed,        # cells embedded by UMAP
     n_neighbors = as.integer(n_neighbors),
     min_dist = as.numeric(min_dist),
     markers_used = h3_cols,
@@ -150,7 +152,8 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
       proportion = as.numeric(var_explained["Proportion of Variance", 1:n_comp]),
       cumulative = as.numeric(var_explained["Cumulative Proportion", 1:n_comp])
     ),
-    n_cells = nrow(scores_df),
+    n_cells = nrow(scores_df),      # points actually returned/rendered
+    n_analyzed = nrow(complete_data),# cells the PCA was computed on
     n_features = length(feature_cols),
     feature_label = feature_label,
     n_components = n_comp
@@ -458,7 +461,8 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     method = method,
     silhouette = sil_val,
     subsampled = subsampled,
-    n_cells = nrow(wide),
+    n_cells = nrow(wide),           # cells clustered (analysis set)
+    n_displayed = nrow(viz),        # points actually returned/rendered
     markers = h3_cols,
     all_markers = all_marker_cols,
     has_umap = umap_ok

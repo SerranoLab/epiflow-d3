@@ -59,13 +59,19 @@ const PCAPlot = {
     const g = svg.append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
-    // Title
+    // Title. Show the count of cells the PCA was computed on (n_analyzed); when
+    // the scatter was subsampled for display, note how many points are shown.
+    const pcaAnalyzed = data.n_analyzed || data.n_cells;
+    const pcaShown = data.n_cells;
+    const pcaCount = (pcaShown < pcaAnalyzed)
+      ? `${pcaAnalyzed.toLocaleString()} cells · showing ${pcaShown.toLocaleString()}`
+      : `${pcaAnalyzed.toLocaleString()} cells`;
     svg.append('text')
       .attr('class', 'chart-title')
       .attr('x', (width + margin.left + margin.right) / 2)
       .attr('y', 20)
       .attr('text-anchor', 'middle')
-      .text(`PCA — ${pcX} vs ${pcY} — ${data.feature_label} (${data.n_cells.toLocaleString()} cells)`);
+      .text(`PCA — ${pcX} vs ${pcY} — ${data.feature_label} (${pcaCount})`);
 
     // Scales
     const xScale = d3.scaleLinear()
