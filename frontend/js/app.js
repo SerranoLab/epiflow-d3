@@ -938,6 +938,12 @@ const App = {
     document.getElementById('run-positivity-btn').addEventListener('click', () => this.runPositivity());
     document.getElementById('run-corr-diff-btn').addEventListener('click', () => this.runCorrelationDiff());
     document.getElementById('run-gating-btn').addEventListener('click', () => this.runGating());
+    // B. Density-contour toggle — flips the layer in place so dragged
+    // thresholds and quadrant selection are preserved.
+    const densityToggle = document.getElementById('gate-show-density');
+    if (densityToggle) {
+      densityToggle.addEventListener('change', (e) => GatingPlot.setDensity(e.target.checked));
+    }
 
     // About toggle
     const aboutToggle = document.getElementById('about-toggle');
@@ -3385,6 +3391,11 @@ const App = {
       document.getElementById('gate-labels-panel').style.display = 'block';
       // Reset detail panel
       document.getElementById('gate-detail-panel').style.display = 'none';
+
+      // Keep the density layer in sync with the checkbox (covers browser
+      // restoring a checked box on reload without firing a change event).
+      const densityOn = document.getElementById('gate-show-density')?.checked || false;
+      GatingPlot._showDensity = densityOn;
 
       GatingPlot.render('gating-chart', data, {
         onQuadrantClick: (quadrant, threshX, threshY) => {

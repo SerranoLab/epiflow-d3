@@ -7,6 +7,14 @@ const GatingPlot = {
   _currentData: null,
   _xScale: null,
   _yScale: null,
+  // B. Gating density — persists across re-gates so toggling stays sticky.
+  _showDensity: false,
+  _densityG: null,
+  _scatterSel: null,
+  _densityBuilt: false,    // contours computed for the current render yet?
+  _densityArgs: null,      // inputs cached so setDensity() can build lazily
+  _pointOpacityOn: 0.10,   // points fade back when contours are shown
+  _pointOpacityOff: 0.35,  // default points-only opacity
 
   render(containerId, data, options = {}) {
     const container = document.getElementById(containerId);
@@ -94,14 +102,33 @@ const GatingPlot = {
     // Scatter points
     const plotG = g.append('g').attr('clip-path', 'url(#gate-clip)');
 
-    plotG.selectAll('circle')
+    const scatterSel = plotG.selectAll('circle')
       .data(points)
       .join('circle')
       .attr('cx', d => xScale(Number(d.x)))
       .attr('cy', d => yScale(Number(d.y)))
       .attr('r', 1.5)
       .attr('fill', d => colorScale(String(d.group)))
-      .attr('fill-opacity', 0.35);
+      .attr('fill-opacity', this._showDensity ? this._pointOpacityOn : this._pointOpacityOff);
+    this._scatterSel = scatterSel;
+
+    // B. 2D density / contour layer — sits above the faint points, below the
+    // threshold crosshairs. pointer-events:none so it never blocks quadrant
+    // clicks or threshold dragging. Contours are computed lazily: only when the
+    // toggle is on (now or via setDensity later), so an unused overlay costs
+    // nothing per gate. Visibility flips in place so dragged thresholds survive.
+    const densityG = g.append('g')
+      .attr('class', 'gate-density')
+      .attr('clip-path', 'url(#gate-clip)')
+      .style('pointer-events', 'none')
+      .style('display', this._showDensity ? null : 'none');
+    this._densityG = densityG;
+    this._densityBuilt = false;
+    this._densityArgs = { points, groups, colorScale, xScale, yScale, size };
+    if (this._showDensity) {
+      this._buildDensity(densityG, points, groups, colorScale, xScale, yScale, size);
+      this._densityBuilt = true;
+    }
 
     // Quadrant labels (will be updated by drag)
     const quadLabels = {};
@@ -337,5 +364,70 @@ const GatingPlot = {
         .attr('x', 22).attr('y', 17 + i * 18)
         .attr('font-size', '10px').attr('fill', '#1a202c').text(gr);
     });
+  },
+
+  // B. Build per-group 2D density contours in pixel space. Coordinates are
+  // already screen pixels, so d3.geoPath() needs no projection. Each group is
+  // contoured independently (self-scaled thresholds), drawn as colour-matched
+  // lines with inner contours rendered heavier — this keeps populations
+  // separable when several genotypes overlap, unlike a single pooled fill.
+  _buildDensity(densityG, points, groups, colorScale, xScale, yScale, size) {
+    densityG.selectAll('*').remove();
+    // Defensive: contourDensity/geoPath live in the full d3 bundle. If a slimmer
+    // build is ever swapped in, degrade to points-only rather than throwing.
+    if (typeof d3.contourDensity !== 'function' || typeof d3.geoPath !== 'function') return;
+    if (!points || points.length < 10) return;
+
+    const bandwidth = Math.max(8, size / 40);
+    const path = d3.geoPath();
+
+    groups.forEach(gr => {
+      const pts = points.filter(p => String(p.group) === String(gr));
+      if (pts.length < 10) return;
+
+      const contours = d3.contourDensity()
+        .x(d => xScale(Number(d.x)))
+        .y(d => yScale(Number(d.y)))
+        .size([size, size])
+        .bandwidth(bandwidth)
+        .thresholds(11)(pts);
+
+      if (!contours.length) return;
+      const maxVal = d3.max(contours, c => c.value) || 1;
+      const color = colorScale(String(gr));
+
+      densityG.append('g')
+        .attr('fill', 'none')
+        .attr('stroke', color)
+        .attr('stroke-linejoin', 'round')
+        .selectAll('path')
+        .data(contours)
+        .join('path')
+        .attr('d', path)
+        // Outer (low-density) rings faint and thin; inner core bold.
+        .attr('stroke-opacity', c => 0.25 + 0.55 * (c.value / maxVal))
+        .attr('stroke-width', c => 0.5 + 1.3 * (c.value / maxVal));
+    });
+  },
+
+  // Toggle the density layer without re-rendering, so dragged thresholds and
+  // any selected quadrant survive the switch. Called from app.js on checkbox
+  // change; also reads the persisted _showDensity at render time.
+  setDensity(show) {
+    this._showDensity = !!show;
+    // Build on first enable for the current render (lazy), so toggling stays
+    // instant thereafter and a never-opened overlay never costs compute.
+    if (this._showDensity && !this._densityBuilt && this._densityG && this._densityArgs) {
+      const a = this._densityArgs;
+      this._buildDensity(this._densityG, a.points, a.groups, a.colorScale, a.xScale, a.yScale, a.size);
+      this._densityBuilt = true;
+    }
+    if (this._densityG) {
+      this._densityG.style('display', this._showDensity ? null : 'none');
+    }
+    if (this._scatterSel) {
+      this._scatterSel.attr('fill-opacity',
+        this._showDensity ? this._pointOpacityOn : this._pointOpacityOff);
+    }
   }
 };
