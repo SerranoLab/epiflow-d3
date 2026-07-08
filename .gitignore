@@ -2,3 +2,17 @@ api/R/data/
 certs/
 .DS_Store
 docker-compose.override.yml
+
+# Large data files (not versioned)
+/*.rds
+# Installer backups
+api/R/*.bak.*
+# Titration installer scaffolding (endpoints now live in plumber.R)
+titration_endpoints_block.R
+install_titration_endpoints.sh
+titration_endpoints.patch
+make_test_condition_rds.R
+test_condition.rds
+# Never commit certs / server-only dirs
+/certs/
+/certbot-webroot/

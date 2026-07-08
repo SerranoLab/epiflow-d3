@@ -53,6 +53,14 @@ function getColor(type, value, index = 0, serverPalette = null) {
   // Server palette represents custom user-picked colors, which only make sense
   // with the default theme.
   const useServerPalette = serverPalette && activePalette === 'Ocean & Earth';
+  // Generic custom-color override for ANY comparison variable (genotype, condition,
+  // timepoint, cell_type, ...). Custom colors are keyed by variable name in serverPalette.
+  if (useServerPalette && serverPalette[type] &&
+      typeof serverPalette[type] === 'object' && !Array.isArray(serverPalette[type])) {
+    let color = serverPalette[type][value];
+    if (Array.isArray(color)) color = color[0];
+    if (color) return color;
+  }
 
   if (type === 'genotype' && useServerPalette && serverPalette.genotype) {
     const gpal = serverPalette.genotype;

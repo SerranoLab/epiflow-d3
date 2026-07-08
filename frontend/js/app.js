@@ -126,7 +126,7 @@ const App = {
     const phenoMarkers = ensureArray(meta.phenotypic_markers);
     this.populateMarkerSelects([...markers, ...phenoMarkers]);
     this.populateRefLevel(genoLevels);
-    this.populateCustomColors(genoLevels);
+    this.populateCustomColors();
     this.populateFeatureSelections(markers, phenoMarkers);
     // Store original palette for reset
     if (meta.palette) {
@@ -332,6 +332,7 @@ const App = {
     if (compSelect) {
       compSelect.addEventListener('change', () => {
         this.populateRefLevel(this._getLevelsForVar(compSelect.value));
+        this.populateCustomColors(compSelect.value);
       });
     }
     // Clear quadrant gate filter
@@ -471,22 +472,25 @@ const App = {
     document.getElementById('reset-custom-colors').addEventListener('click', () => this.resetCustomColors());
   },
 
-  populateCustomColors(genotypeLevels) {
-    const levels = ensureArray(genotypeLevels);
+  populateCustomColors(varName) {
+    varName = varName || (DataManager.getComparisonVar ? DataManager.getComparisonVar() : 'genotype') || 'genotype';
+    const levels = ensureArray(this._getLevelsForVar(varName));
     const container = document.getElementById('custom-color-pickers');
     const group = document.getElementById('custom-colors-group');
-    if (!levels.length) return;
+    if (!container) return;
+    if (!levels.length) { if (group) group.style.display = 'none'; return; }
 
-    const pal = DataManager.serverPalette?.genotype || {};
+    const pal = (DataManager.serverPalette && DataManager.serverPalette[varName]) || {};
     const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD', '#8C564B', '#E377C2', '#7F7F7F', '#BCBD22'];
 
-    container.innerHTML = levels.map((geno, i) => {
+    container.dataset.var = varName;
+    container.innerHTML = levels.map((lv, i) => {
       const currentColor = (typeof pal === 'object' && !Array.isArray(pal))
-        ? (pal[geno] || defaultColors[i % defaultColors.length])
+        ? (pal[lv] || defaultColors[i % defaultColors.length])
         : defaultColors[i % defaultColors.length];
       return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-        <input type="color" data-genotype="${geno}" value="${currentColor}" style="width:32px;height:24px;border:none;cursor:pointer;">
-        <span style="font-size:12px;">${geno}</span>
+        <input type="color" data-level="${lv}" value="${currentColor}" style="width:32px;height:24px;border:none;cursor:pointer;">
+        <span style="font-size:12px;">${lv}</span>
       </div>`;
     }).join('');
 
@@ -505,7 +509,7 @@ const App = {
     if (DataManager.metadata?.palette) {
       DataManager.serverPalette = JSON.parse(JSON.stringify(DataManager.metadata.palette));
     }
-    this.populateCustomColors(ensureArray(DataManager.metadata?.genotype_levels));
+    this.populateCustomColors();
     this.loadCurrentTab();
   },
 
@@ -3443,7 +3447,8 @@ const App = {
         .range(groups.map((gr, i) => palette[gr] || defaultColors[i % defaultColors.length]));
 
       // H3-PTM mini-densities
-      densEl.innerHTML = `<p style="font-size:11px;font-weight:600;margin:0 0 4px;">H3-PTM Profiles (n=${Number(data.n_cells).toLocaleString()})</p>`;
+      densEl.innerHTML = `<p style="font-size:11px;font-weight:600;margin:0 0 2px;">H3-PTM Profiles (n=${Number(data.n_cells).toLocaleString()})</p>` +
+        `<p style="font-size:9px;color:#94a3b8;margin:0 0 6px;">arcsinh intensity (x-axis scaled per mark)</p>`;
       const densities = ensureArray(data.h3_densities);
       const markers = ensureArray(data.markers);
 
@@ -3455,7 +3460,7 @@ const App = {
         div.style.marginBottom = '6px';
         densEl.appendChild(div);
 
-        const w = 300, h = 50, margin = { top: 12, right: 8, bottom: 4, left: 8 };
+        const w = 300, h = 64, margin = { top: 12, right: 8, bottom: 18, left: 8 };
         const pw = w - margin.left - margin.right;
         const ph = h - margin.top - margin.bottom;
 
@@ -3479,6 +3484,12 @@ const App = {
           g.append('path').datum(dx).attr('d', area).attr('fill', colorScale(gr)).attr('fill-opacity', 0.15);
           g.append('path').datum(dx).attr('d', line).attr('fill', 'none').attr('stroke', colorScale(gr)).attr('stroke-width', 1.5);
         });
+
+        // x-axis with units so the intensity scale is explicit (was previously unlabeled)
+        const xAxis = g.append('g').attr('transform', `translate(0,${ph})`)
+          .call(d3.axisBottom(xS).ticks(3).tickSizeOuter(0));
+        xAxis.selectAll('text').attr('font-size', '7px').attr('fill', '#94a3b8');
+        xAxis.selectAll('line, path').attr('stroke', '#cbd5e1');
       });
 
       // Legend

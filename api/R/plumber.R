@@ -15,6 +15,8 @@ source("helpers.R")
 source("statistics.R")
 source("phase2.R")
 source("phase3.R")
+source("separation.R")
+source("interpret.R")
 
 # In-memory data store (per-session; keyed by upload ID)
 # In production, consider Redis or file-based caching
@@ -1318,4 +1320,141 @@ prune_data_store <- function(max_sessions = 100) {
   drop <- ids[order(created)][seq_len(length(ids) - max_sessions)]
   if (length(drop)) rm(list = drop, envir = data_store)
   invisible(NULL)
+}
+
+# ============================================================================
+# Titration & Separation endpoints  (uses separation.R + interpret.R)
+# ============================================================================
+
+#* Detect available controls (Q1-Q4) and assess negative quality
+#* @post /api/controls/detect/<session_id>
+#* @serializer json list(auto_unbox = TRUE)
+function(session_id, req) {
+  store <- get_session(session_id)
+  if (is.null(store)) return(list(error = "Session not found"))
+  d <- store$filtered_data
+  if (!"condition" %in% names(d)) return(list(error = "No 'condition' column; not a titration dataset."))
+  p <- req$body
+  floor_cond <- p$blank_condition %||% "BLANK"
+  pos_ids <- p$pos_ids %||% setdiff(unique(d$identity), c("Unstained", "Apoptotic Cells"))
+  controls <- detect_controls(d, blank_condition = floor_cond,
+                              unstained_ident = p$unstained_ident %||% "Unstained",
+                              apoptotic_ident = p$apoptotic_ident %||% "Apoptotic Cells")
+  rec <- recommend_negative(controls, data = d, pos_ids = pos_ids, floor_condition = floor_cond)
+  list(
+    controls = controls,
+    recommended_negative = list(type = rec$type, confidence = rec$confidence, caveat = rec$caveat),
+    quality = if (is.null(rec$quality)) NULL else list(verdict = rec$quality$verdict,
+                                                       mean_frac = rec$quality$mean_frac),
+    positive_identities = safe_I(pos_ids),
+    doses = safe_I(sort(unique(d$condition[d$condition != floor_cond])))
+  )
+}
+
+#* General A-vs-B separation score for one or more markers (current filter)
+#* @post /api/separation/score/<session_id>
+#* @serializer json list(auto_unbox = TRUE)
+function(session_id, req) {
+  store <- get_session(session_id)
+  if (is.null(store)) return(list(error = "Session not found"))
+  d <- store$filtered_data
+  p <- req$body
+  pos_ids <- p$pos_ids; neg_ids <- p$neg_ids
+  if (is.null(pos_ids) || is.null(neg_ids)) return(list(error = "pos_ids and neg_ids are required"))
+  markers <- p$markers %||% store$metadata$h3_markers
+  if (!is.null(p$condition) && "condition" %in% names(d)) d <- d %>% dplyr::filter(condition == p$condition)
+  assert_arcsinh(d$value)
+  scores <- lapply(markers, function(m) {
+    md <- d[d$H3PTM == m, ]
+    s <- separation_score(md$value[md$identity %in% pos_ids], md$value[md$identity %in% neg_ids])
+    c(list(marker = m), s)
+  })
+  list(scores = scores, positive = safe_I(pos_ids), negative = safe_I(neg_ids))
+}
+
+#* Titration sweep with recommendation + plain-language interpretation
+#* @post /api/titration/sweep/<session_id>
+#* @serializer json list(auto_unbox = TRUE)
+function(session_id, req) {
+  store <- get_session(session_id)
+  if (is.null(store)) return(list(error = "Session not found"))
+  d <- store$filtered_data
+  if (!"condition" %in% names(d)) return(list(error = "No 'condition' column; not a titration dataset."))
+  p <- req$body
+  floor_cond <- p$blank_condition %||% "BLANK"
+  markers <- p$markers %||% store$metadata$h3_markers
+  pos_ids <- p$pos_ids %||% setdiff(unique(d$identity), c("Unstained", "Apoptotic Cells"))
+  reference <- p$reference %||% "population"
+
+  # ---- Cell-cycle reference mode: titrate against an endogenous cycle contrast ----
+  # (draft) Uses cell_cycle phases as the A-vs-B populations, no antibody-negative
+  # control needed. Default contrast: G2/M vs G1. See separation.R for the engine.
+  if (reference == "cellcycle") {
+    if (!"cell_cycle" %in% names(d)) return(list(error = "No 'cell_cycle' column in this dataset."))
+    if (!is.null(p$identity_filter) && length(p$identity_filter) > 0 && "identity" %in% names(d)) {
+      d <- d[d$identity %in% p$identity_filter, ]
+      if (nrow(d) == 0) return(list(error = "No cells in the selected identity."))
+    }
+    ph_hi <- p$cc_high; if (is.null(ph_hi)) ph_hi <- c("G2", "M")
+    ph_lo <- p$cc_low;  if (is.null(ph_lo)) ph_lo <- c("G0/G1")
+    lab_hi <- paste(ph_hi, collapse = "/"); lab_lo <- paste(ph_lo, collapse = "/")
+    matched_dna <- setequal(ph_hi, "M") && setequal(ph_lo, "G2")   # both ~4N, copy number cancels
+    # Raw phase-resolved intensity (no normalization): cell-cycle changes, including
+    # DNA amount and chromatin compaction, are biology the user should see (per the paper).
+    results <- lapply(markers, function(m) {
+      sw <- titration_sweep(d, m, pos_ids = ph_hi, neg_ids = ph_lo, ref_col = "cell_cycle",
+                            floor_condition = floor_cond)
+      ti <- recommend_titer(sw, "medium")
+      ip <- interpret_mark(m, sw, ti, label_pos = paste(lab_hi, "cells"), label_neg = paste(lab_lo, "cells"))
+      list(marker = m, trajectory = sw$trajectory, floor = sw$floor,
+           peak_condition = sw$peak_condition, peak_auroc = sw$peak_auroc,
+           knee_condition = sw$knee_condition, flags = safe_I(sw$flags %||% character(0)),
+           titer = list(recommended = ti$recommended, basis = ti$basis, reliable = ti$reliable),
+           interpretation = ip)
+    })
+    names(results) <- markers
+    reliable <- names(which(vapply(results, function(r) isTRUE(r$titer$reliable), logical(1))))
+    weak <- setdiff(markers, reliable)
+    norm_note <- if (matched_dna)
+      " Contrast is matched for DNA content (M and G2 are both ~4N), so copy number cancels and separation reflects mitosis-specific biology, though condensed mitotic chromatin can affect all epitopes."
+      else " Reads raw per-phase intensity. The G1 vs G2/M difference includes real biology: DNA amount, chromatin compaction, and mark regulation together."
+    panel <- list(
+      controls = paste0("Cell-cycle reference: ", lab_hi, " vs ", lab_lo,
+                        ". This is phase-resolved intensity profiling of your own cells (as in the EpiFlow paper), an exploratory biological lens rather than a standalone antibody titer. Each contrast carries a confound (G1 vs G2/M = DNA copy number; M vs G2 = mitotic condensation affecting all epitopes; S vs G1 = collinear with content), so read it alongside a population or FMO titration.", norm_note),
+      confidence = "Titers reflect the concentration that best resolves this cell-cycle difference. A mark that is stable across the cycle will show weak separation; that means small biology, not a bad antibody.",
+      summary = if (length(reliable))
+                  paste0("Resolves the contrast for: ", paste(reliable, collapse = ", "),
+                         ". Cycle-stable (weak here): ", if (length(weak)) paste(weak, collapse = ", ") else "none", ".")
+                else "No mark clearly resolves this cell-cycle contrast; try another phase pair or rely on the saturation curve and an FMO.",
+      negative_note = "")
+    return(list(markers = safe_I(markers),
+                negative = list(type = "cellcycle", ids = safe_I(c(ph_hi, ph_lo)), confidence = "medium", quality = NULL),
+                results = results, panel = panel))
+  }
+
+  controls <- detect_controls(d, blank_condition = floor_cond)
+  rec_neg  <- recommend_negative(controls, data = d, pos_ids = pos_ids,
+                                 floor_condition = floor_cond, force_neg = p$neg_ids)
+  neg_ids  <- rec_neg$ids
+  if (is.null(neg_ids) || length(neg_ids) == 0)
+    return(list(error = "No usable negative population found; pass neg_ids explicitly."))
+
+  results <- lapply(markers, function(m) {
+    sw <- titration_sweep(d, m, pos_ids = pos_ids, neg_ids = neg_ids, floor_condition = floor_cond)
+    ti <- recommend_titer(sw, rec_neg$confidence)
+    ip <- interpret_mark(m, sw, ti)
+    list(marker = m, trajectory = sw$trajectory, floor = sw$floor,
+         peak_condition = sw$peak_condition, peak_auroc = sw$peak_auroc,
+         knee_condition = sw$knee_condition, flags = safe_I(sw$flags %||% character(0)),
+         titer = list(recommended = ti$recommended, basis = ti$basis, reliable = ti$reliable),
+         interpretation = ip)
+  })
+  names(results) <- markers
+  mark_titers <- lapply(results, function(r) list(reliable = r$titer$reliable))
+  panel <- interpret_panel(controls, rec_neg, mark_titers)
+
+  list(markers = safe_I(markers),
+       negative = list(type = rec_neg$type, ids = safe_I(neg_ids), confidence = rec_neg$confidence,
+                       quality = if (is.null(rec_neg$quality)) NULL else rec_neg$quality$verdict),
+       results = results, panel = panel)
 }
