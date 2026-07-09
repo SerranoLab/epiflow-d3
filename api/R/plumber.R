@@ -1415,13 +1415,18 @@ function(session_id, req) {
     names(results) <- markers
     reliable <- names(which(vapply(results, function(r) isTRUE(r$titer$reliable), logical(1))))
     weak <- setdiff(markers, reliable)
-    norm_note <- if (matched_dna)
-      " Contrast is matched for DNA content (M and G2 are both ~4N), so copy number cancels and separation reflects mitosis-specific biology, though condensed mitotic chromatin can affect all epitopes."
-      else " Reads raw per-phase intensity. The G1 vs G2/M difference includes real biology: DNA amount, chromatin compaction, and mark regulation together."
+    contrast_caveat <- if (matched_dna)
+      "M and G2 share ~4N DNA, so copy number is matched; condensed mitotic chromatin can still affect epitopes."
+      else if (setequal(ph_hi, "S"))
+      "S-phase cells have partially replicated DNA, so this contrast is correlated with DNA content."
+      else
+      "G1 and G2/M differ in DNA content and chromatin compaction as well as in mark level."
     panel <- list(
       controls = paste0("Cell-cycle reference: ", lab_hi, " vs ", lab_lo,
-                        ". This is phase-resolved intensity profiling of your own cells (as in the EpiFlow paper), an exploratory biological lens rather than a standalone antibody titer. Each contrast carries a confound (G1 vs G2/M = DNA copy number; M vs G2 = mitotic condensation affecting all epitopes; S vs G1 = collinear with content), so read it alongside a population or FMO titration.", norm_note),
-      confidence = "Titers reflect the concentration that best resolves this cell-cycle difference. A mark that is stable across the cycle will show weak separation; that means small biology, not a bad antibody.",
+                        ". Raw per-phase intensity across the concentration series; interpret alongside a population or FMO titration. ",
+                        contrast_caveat,
+                        " Method: Golden et al., bioRxiv 2024 (doi.org/10.1101/2024.10.03.616268)."),
+      confidence = "Recommended concentration is where the cell-cycle contrast is best resolved. A mark that is stable across the cycle shows weak separation, which reflects small biology rather than a poor antibody.",
       summary = if (length(reliable))
                   paste0("Resolves the contrast for: ", paste(reliable, collapse = ", "),
                          ". Cycle-stable (weak here): ", if (length(weak)) paste(weak, collapse = ", ") else "none", ".")

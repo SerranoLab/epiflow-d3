@@ -97,6 +97,8 @@
           padding:3px 7px;border-radius:4px;}
         .tit-status{font-size:12px;color:var(--text-secondary);margin:4px 0 0;}
         .tit-picker{font-size:12px;color:var(--text-secondary);}
+        #panel-titration .panel-header{flex-wrap:wrap;row-gap:8px;}
+        #panel-titration .panel-controls{flex-wrap:wrap;justify-content:flex-end;gap:8px 12px;}
         .tit-chart-slot{margin-top:16px;padding:14px;border:1px dashed var(--border);border-radius:var(--radius);
           color:var(--text-muted);font-size:12px;text-align:center;}
         .tit-chart{margin-top:18px;background:var(--surface);border:1px solid var(--border);
@@ -145,7 +147,14 @@
                 <option value="cellcycle">Cell cycle (G2/M vs G1)</option>
               </select>
             </label>
-            <label class="tit-picker" id="tit-pos-wrap">Positive
+            <label class="tit-picker" id="tit-contrast-wrap" style="display:none;">Contrast
+              <select id="tit-cc-contrast" class="select-input">
+                <option value="g2m_g1">G2/M vs G1</option>
+                <option value="m_g2">M vs G2 (matched DNA)</option>
+                <option value="s_g1">S vs G1</option>
+              </select>
+            </label>
+            <label class="tit-picker" id="tit-pos-wrap"><span id="tit-pos-label">Positive</span>
               <select id="tit-pos" class="select-input" multiple size="1" style="min-width:120px;"></select>
             </label>
             <label class="tit-picker" id="tit-neg-wrap">Negative
@@ -202,10 +211,13 @@
       panel.querySelector('#tit-neg').addEventListener('change', markStale);
       panel.querySelector('#tit-reference').addEventListener('change', e => {
         const cc = e.target.value === 'cellcycle';
-        document.getElementById('tit-pos-wrap').style.display = cc ? 'none' : '';
+        document.getElementById('tit-pos-wrap').style.display = '';   // identity picker stays in both modes
+        document.getElementById('tit-pos-label').textContent = cc ? 'Cells' : 'Positive';
         document.getElementById('tit-neg-wrap').style.display = cc ? 'none' : '';
+        document.getElementById('tit-contrast-wrap').style.display = cc ? '' : 'none';
         markStale();
       });
+      panel.querySelector('#tit-cc-contrast').addEventListener('change', markStale);
     },
 
     // Replicate switchTab's DOM behavior for this tab (no dependency on app.js).
@@ -275,7 +287,16 @@
       const reference = document.getElementById('tit-reference').value;
       let body;
       if (reference === 'cellcycle') {
-        body = { reference: 'cellcycle' };
+        const contrastMap = {
+          g2m_g1: { cc_high: ['G2', 'M'], cc_low: ['G0/G1'] },
+          m_g2:   { cc_high: ['M'],       cc_low: ['G2'] },
+          s_g1:   { cc_high: ['S'],       cc_low: ['G0/G1'] }
+        };
+        const c = contrastMap[document.getElementById('tit-cc-contrast').value] || contrastMap.g2m_g1;
+        const ids = Array.from(document.getElementById('tit-pos').selectedOptions).map(o => o.value);
+        const allIds = Array.from(document.getElementById('tit-pos').options).map(o => o.value);
+        body = { reference: 'cellcycle', cc_high: c.cc_high, cc_low: c.cc_low };
+        if (ids.length && ids.length < allIds.length) body.identity_filter = ids; // restrict to chosen cells
       } else {
         const pos = Array.from(document.getElementById('tit-pos').selectedOptions).map(o => o.value);
         if (!pos.length) { status.textContent = 'Pick at least one positive identity.'; return; }
