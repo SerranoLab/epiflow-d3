@@ -8,6 +8,15 @@
   See LICENSE file or https://www.gnu.org/licenses/agpl-3.0.txt
 -->
 <html lang="en">
+  <style>
+    .feature.clickable { cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
+    .feature.clickable:hover { border-color: #0084b8; box-shadow: 0 3px 10px rgba(0,0,0,.09); transform: translateY(-2px); }
+    .epiflow-cite { margin-top: 22px; font-size: 12px; color: #64748b; max-width: 720px; margin-left: auto; margin-right: auto; text-align: center; }
+    .epiflow-cite .cite-lab { margin: 0 0 6px; }
+    .epiflow-cite a { color: #0084b8; text-decoration: none; }
+    .epiflow-cite .cite-how summary { cursor: pointer; color: #0084b8; font-weight: 600; }
+    .epiflow-cite .cite-how p { margin: 6px 0; text-align: left; }
+  </style>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -127,7 +136,7 @@
   <header class="top-bar">
     <div class="top-bar-left">
       <span class="logo-text">EpiFlow</span>
-      <span class="version-badge">D3 v1.3.0</span>
+      <span class="version-badge">D3 v1.3.4</span>
     </div>
     <div class="top-bar-center" id="data-status">
       <span class="status-dot inactive"></span>
@@ -297,7 +306,7 @@
             <p><strong>Statistical approach:</strong> Biological replicates are the unit of inference. Linear mixed models (LMM) account for cell-level nesting within replicates. Cell-level tests (KS, Wilcoxon, chi-square) are flagged as exploratory. Effect sizes (Cohen's d, Cliff's δ, Cramér's V) are prioritized over p-values. BH correction is applied for multiple comparisons.</p>
             <p><strong>ML caution:</strong> RF, GBM, and LDA train/test splits are at the cell level. Accuracy may be optimistic due to replicate leakage. Leave-one-replicate-out CV is recommended for rigorous validation.</p>
             <p><strong>Titration &amp; Separation:</strong> Antibody concentrations are assessed by separation (AUROC and stain index) against a chosen reference (population, FMO/blank floor, or cell-cycle phase), since ubiquitous histone marks lack a true negative population. See the module and the preprint (doi.org/10.1101/2024.10.03.616268) for rationale.</p>
-            <p><strong>Version:</strong> EpiFlow D3 v1.3.0 · © 2025–2026 Serrano Lab, Center for Regenerative Medicine (CReM), Boston University</p>
+            <p><strong>Version:</strong> EpiFlow D3 v1.3.4 · © 2025–2026 Serrano Lab, Center for Regenerative Medicine (CReM), Boston University</p>
             <p style="font-size:9px;color:#94a3b8;">Licensed under AGPL-3.0. Built with R/plumber + D3.js. Contact: Serrano Lab, BU Chobanian & Avedisian School of Medicine.</p>
           </div>
         </div>
@@ -333,20 +342,30 @@
           <div class="welcome-card">
             <h1>EpiFlow <span class="accent">D3</span></h1>
             <p>Multiparametric histone PTM profiling by spectral flow cytometry</p>
-            <p class="subtitle">Upload your .rds file to begin analysis</p>
+            <p class="subtitle">Upload your .rds file, or click any module below to explore with example data</p>
             <div class="feature-grid">
-              <div class="feature"><i class="fas fa-chart-area"></i> Ridge plots</div>
-              <div class="feature"><i class="fas fa-chart-bar"></i> Violin plots</div>
-              <div class="feature"><i class="fas fa-calculator"></i> LMM statistics</div>
-              <div class="feature"><i class="fas fa-th"></i> Heatmaps</div>
-              <div class="feature"><i class="fas fa-sync-alt"></i> Cell Cycle</div>
-              <div class="feature"><i class="fas fa-grip-horizontal"></i> Correlation</div>
-              <div class="feature"><i class="fas fa-chart-line"></i> Positivity</div>
-              <div class="feature"><i class="fas fa-crosshairs"></i> Gating</div>
-              <div class="feature"><i class="fas fa-project-diagram"></i> PCA</div>
-              <div class="feature"><i class="fas fa-braille"></i> UMAP + FeaturePlot</div>
-              <div class="feature"><i class="fas fa-th-large"></i> Clustering</div>
-              <div class="feature"><i class="fas fa-brain"></i> ML</div>
+              <div class="feature clickable" data-tab="ridge"><i class="fas fa-chart-area"></i> Ridge plots</div>
+              <div class="feature clickable" data-tab="violin"><i class="fas fa-chart-bar"></i> Violin plots</div>
+              <div class="feature clickable" data-tab="statistics"><i class="fas fa-calculator"></i> LMM statistics</div>
+              <div class="feature clickable" data-tab="cellcycle"><i class="fas fa-sync-alt"></i> Cell Cycle</div>
+              <div class="feature clickable" data-tab="correlation"><i class="fas fa-grip-horizontal"></i> Correlation</div>
+              <div class="feature clickable" data-tab="positivity"><i class="fas fa-chart-line"></i> Positivity</div>
+              <div class="feature clickable" data-tab="gating"><i class="fas fa-crosshairs"></i> Gating</div>
+              <div class="feature clickable" data-tab="pca"><i class="fas fa-project-diagram"></i> PCA</div>
+              <div class="feature clickable" data-tab="umap"><i class="fas fa-braille"></i> UMAP + FeaturePlot</div>
+              <div class="feature clickable" data-tab="clustering"><i class="fas fa-th-large"></i> Clustering</div>
+              <div class="feature clickable" data-tab="volcano"><i class="fas fa-mountain"></i> Volcano</div>
+              <div class="feature clickable" data-tab="forest"><i class="fas fa-tree"></i> Forest</div>
+              <div class="feature clickable" data-tab="ml"><i class="fas fa-brain"></i> ML</div>
+              <div class="feature clickable" data-tab="titration"><i class="fas fa-flask"></i> Titration</div>
+            </div>
+            <div class="epiflow-cite">
+              <p class="cite-lab">Developed by the <strong>Serrano Lab</strong> · Center for Regenerative Medicine (CReM), Boston University · <a href="https://epiflow.serranolab.org/" target="_blank" rel="noopener">epiflow.serranolab.org</a></p>
+              <details class="cite-how">
+                <summary>How to cite EpiFlow D3</summary>
+                <p><strong>Software:</strong> Sreerama S, Serrano A. EpiFlow D3: a browser-based analysis platform for spectral flow cytometry of histone modifications. Zenodo. <a href="https://doi.org/10.5281/zenodo.20026122" target="_blank" rel="noopener">doi.org/10.5281/zenodo.20026122</a></p>
+                <p><strong>Method:</strong> Golden CS, et al. Nuclear histone H3 post-translational modification profiling in whole cells using spectral flow cytometry. bioRxiv 2024. <a href="https://doi.org/10.1101/2024.10.03.616268" target="_blank" rel="noopener">doi.org/10.1101/2024.10.03.616268</a></p>
+              </details>
             </div>
           </div>
         </div>
@@ -951,7 +970,7 @@
   </div>
 
   <footer class="app-footer">
-    EpiFlow D3 v1.3.0 · © 2025–2026 <a href="https://serranolab.github.io/online/" target="_blank">Serrano Lab</a>, <a href="https://crem.bu.edu/" target="_blank">Center for Regenerative Medicine (CReM)</a>, Boston University · <span style="color:#b0b8c4;">AGPL-3.0</span>
+    EpiFlow D3 v1.3.4 · © 2025–2026 <a href="https://serranolab.github.io/online/" target="_blank">Serrano Lab</a>, <a href="https://crem.bu.edu/" target="_blank">Center for Regenerative Medicine (CReM)</a>, Boston University · <span style="color:#b0b8c4;">AGPL-3.0</span>
   </footer>
 
   <!-- Figure Composer Modal -->

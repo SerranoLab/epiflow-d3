@@ -36,6 +36,8 @@
 
   const TitrationPanel = {
     lastSweep: null,
+    runs: {},            // accumulated runs keyed by reference label (for Compare)
+    runsSession: null,   // resets runs when the dataset changes
 
     init() {
       this.injectStyles();
@@ -107,8 +109,17 @@
         .tit-chart-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
         .tit-chart-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-top:18px;}
         .tit-chart-row .tit-chart{margin-top:0;}
+        .tit-report{margin-top:18px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);overflow-x:auto;}
+        .tit-report h3{margin:0 0 8px;font-size:13px;font-weight:700;}
+        .tit-report table{border-collapse:collapse;width:100%;font-size:12px;}
+        .tit-report th,.tit-report td{border:1px solid var(--border);padding:4px 8px;text-align:left;white-space:nowrap;}
+        .tit-report th{background:var(--surface-alt);font-weight:700;}
+        .tit-report td.ok{color:#4d5f26;font-weight:600;}
+        .tit-report td.bad{color:#8a1616;font-weight:600;}
+        .tit-report td.prov{color:#7a3d00;}
         .tit-svg svg{max-width:100%;height:auto;font-family:Arial,Helvetica,sans-serif;}
         .tit-cards.stale{opacity:.45;transition:opacity .15s;}
+        .tit-report.stale{opacity:.45;transition:opacity .15s;}
         #tit-tooltip{position:fixed;z-index:9999;max-width:280px;background:var(--text);color:#fff;
           font-size:12px;line-height:1.4;padding:8px 10px;border-radius:6px;box-shadow:var(--shadow-md);
           pointer-events:none;display:none;}
@@ -195,9 +206,28 @@
           <div id="tit-overlay" class="tit-svg"></div>
         </div>
         </div>
+        <div class="tit-report" id="tit-report-block" style="display:none;">
+          <div class="tit-chart-head">
+            <h3>Recommended concentrations</h3>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <label class="tit-picker">1X = <input type="number" id="tit-stock" step="any" min="0" style="width:64px;"> µg/mL ${tip('Optional. Enter the antibody concentration at 1X to convert the recommended titer to absolute µg/mL.')}</label>
+              <button class="btn btn-outline btn-sm" id="tit-compare"><i class="fas fa-layer-group"></i> Compare runs</button>
+              <button class="btn btn-outline btn-sm" id="tit-clear"><i class="fas fa-eraser"></i> Clear</button>
+              <button class="btn btn-outline btn-sm" id="tit-export-csv"><i class="fas fa-download"></i> CSV</button>
+              <button class="btn btn-outline btn-sm" id="tit-methods-btn"><i class="fas fa-file-lines"></i> Methods</button>
+            </div>
+          </div>
+          <div id="tit-report-table"></div>
+          <textarea id="tit-report-methods" style="display:none;width:100%;height:120px;margin-top:8px;font-size:11px;" readonly></textarea>
+        </div>
       `;
       panels.appendChild(panel);
       panel.querySelector('#tit-run').addEventListener('click', () => this.run());
+      panel.querySelector('#tit-stock').addEventListener('input', () => { if (this.lastSweep) this.renderReport(this.lastSweep); });
+      panel.querySelector('#tit-compare').addEventListener('click', () => this.buildComparison());
+      panel.querySelector('#tit-clear').addEventListener('click', () => this.clearComparison());
+      panel.querySelector('#tit-export-csv').addEventListener('click', () => this.exportCSV());
+      panel.querySelector('#tit-methods-btn').addEventListener('click', () => this.toggleMethods());
       panel.querySelector('#tit-line-metric').addEventListener('change', e => { if (this.lastSweep) this.renderLine(this.lastSweep, e.target.value); });
       panel.querySelector('#tit-overlay-marker').addEventListener('change', e => { if (this.lastSweep) this.renderOverlay(this.lastSweep, e.target.value); });
       const markStale = () => {
@@ -206,6 +236,8 @@
           c.classList.add('stale');
           document.getElementById('tit-status').textContent = 'Selection changed — click Analyze to update.';
         }
+        const rb = document.getElementById('tit-report-block');
+        if (rb && rb.style.display !== 'none') rb.classList.add('stale');
       };
       panel.querySelector('#tit-pos').addEventListener('change', markStale);
       panel.querySelector('#tit-neg').addEventListener('change', markStale);
@@ -285,14 +317,16 @@
         status.textContent = 'Upload a dataset first.'; return;
       }
       const reference = document.getElementById('tit-reference').value;
-      let body;
+      let body, runLabel;
       if (reference === 'cellcycle') {
         const contrastMap = {
           g2m_g1: { cc_high: ['G2', 'M'], cc_low: ['G0/G1'] },
           m_g2:   { cc_high: ['M'],       cc_low: ['G2'] },
           s_g1:   { cc_high: ['S'],       cc_low: ['G0/G1'] }
         };
-        const c = contrastMap[document.getElementById('tit-cc-contrast').value] || contrastMap.g2m_g1;
+        const cc = document.getElementById('tit-cc-contrast').value;
+        const c = contrastMap[cc] || contrastMap.g2m_g1;
+        runLabel = { g2m_g1: 'Cell cycle G2/M', m_g2: 'Cell cycle M vs G2', s_g1: 'Cell cycle S' }[cc] || 'Cell cycle';
         const ids = Array.from(document.getElementById('tit-pos').selectedOptions).map(o => o.value);
         const allIds = Array.from(document.getElementById('tit-pos').options).map(o => o.value);
         body = { reference: 'cellcycle', cc_high: c.cc_high, cc_low: c.cc_low };
@@ -303,15 +337,19 @@
         const negVal = document.getElementById('tit-neg').value;
         body = { pos_ids: pos };
         if (negVal && negVal !== '__auto__') body.neg_ids = [negVal];
+        runLabel = (negVal && negVal !== '__auto__') ? 'Population (' + negVal + ')' : 'Population (auto)';
       }
 
       status.textContent = 'Analyzing…';
       try {
         const res = await post(`/api/titration/sweep/${EpiFlowAPI.sessionId}`, body);
         this.lastSweep = res;
+        if (EpiFlowAPI.sessionId !== this.runsSession) { this.runs = {}; this.runsSession = EpiFlowAPI.sessionId; }
+        this.runs[runLabel] = res; this._lastLabel = runLabel;
         this.renderSummary(res);
         this.renderCards(res);
         this.renderCharts(res);
+        this.renderReport(res);
         status.textContent = '';
       } catch (err) {
         status.textContent = 'Error: ' + err.message;
@@ -481,6 +519,132 @@
       });
       svg.append('text').attr('x', (mL + W - mR) / 2).attr('y', Hh - 4).attr('text-anchor', 'middle')
         .attr('font-size', 10).attr('fill', '#64748b').text('concentration');
+    },
+
+    parseX(s) {
+      if (s == null) return null;
+      const m = String(s).match(/([\d.]+)/);
+      return m ? parseFloat(m[1]) : null;
+    },
+
+    // Single-method recommended-concentration table (from the current run).
+    renderReport(res) {
+      const block = document.getElementById('tit-report-block');
+      block.style.display = '';
+      block.classList.remove('stale');
+      document.getElementById('tit-report-methods').style.display = 'none';
+      const markers = arr(res.markers), results = res.results || {};
+      const stock = parseFloat(document.getElementById('tit-stock').value);
+      const hasUg = isFinite(stock) && stock > 0;
+      const negLabel = (res.negative && res.negative.type) ? res.negative.type : 'reference';
+      const csv = [['Mark', 'Recommended (' + negLabel + ')', 'Peak AUROC'].concat(hasUg ? ['ug/mL'] : [])];
+      let html = '<table><thead><tr><th>Mark</th><th>Recommended (' + esc(negLabel) + ')</th><th>Peak AUROC</th>'
+        + (hasUg ? '<th>µg/mL</th>' : '') + '</tr></thead><tbody>';
+      markers.forEach(m => {
+        const r = results[m] || {}, t = r.titer || {}, ip = r.interpretation || {};
+        const inverted = String(t.basis || '').indexOf('inverted') >= 0;
+        const rec = ip.reliable ? (t.recommended || '') : (inverted ? 'no titer' : 'provisional');
+        const cls = ip.reliable ? 'ok' : (inverted ? 'bad' : 'prov');
+        const x = this.parseX(t.recommended);
+        const ug = (hasUg && x != null && ip.reliable) ? (x * stock).toFixed(2) : '';
+        const auroc = r.peak_auroc != null ? r.peak_auroc.toFixed(2) : '';
+        html += `<tr><td>${esc(m)}</td><td class="${cls}">${esc(rec)}</td><td>${auroc}</td>`
+          + (hasUg ? `<td>${ug}</td>` : '') + '</tr>';
+        csv.push([m, rec, auroc].concat(hasUg ? [ug] : []));
+      });
+      html += '</tbody></table>';
+      document.getElementById('tit-report-table').innerHTML = html;
+      this.reportCSV = csv;
+    },
+
+    // Cross-reference comparison: run population + cell-cycle contrasts and flag agreement.
+    // Compare only the references the user has actually run (accumulated in this.runs).
+    buildComparison() {
+      const runs = this.runs || {};
+      const keys = Object.keys(runs);
+      const el = document.getElementById('tit-report-table');
+      document.getElementById('tit-report-block').classList.remove('stale');
+      if (keys.length < 2) {
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:12px;">Compare shows the references you have run. '
+          + 'Run at least two (change the Reference or Contrast and click Analyze), then click Compare runs.</p>';
+        return;
+      }
+      this.renderComparison(runs);
+    },
+
+    clearComparison() {
+      this.runs = this.lastSweep ? { [this._lastLabel || 'current']: this.lastSweep } : {};
+      if (this.lastSweep) this.renderReport(this.lastSweep);
+    },
+
+    renderComparison(out) {
+      const methods = Object.keys(out).filter(k => out[k] && out[k].markers);
+      const el = document.getElementById('tit-report-table');
+      document.getElementById('tit-report-block').classList.remove('stale');
+      if (!methods.length) { el.innerHTML = '<p style="color:var(--danger);">Comparison failed.</p>'; return; }
+      const markers = arr(out[methods[0]].markers);
+      const stock = parseFloat(document.getElementById('tit-stock').value);
+      const hasUg = isFinite(stock) && stock > 0;
+      const csv = [['Mark'].concat(methods, ['Agreement'], hasUg ? ['ug/mL (Population)'] : [])];
+      let html = '<table><thead><tr><th>Mark</th>' + methods.map(k => `<th>${esc(k)}</th>`).join('')
+        + '<th>Agreement</th>' + (hasUg ? '<th>µg/mL (Pop.)</th>' : '') + '</tr></thead><tbody>';
+      markers.forEach(m => {
+        const cells = methods.map(k => {
+          const r = (out[k].results || {})[m] || {}, t = r.titer || {}, ip = r.interpretation || {};
+          const inverted = String(t.basis || '').indexOf('inverted') >= 0;
+          return { rec: ip.reliable ? (t.recommended || '') : (inverted ? 'no titer' : 'prov'),
+                   rel: !!ip.reliable, x: ip.reliable ? this.parseX(t.recommended) : null };
+        });
+        const xs = cells.filter(c => c.x != null).map(c => c.x);
+        let agree, acls;
+        if (xs.length === 0) { agree = 'none'; acls = 'bad'; }
+        else if (xs.length === 1) { agree = 'single'; acls = 'prov'; }
+        else { const ratio = Math.max(...xs) / Math.min(...xs); agree = ratio <= 1.6 ? 'consistent' : 'unresolved'; acls = ratio <= 1.6 ? 'ok' : 'bad'; }
+        const ug = (hasUg && cells[0].x != null) ? (cells[0].x * stock).toFixed(2) : '';
+        html += `<tr><td>${esc(m)}</td>` + cells.map(c => `<td class="${c.rel ? 'ok' : 'prov'}">${esc(c.rec)}</td>`).join('')
+          + `<td class="${acls}">${agree}</td>` + (hasUg ? `<td>${ug}</td>` : '') + '</tr>';
+        csv.push([m].concat(cells.map(c => c.rec), [agree], hasUg ? [ug] : []));
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+      this.reportCSV = csv;
+    },
+
+    exportCSV() {
+      const rows = this.reportCSV;
+      if (!rows || !rows.length) return;
+      const csv = rows.map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'epiflow_titration_recommendations.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    },
+
+    toggleMethods() {
+      const ta = document.getElementById('tit-report-methods');
+      if (ta.style.display !== 'none') { ta.style.display = 'none'; return; }
+      ta.value = this.methodsParagraph();
+      ta.style.display = ''; ta.focus(); ta.select();
+    },
+
+    methodsParagraph() {
+      const res = this.lastSweep; if (!res) return '';
+      const neg = (res.negative && res.negative.type) || 'reference';
+      const reliable = arr(res.markers).filter(m => {
+        const t = ((res.results || {})[m] || {}).titer; return t && t.reliable;
+      });
+      return 'Antibody concentrations for histone H3 post-translational modification (PTM) staining were '
+        + 'assessed in EpiFlow D3 (Serrano Lab, Boston University) by quantifying separation between a positive '
+        + 'population and a ' + neg + ' reference across a concentration series, on arcsinh-transformed intensities. '
+        + 'Separation was scored by the area under the ROC curve (AUROC; rank-based, transform-invariant) and the '
+        + 'staining index, and the working concentration was taken at the peak of separation together with the '
+        + 'signal-saturation knee. Because histone PTMs are ubiquitous and lack a true marker-negative population, '
+        + 'specificity was interpreted alongside a fluorescence-minus-one (FMO) control where available, and '
+        + 'cell-cycle contrasts (phase-resolved, raw intensity) were used as an exploratory biological reference. '
+        + 'Marks with a clear recommendation under the chosen reference: ' + (reliable.join(', ') || 'none') + '. '
+        + 'Method: Golden et al., bioRxiv 2024 (doi.org/10.1101/2024.10.03.616268).';
     }
   };
 

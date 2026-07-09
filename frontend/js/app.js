@@ -16,7 +16,7 @@ const App = {
     this.bindChartControls();
     this.bindExports();
     this.bindOptions();
-    console.log('EpiFlow D3 v1.3.0 initialized');
+    console.log('EpiFlow D3 v1.3.4 initialized');
   },
 
   // ===== DATA UPLOAD =====
@@ -525,6 +525,16 @@ const App = {
         this.loadCurrentTab();
       });
     });
+    // Clickable landing cards: load the example dataset if none is loaded, then open that module.
+    document.querySelectorAll('.feature[data-tab]').forEach(f => {
+      f.addEventListener('click', () => this.openFeature(f.dataset.tab));
+    });
+  },
+
+  async openFeature(tab) {
+    if (!DataManager.metadata) { await this.handleExample(); }
+    const btn = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
+    if (btn) btn.click();
   },
 
   switchTab(tab) {
@@ -3792,7 +3802,7 @@ const App = {
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Fisher z-transform was used to compare per-group Pearson/Spearman correlations, with replicate-level N used by default for the standard error calculation.</p>
         <p><strong>Machine learning:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Note: cell-level train/test splits may overestimate accuracy due to replicate leakage; leave-one-replicate-out CV is recommended for rigorous validation.</p>
-        <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.3.0 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
+        <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.3.4 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
       </div>
     `);
 
@@ -3894,7 +3904,7 @@ ${sections.join('\n')}
     const year = new Date().getFullYear();
     const date = new Date().toISOString().slice(0, 10);
     const citation = `EpiFlow D3: A spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification profiling. Serrano Lab, Center for Regenerative Medicine (CReM), Boston University. https://serranolab.github.io/online/. Accessed ${date}.`;
-    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.3.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Effect sizes are reported as Cohen's d. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
+    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.3.4 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Effect sizes are reported as Cohen's d. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
