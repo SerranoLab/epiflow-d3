@@ -215,6 +215,7 @@
               <button class="btn btn-outline btn-sm" id="tit-clear"><i class="fas fa-eraser"></i> Clear</button>
               <button class="btn btn-outline btn-sm" id="tit-export-csv"><i class="fas fa-download"></i> CSV</button>
               <button class="btn btn-outline btn-sm" id="tit-methods-btn"><i class="fas fa-file-lines"></i> Methods</button>
+              <button class="btn btn-outline btn-sm" id="tit-report-btn"><i class="fas fa-file-arrow-down"></i> Report</button>
             </div>
           </div>
           <div id="tit-report-table"></div>
@@ -228,6 +229,7 @@
       panel.querySelector('#tit-clear').addEventListener('click', () => this.clearComparison());
       panel.querySelector('#tit-export-csv').addEventListener('click', () => this.exportCSV());
       panel.querySelector('#tit-methods-btn').addEventListener('click', () => this.toggleMethods());
+      panel.querySelector('#tit-report-btn').addEventListener('click', () => this.downloadReport());
       panel.querySelector('#tit-line-metric').addEventListener('change', e => { if (this.lastSweep) this.renderLine(this.lastSweep, e.target.value); });
       panel.querySelector('#tit-overlay-marker').addEventListener('change', e => { if (this.lastSweep) this.renderOverlay(this.lastSweep, e.target.value); });
       const markStale = () => {
@@ -645,6 +647,100 @@
         + 'cell-cycle contrasts (phase-resolved, raw intensity) were used as an exploratory biological reference. '
         + 'Marks with a clear recommendation under the chosen reference: ' + (reliable.join(', ') || 'none') + '. '
         + 'Method: Golden et al., bioRxiv 2024 (doi.org/10.1101/2024.10.03.616268).';
+    },
+
+    // Self-contained HTML report for a paper supplement or lab notebook.
+    downloadReport() {
+      const res = this.lastSweep;
+      if (!res) return;
+      const markers = arr(res.markers), results = res.results || {};
+      const stock = parseFloat(document.getElementById('tit-stock').value);
+      const hasUg = isFinite(stock) && stock > 0;
+      const negType = (res.negative && res.negative.type) || 'reference';
+      const negQual = (res.negative && res.negative.quality) || '';
+      const panel = res.panel || {};
+      const now = new Date();
+      const e = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+      const rowsHtml = markers.map(m => {
+        const r = results[m] || {}, t = r.titer || {}, ip = r.interpretation || {};
+        const inverted = String(t.basis || '').indexOf('inverted') >= 0;
+        const rec = ip.reliable ? (t.recommended || '') : (inverted ? 'no titer' : 'provisional');
+        const x = this.parseX(t.recommended);
+        const ug = (hasUg && x != null && ip.reliable) ? (x * stock).toFixed(2) : '';
+        const auroc = r.peak_auroc != null ? r.peak_auroc.toFixed(2) : '';
+        const cls = ip.reliable ? 'ok' : (inverted ? 'bad' : 'prov');
+        return `<tr><td>${e(m)}</td><td class="${cls}">${e(rec)}</td><td>${auroc}</td>${hasUg ? `<td>${ug}</td>` : ''}</tr>`;
+      }).join('');
+
+      const reasonHtml = markers.map(m => {
+        const ip = (results[m] || {}).interpretation || {};
+        const flags = arr(ip.flags).map(f => `<li>${e(f)}</li>`).join('');
+        return `<div class="mark"><h4>${e(ip.headline || m)}</h4><p>${e(ip.separation || '')}</p>`
+          + (ip.saturation ? `<p>${e(ip.saturation)}</p>` : '') + (flags ? `<ul class="flags">${flags}</ul>` : '') + '</div>';
+      }).join('');
+
+      let compHtml = '';
+      const runKeys = Object.keys(this.runs || {}).filter(k => this.runs[k] && this.runs[k].markers);
+      if (runKeys.length >= 2) {
+        const mk = arr(this.runs[runKeys[0]].markers);
+        let h = '<table><thead><tr><th>Mark</th>' + runKeys.map(k => `<th>${e(k)}</th>`).join('') + '<th>Agreement</th></tr></thead><tbody>';
+        mk.forEach(m => {
+          const cells = runKeys.map(k => {
+            const r = (this.runs[k].results || {})[m] || {}, t = r.titer || {}, ip = r.interpretation || {};
+            const inv = String(t.basis || '').indexOf('inverted') >= 0;
+            return { rec: ip.reliable ? (t.recommended || '') : (inv ? 'no titer' : 'prov'), x: ip.reliable ? this.parseX(t.recommended) : null };
+          });
+          const xs = cells.filter(c => c.x != null).map(c => c.x);
+          let ag = 'unresolved';
+          if (xs.length === 0) ag = 'none'; else if (xs.length === 1) ag = 'single';
+          else ag = (Math.max(...xs) / Math.min(...xs) <= 1.6) ? 'consistent' : 'unresolved';
+          h += `<tr><td>${e(m)}</td>` + cells.map(c => `<td>${e(c.rec)}</td>`).join('') + `<td>${e(ag)}</td></tr>`;
+        });
+        h += '</tbody></table>';
+        compHtml = '<h2>Cross-reference comparison</h2><p>Recommended concentration under each reference you ran. '
+          + '"Unresolved" means the references disagree, indicating no confound-free reference exists for that mark.</p>' + h;
+      }
+
+      const fig = id => { const el = document.getElementById(id); return el ? el.innerHTML : ''; };
+      const overlay = fig('tit-overlay');
+      const unresolved = markers.filter(m => !((results[m] || {}).interpretation || {}).reliable);
+
+      const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>EpiFlow titration report</title><style>'
+        + 'body{font-family:Arial,Helvetica,sans-serif;color:#1a202c;max-width:900px;margin:24px auto;padding:0 20px;line-height:1.5;}'
+        + 'h1{font-size:20px;}h2{font-size:15px;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-top:28px;}h4{font-size:13px;margin:12px 0 4px;}'
+        + '.prov{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:12px;color:#475569;}'
+        + 'table{border-collapse:collapse;width:100%;font-size:12px;margin:8px 0;}th,td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;}'
+        + 'th{background:#f1f5f9;}td.ok{color:#4d5f26;font-weight:600;}td.bad{color:#8a1616;font-weight:600;}td.prov{color:#7a3d00;}'
+        + '.flags{margin:4px 0;color:#7a3d00;font-size:12px;}p{font-size:13px;}.fig{margin:10px 0;}.fig svg{max-width:100%;height:auto;}'
+        + '.rules li{margin:3px 0;font-size:12px;color:#334155;}.caveat{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;font-size:12px;}'
+        + '@media print{h2{page-break-after:avoid;}.fig{page-break-inside:avoid;}}</style></head><body>'
+        + '<h1>EpiFlow D3 &mdash; Antibody titration report</h1>'
+        + `<div class="prov">Generated ${e(now.toISOString().slice(0, 16).replace('T', ' '))} &middot; EpiFlow D3 &middot; Serrano Lab, CReM, Boston University<br>`
+        + `Reference: ${e(negType)}${negQual ? ` (negative quality: ${e(negQual)})` : ''} &middot; Markers: ${markers.length}</div>`
+        + (panel.summary ? `<p><strong>${e(panel.confidence || '')}</strong> ${e(panel.summary)}</p>` : '')
+        + `<h2>Recommended concentrations</h2><table><thead><tr><th>Mark</th><th>Recommended (${e(negType)})</th><th>Peak AUROC</th>${hasUg ? '<th>&micro;g/mL</th>' : ''}</tr></thead><tbody>${rowsHtml}</tbody></table>`
+        + compHtml
+        + `<h2>Per-mark reasoning</h2>${reasonHtml}`
+        + `<h2>Figures</h2><div class="fig"><strong>AUROC &mdash; marker &times; concentration</strong><br>${fig('tit-heatmap')}</div>`
+        + `<div class="fig"><strong>Concentration response</strong><br>${fig('tit-line')}</div>`
+        + (overlay ? `<div class="fig"><strong>Signal vs background</strong><br>${overlay}</div>` : '')
+        + `<h2>Methods</h2><p>${e(this.methodsParagraph())}</p>`
+        + '<h2>Interpretation notes</h2>'
+        + (unresolved.length ? `<p class="caveat">Marks without a reliable recommendation under this reference: <strong>${unresolved.map(e).join(', ')}</strong>. For these, use the saturation knee as a working concentration and confirm specificity with an FMO.</p>` : '')
+        + '<p>Titration of ubiquitous histone PTMs follows four principles:</p><ol class="rules">'
+        + '<li><strong>No true negative exists.</strong> Titrate to a difference you trust (an FMO), not a "negative"; demote co-staining internal negatives to QC.</li>'
+        + '<li><strong>Detection is not specificity.</strong> Signal above blank proves the antibody works but cannot pick a concentration; only separation from a proper negative places the peak.</li>'
+        + '<li><strong>Instability means unresolved.</strong> If the recommendation moves when you change the reference, no confound-free reference exists; use the saturation knee, add an FMO, and report a range.</li>'
+        + '<li><strong>Know your reference.</strong> Repressive marks stain condensed and apoptotic chromatin higher (biology, not antibody failure); cell-cycle separation is largely DNA copy number.</li>'
+        + '</ol></body></html>';
+
+      const blob = new Blob([html], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'epiflow_titration_report.html';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
     }
   };
 
