@@ -294,7 +294,18 @@ const ViolinPlot = {
     const maxDensity = d3.max(v.density_y);
     const widthScale = d3.scaleLinear().domain([0, maxDensity]).range([0, maxWidth / 2]);
 
-    const points = v.density_x.map((dx, i) => ({ x: dx, y: v.density_y[i] }));
+    // Trim the KDE to just past the data range so violins taper smoothly toward
+    // the edges without spilling past the axis (small seaborn-style cut). The
+    // axis already pads 5%, so a 4% cut stays inside it. Falls back to the full
+    // curve if the trim would leave too few points (near-constant marker).
+    const cut = 0.04 * ((v.max - v.min) || 1);
+    const lo = v.min - cut, hi = v.max + cut;
+    let points = v.density_x
+      .map((dx, i) => ({ x: dx, y: v.density_y[i] }))
+      .filter(p => p.x >= lo && p.x <= hi);
+    if (points.length < 2) {
+      points = v.density_x.map((dx, i) => ({ x: dx, y: v.density_y[i] }));
+    }
     const rightPath = points.map(p => [centerX + widthScale(p.y), yScale(p.x)]);
     const leftPath = points.map(p => [centerX - widthScale(p.y), yScale(p.x)]).reverse();
     const violinPath = [...rightPath, ...leftPath];

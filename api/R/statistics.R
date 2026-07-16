@@ -670,12 +670,21 @@ run_gbm <- function(data, target_var = "genotype",
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
   meta_cols <- c("cell_id", target_var)
 
-  wide <- data %>%
-    dplyr::select(dplyr::all_of(c(meta_cols, pheno_cols, "H3PTM", "value"))) %>%
-    dplyr::group_by(dplyr::across(dplyr::all_of(c(meta_cols, pheno_cols))), H3PTM) %>%
-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
-    tidyr::drop_na()
+  if (.epiflow_phenotype_only(data)) {
+    # Phenotype-only: no H3 value to pivot. The all-NA "none" sentinel would make
+    # drop_na() delete every row (RF skips drop_na, which is why it worked here).
+    wide <- data %>%
+      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+      dplyr::select(dplyr::all_of(c(meta_cols, pheno_cols))) %>%
+      tidyr::drop_na(dplyr::all_of(pheno_cols))
+  } else {
+    wide <- data %>%
+      dplyr::select(dplyr::all_of(c(meta_cols, pheno_cols, "H3PTM", "value"))) %>%
+      dplyr::group_by(dplyr::across(dplyr::all_of(c(meta_cols, pheno_cols))), H3PTM) %>%
+      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+      tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+      tidyr::drop_na()
+  }
 
   # Subsample if dataset is very large (memory protection)
   subsampled <- FALSE

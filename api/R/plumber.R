@@ -149,6 +149,7 @@ function(req) {
   response <- list(
     session_id = session_id,
     n_cells = result$n_cells,
+    phenotype_only = result$phenotype_only,
     h3_markers = result$h3_markers,
     phenotypic_markers = result$phenotypic_markers,
     genotype_levels = result$genotype_levels,
@@ -249,6 +250,7 @@ function(req) {
     preset = preset,
     example_label = preset_meta$label,
     n_cells = result$n_cells,
+    phenotype_only = result$phenotype_only,
     h3_markers = result$h3_markers,
     phenotypic_markers = result$phenotypic_markers,
     genotype_levels = result$genotype_levels,
@@ -650,6 +652,7 @@ function(session_id, req) {
         group_by   = params$group_by %||% "genotype",
         color_by   = params$color_by %||% "marker",
         h3_markers = store$metadata$h3_markers,
+        phenotypic_markers = store$metadata$phenotypic_markers,
         bw         = params$bandwidth %||% "auto",
         scale_mode = params$scale_mode %||% "robust"
       )
@@ -1154,6 +1157,7 @@ function(session_id, req) {
     compute_elbow(
       store$filtered_data,
       h3_markers = store$metadata$h3_markers,
+      phenotypic_markers = store$metadata$phenotypic_markers,
       k_range    = 2:k_max
     ),
     error = function(e) list(error = paste("Elbow scan failed:", e$message))
@@ -1230,7 +1234,8 @@ function(session_id, req) {
       msg <- e$message
       if (grepl("contrasts|factor|level|classes", msg, ignore.case = TRUE))
         msg <- "GBM classification failed — the target variable needs at least 2 levels with sufficient data in each."
-      if (grepl("xgboost", msg, ignore.case = TRUE))
+      if (grepl("xgboost", msg, ignore.case = TRUE) &&
+          !requireNamespace("xgboost", quietly = TRUE))
         msg <- "xgboost package not installed. Run: install.packages('xgboost')"
       list(error = msg)
     }

@@ -138,8 +138,28 @@ const App = {
     document.getElementById('report-section').classList.remove('hidden');
     document.getElementById('tab-nav').classList.remove('hidden');
 
+    this.applyPhenotypeOnlyMode(meta.phenotype_only === true);
     this.switchTab('overview');
     this.loadCurrentTab();
+  },
+
+  // Hide histone-PTM-only tabs for phenotype-only datasets (no H3 markers).
+  // Their analyses run on the long-format `value` column, which is empty in
+  // phenotype-only mode. Everything else works on phenotypic markers + metadata.
+  applyPhenotypeOnlyMode(isPhenotypeOnly) {
+    // Phenotype-only datasets (no H3-PTMs) run every analysis on the phenotypic
+    // markers instead. Nothing is hidden; we just note the mode.
+    const summary = document.getElementById('data-summary');
+    let banner = document.getElementById('phenotype-only-banner');
+    if (isPhenotypeOnly && !banner && summary) {
+      banner = document.createElement('div');
+      banner.id = 'phenotype-only-banner';
+      banner.style.cssText = 'margin-top:6px;padding:4px 8px;border-radius:4px;background:#eef4ff;color:#1b3a6b;font-size:12px;';
+      banner.innerHTML = '<i class="fas fa-info-circle"></i> Phenotype-only dataset: analyses run on your phenotypic markers (no histone PTMs).';
+      summary.appendChild(banner);
+    } else if (!isPhenotypeOnly && banner) {
+      banner.remove();
+    }
   },
 
   // ===== FILTERS =====
@@ -275,11 +295,14 @@ const App = {
     // Phase 2: Populate H3-PTM marker selectors
     const h3Markers = ensureArray(meta.h3_markers || []);
     const phenoMarkers = ensureArray(meta.phenotypic_markers || []);
-    const allMarkers = [...h3Markers, ...phenoMarkers];
+    // Phenotype-only: no H3 markers, so feed phenotypic markers into the H3
+    // marker selectors (ridge/violin operate on them via the backend).
+    const uiH3Markers = h3Markers.length ? h3Markers : phenoMarkers;
+    const allMarkers = [...new Set([...uiH3Markers, ...phenoMarkers])];
 
     document.querySelectorAll('.dynamic-h3-markers').forEach(sel => {
       sel.innerHTML = '';
-      h3Markers.forEach(mk => {
+      uiH3Markers.forEach(mk => {
         sel.insertAdjacentHTML('beforeend', `<option value="${mk}">${mk}</option>`);
       });
     });
@@ -833,7 +856,8 @@ const App = {
     // Ridge "overlay PTMs" checklist (used when Group-by or Color-by = H3-PTM)
     const ridgeChecks = document.getElementById('ridge-marker-checks');
     if (ridgeChecks) {
-      ridgeChecks.innerHTML = ensureArray(h3Markers).map(m =>
+      const ridgeMarkers = (h3Markers && h3Markers.length) ? h3Markers : phenoMarkers;
+      ridgeChecks.innerHTML = ensureArray(ridgeMarkers).map(m =>
         `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
            <input type="checkbox" value="${m}" checked> ${m}</label>`
       ).join('');

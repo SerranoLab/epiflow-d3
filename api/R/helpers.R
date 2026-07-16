@@ -70,6 +70,14 @@ sanitize_session_id <- function(id) {
 
 #' Load and validate an EpiFlow .rds dataset
 #' @param path Path to .rds file
+#' TRUE for phenotype-only (no-H3-PTM) datasets: the converter writes a single
+#' sentinel row per cell with H3PTM = "none". Value-based analyses use this to
+#' switch to phenotypic-marker columns instead of the empty long `value`.
+.epiflow_phenotype_only <- function(data) {
+  "H3PTM" %in% names(data) && length(data$H3PTM) > 0 &&
+    all(as.character(data$H3PTM) == "none")
+}
+
 #' @return List with data, h3_markers, phenotypic_markers, metadata
 load_epiflow_data <- function(path) {
   data <- readRDS(path)
@@ -82,6 +90,10 @@ load_epiflow_data <- function(path) {
   if (nrow(data) > 5e7) {
     stop("Dataset too large (", nrow(data), " rows); exceeds the 50M-row safety cap.")
   }
+
+  # Capture the converter's mode stamp before any dplyr transforms below can
+  # drop custom attributes, so phenotype-only detection stays robust.
+  epiflow_mode_attr <- attr(data, "epiflow_mode")
 
   # Normalize identity column
   identity_candidates <- c("identity", "Identity", "Filter", "filter",
@@ -130,6 +142,18 @@ load_epiflow_data <- function(path) {
   # Detect markers
   h3_markers <- sort(unique(data$H3PTM))
 
+  # Phenotype-only datasets (surface / cytometry panels with no histone PTMs)
+  # arrive from the converter as one sentinel row per cell: H3PTM = "none",
+  # value = NA. Detect that — via the stamped attribute, or the all-"none"
+  # sentinel as a fallback — and empty the H3 marker list so "none" never shows
+  # up as a selectable marker. Do NOT drop rows: each cell has exactly one row
+  # here and it carries all of the phenotypic-marker data.
+  phenotype_only <- identical(epiflow_mode_attr, "phenotype_only") ||
+                    (length(h3_markers) > 0 && all(h3_markers == "none"))
+  if (phenotype_only) {
+    h3_markers <- character(0)
+  }
+
   # Columns to exclude from phenotypic markers
   meta_cols <- c("cell_id", "genotype", "replicate", "identity", "cell_cycle",
                  "H3PTM", "value", "sample_id", "raw_identity", "quadrant",
@@ -170,6 +194,7 @@ load_epiflow_data <- function(path) {
   result <- list(
     data = data,
     h3_markers = safe_I(h3_markers),
+    phenotype_only = phenotype_only,
     phenotypic_markers = safe_I(phenotypic_markers),
     available_meta = safe_I(available_meta),
     genotype_levels = safe_I(geno_levels),
@@ -321,9 +346,26 @@ compute_ridge_data <- function(data, marker, group_by = "genotype",
 #' parts of the range (expected).
 compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
                                   color_by = "marker", h3_markers = NULL,
+                                  phenotypic_markers = NULL,
                                   bw = "auto", scale_mode = "robust") {
   if (!"H3PTM" %in% names(data) || !"value" %in% names(data)) {
     return(list(error = "Long-format H3PTM/value columns required"))
+  }
+  # Phenotype-only: rebuild a long frame from phenotypic wide columns so the
+  # marker machinery below runs unchanged (markers become phenotypic markers).
+  if (.epiflow_phenotype_only(data)) {
+    pheno_avail <- intersect(phenotypic_markers %||% character(0), names(data))
+    sel <- intersect(as.character(unlist(markers)), pheno_avail)
+    if (length(sel) == 0) sel <- pheno_avail
+    if (length(sel) == 0) return(list(error = "No phenotypic markers available"))
+    keep_meta <- intersect(unique(c("cell_id", group_by,
+                              if (!identical(color_by, "marker")) color_by)), names(data))
+    data <- data %>%
+      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+      dplyr::select(dplyr::all_of(c(keep_meta, sel))) %>%
+      tidyr::pivot_longer(dplyr::all_of(sel), names_to = "H3PTM", values_to = "value")
+    markers <- sel
+    h3_markers <- sel
   }
   avail <- unique(data$H3PTM)
   markers <- as.character(unlist(markers))
@@ -821,6 +863,15 @@ compute_correlations <- function(data, h3_markers, method = "pearson",
                                 include_phenotypic = FALSE,
                                 phenotypic_markers = NULL,
                                 selected_markers = NULL) {
+  # Phenotype-only: correlate phenotypic wide columns directly (no H3 value).
+  pheno_only <- .epiflow_phenotype_only(data)
+  if (pheno_only) {
+    pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for correlation"))
+    wide <- data %>%
+      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+      dplyr::select(dplyr::all_of(pheno_cols))
+  } else {
   # H3-PTM data (long → wide)
   wide <- data %>%
     dplyr::select(cell_id, H3PTM, value) %>%
@@ -828,9 +879,10 @@ compute_correlations <- function(data, h3_markers, method = "pearson",
     dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
     tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
     dplyr::select(-cell_id)
+  }
 
   # Optionally add phenotypic markers
-  if (isTRUE(include_phenotypic) && !is.null(phenotypic_markers)) {
+  if (!pheno_only && isTRUE(include_phenotypic) && !is.null(phenotypic_markers)) {
     pheno_cols <- intersect(phenotypic_markers, names(data))
     if (length(pheno_cols) > 0) {
       pheno_data <- data %>%
@@ -878,7 +930,7 @@ compute_correlations <- function(data, h3_markers, method = "pearson",
 
   # ---- REPLICATE-LEVEL correlations (primary inference) ----
   # Aggregate each marker to replicate-level means, then correlate
-  if ("replicate" %in% names(data) && "genotype" %in% names(data)) {
+  if (!pheno_only && "replicate" %in% names(data) && "genotype" %in% names(data)) {
     tryCatch({
       # Build replicate-level means for H3 markers
       rep_wide_h3 <- data %>%

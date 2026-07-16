@@ -1,0 +1,449 @@
+--- a/api/R/helpers.R
++++ b/api/R/helpers.R
+@@ -70,6 +70,14 @@
+ 
+ #' Load and validate an EpiFlow .rds dataset
+ #' @param path Path to .rds file
++#' TRUE for phenotype-only (no-H3-PTM) datasets: the converter writes a single
++#' sentinel row per cell with H3PTM = "none". Value-based analyses use this to
++#' switch to phenotypic-marker columns instead of the empty long `value`.
++.epiflow_phenotype_only <- function(data) {
++  "H3PTM" %in% names(data) && length(data$H3PTM) > 0 &&
++    all(as.character(data$H3PTM) == "none")
++}
++
+ #' @return List with data, h3_markers, phenotypic_markers, metadata
+ load_epiflow_data <- function(path) {
+   data <- readRDS(path)
+@@ -83,6 +91,10 @@
+     stop("Dataset too large (", nrow(data), " rows); exceeds the 50M-row safety cap.")
+   }
+ 
++  # Capture the converter's mode stamp before any dplyr transforms below can
++  # drop custom attributes, so phenotype-only detection stays robust.
++  epiflow_mode_attr <- attr(data, "epiflow_mode")
++
+   # Normalize identity column
+   identity_candidates <- c("identity", "Identity", "Filter", "filter",
+                            "Gate", "gate", "cluster", "Cluster",
+@@ -130,6 +142,18 @@
+   # Detect markers
+   h3_markers <- sort(unique(data$H3PTM))
+ 
++  # Phenotype-only datasets (surface / cytometry panels with no histone PTMs)
++  # arrive from the converter as one sentinel row per cell: H3PTM = "none",
++  # value = NA. Detect that — via the stamped attribute, or the all-"none"
++  # sentinel as a fallback — and empty the H3 marker list so "none" never shows
++  # up as a selectable marker. Do NOT drop rows: each cell has exactly one row
++  # here and it carries all of the phenotypic-marker data.
++  phenotype_only <- identical(epiflow_mode_attr, "phenotype_only") ||
++                    (length(h3_markers) > 0 && all(h3_markers == "none"))
++  if (phenotype_only) {
++    h3_markers <- character(0)
++  }
++
+   # Columns to exclude from phenotypic markers
+   meta_cols <- c("cell_id", "genotype", "replicate", "identity", "cell_cycle",
+                  "H3PTM", "value", "sample_id", "raw_identity", "quadrant",
+@@ -170,6 +194,7 @@
+   result <- list(
+     data = data,
+     h3_markers = safe_I(h3_markers),
++    phenotype_only = phenotype_only,
+     phenotypic_markers = safe_I(phenotypic_markers),
+     available_meta = safe_I(available_meta),
+     genotype_levels = safe_I(geno_levels),
+@@ -321,10 +346,27 @@
+ #' parts of the range (expected).
+ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
+                                   color_by = "marker", h3_markers = NULL,
++                                  phenotypic_markers = NULL,
+                                   bw = "auto", scale_mode = "robust") {
+   if (!"H3PTM" %in% names(data) || !"value" %in% names(data)) {
+     return(list(error = "Long-format H3PTM/value columns required"))
+   }
++  # Phenotype-only: rebuild a long frame from phenotypic wide columns so the
++  # marker machinery below runs unchanged (markers become phenotypic markers).
++  if (.epiflow_phenotype_only(data)) {
++    pheno_avail <- intersect(phenotypic_markers %||% character(0), names(data))
++    sel <- intersect(as.character(unlist(markers)), pheno_avail)
++    if (length(sel) == 0) sel <- pheno_avail
++    if (length(sel) == 0) return(list(error = "No phenotypic markers available"))
++    keep_meta <- intersect(unique(c("cell_id", group_by,
++                              if (!identical(color_by, "marker")) color_by)), names(data))
++    data <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(c(keep_meta, sel))) %>%
++      tidyr::pivot_longer(dplyr::all_of(sel), names_to = "H3PTM", values_to = "value")
++    markers <- sel
++    h3_markers <- sel
++  }
+   avail <- unique(data$H3PTM)
+   markers <- as.character(unlist(markers))
+   markers <- intersect(markers, avail)
+@@ -821,6 +863,15 @@
+                                 include_phenotypic = FALSE,
+                                 phenotypic_markers = NULL,
+                                 selected_markers = NULL) {
++  # Phenotype-only: correlate phenotypic wide columns directly (no H3 value).
++  pheno_only <- .epiflow_phenotype_only(data)
++  if (pheno_only) {
++    pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
++    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for correlation"))
++    wide <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(pheno_cols))
++  } else {
+   # H3-PTM data (long → wide)
+   wide <- data %>%
+     dplyr::select(cell_id, H3PTM, value) %>%
+@@ -828,9 +879,10 @@
+     dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+     tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+     dplyr::select(-cell_id)
++  }
+ 
+   # Optionally add phenotypic markers
+-  if (isTRUE(include_phenotypic) && !is.null(phenotypic_markers)) {
++  if (!pheno_only && isTRUE(include_phenotypic) && !is.null(phenotypic_markers)) {
+     pheno_cols <- intersect(phenotypic_markers, names(data))
+     if (length(pheno_cols) > 0) {
+       pheno_data <- data %>%
+@@ -878,7 +930,7 @@
+ 
+   # ---- REPLICATE-LEVEL correlations (primary inference) ----
+   # Aggregate each marker to replicate-level means, then correlate
+-  if ("replicate" %in% names(data) && "genotype" %in% names(data)) {
++  if (!pheno_only && "replicate" %in% names(data) && "genotype" %in% names(data)) {
+     tryCatch({
+       # Build replicate-level means for H3 markers
+       rep_wide_h3 <- data %>%
+--- a/api/R/phase2.R
++++ b/api/R/phase2.R
+@@ -578,6 +578,14 @@
+ 
+   # Build wide matrix for all cells
+   build_wide <- function(sub_data) {
++    # Phenotype-only: correlate phenotypic wide columns directly (no H3 value).
++    if (.epiflow_phenotype_only(sub_data)) {
++      pheno_cols <- intersect(phenotypic_markers %||% character(0), names(sub_data))
++      return(sub_data %>%
++               dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++               dplyr::select(dplyr::all_of(pheno_cols)) %>%
++               as.data.frame())
++    }
+     wide <- sub_data %>%
+       dplyr::select(cell_id, H3PTM, value) %>%
+       dplyr::filter(H3PTM %in% h3_markers) %>%
+--- a/api/R/phase3.R
++++ b/api/R/phase3.R
+@@ -18,17 +18,26 @@
+ 
+   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+ 
+-  wide <- data %>%
+-    dplyr::select(dplyr::all_of(c(intersect(meta_all, names(data)),
+-                                   pheno_cols, "H3PTM", "value"))) %>%
+-    dplyr::group_by(dplyr::across(dplyr::all_of(c(intersect(meta_all, names(data)),
+-                                                    pheno_cols))), H3PTM) %>%
+-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+-    tidyr::drop_na()
++  if (.epiflow_phenotype_only(data)) {
++    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for UMAP"))
++    wide <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(c(intersect(meta_all, names(data)), pheno_cols))) %>%
++      tidyr::drop_na(dplyr::all_of(pheno_cols))
++    h3_cols <- character(0)
++  } else {
++    wide <- data %>%
++      dplyr::select(dplyr::all_of(c(intersect(meta_all, names(data)),
++                                     pheno_cols, "H3PTM", "value"))) %>%
++      dplyr::group_by(dplyr::across(dplyr::all_of(c(intersect(meta_all, names(data)),
++                                                      pheno_cols))), H3PTM) %>%
++      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
++      tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
++      tidyr::drop_na()
+ 
+-  h3_cols <- intersect(h3_markers, names(wide))
+-  if (length(h3_cols) < 2) return(list(error = "Need at least 2 H3-PTM markers for UMAP"))
++    h3_cols <- intersect(h3_markers, names(wide))
++    if (length(h3_cols) < 2) return(list(error = "Need at least 2 H3-PTM markers for UMAP"))
++  }
+ 
+   if (nrow(wide) > max_cells) {
+     set.seed(seed)
+@@ -36,7 +45,9 @@
+   }
+ 
+   # Compute UMAP on H3-PTM features (optionally + phenotypic)
+-  feature_cols <- if (include_phenotypic && length(pheno_cols) > 0) {
++  feature_cols <- if (length(h3_cols) == 0) {
++    pheno_cols
++  } else if (include_phenotypic && length(pheno_cols) > 0) {
+     c(h3_cols, pheno_cols)
+   } else {
+     h3_cols
+@@ -97,7 +108,15 @@
+   meta_extra <- intersect(c("timepoint", "cell_type", "condition"), names(data))
+   meta_all <- c(meta_base, meta_extra)
+ 
+-  if (include_phenotypic && length(phenotypic_markers) > 0) {
++  if (.epiflow_phenotype_only(data)) {
++    pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
++    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for PCA"))
++    wide_data <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(c(intersect(meta_all, names(data)), pheno_cols)))
++    feature_cols <- pheno_cols
++    feature_label <- "phenotypic markers"
++  } else if (include_phenotypic && length(phenotypic_markers) > 0) {
+     pheno_cols <- intersect(phenotypic_markers, names(data))
+     wide_data <- data %>%
+       dplyr::select(dplyr::all_of(c(intersect(meta_all, names(data)), pheno_cols, "H3PTM", "value"))) %>%
+@@ -170,24 +189,37 @@
+                                     seed = 42) {
+   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+ 
+-  wide <- data %>%
+-    dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
+-                                   "identity", "cell_cycle")),
+-                  dplyr::any_of(pheno_cols),
+-                  H3PTM, value) %>%
+-    dplyr::group_by(dplyr::across(dplyr::any_of(c("cell_id", "genotype", "replicate",
+-                                                    "identity", "cell_cycle",
+-                                                    pheno_cols))),
+-                    H3PTM) %>%
+-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+-    tidyr::drop_na()
++  if (.epiflow_phenotype_only(data)) {
++    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for clustering"))
++    wide <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
++                                     "identity", "cell_cycle")),
++                    dplyr::any_of(pheno_cols)) %>%
++      tidyr::drop_na(dplyr::all_of(pheno_cols))
++    h3_cols <- character(0)
++  } else {
++    wide <- data %>%
++      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
++                                     "identity", "cell_cycle")),
++                    dplyr::any_of(pheno_cols),
++                    H3PTM, value) %>%
++      dplyr::group_by(dplyr::across(dplyr::any_of(c("cell_id", "genotype", "replicate",
++                                                      "identity", "cell_cycle",
++                                                      pheno_cols))),
++                      H3PTM) %>%
++      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
++      tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
++      tidyr::drop_na()
+ 
+-  h3_cols <- intersect(h3_markers, names(wide))
+-  if (length(h3_cols) < 2) return(list(error = "Need at least 2 H3-PTM markers"))
++    h3_cols <- intersect(h3_markers, names(wide))
++    if (length(h3_cols) < 2) return(list(error = "Need at least 2 H3-PTM markers"))
++  }
+ 
+   # Include phenotypic in clustering features if requested
+-  cluster_features <- if (include_phenotypic && length(pheno_cols) > 0) {
++  cluster_features <- if (length(h3_cols) == 0) {
++    pheno_cols
++  } else if (include_phenotypic && length(pheno_cols) > 0) {
+     intersect(c(h3_cols, pheno_cols), names(wide))
+   } else {
+     h3_cols
+@@ -477,16 +509,27 @@
+ 
+ # ---- Elbow / Silhouette scan for optimal k ----
+ compute_elbow <- function(data, h3_markers, k_range = 2:10,
++                          phenotypic_markers = character(0),
+                           max_cells = 50000, seed = 42) {
+-  wide <- data %>%
+-    dplyr::select(dplyr::any_of(c("cell_id")), H3PTM, value) %>%
+-    dplyr::group_by(cell_id, H3PTM) %>%
+-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+-    tidyr::drop_na()
++  if (.epiflow_phenotype_only(data)) {
++    pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
++    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 markers"))
++    wide <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(c("cell_id", pheno_cols))) %>%
++      tidyr::drop_na(dplyr::all_of(pheno_cols))
++    h3_cols <- pheno_cols
++  } else {
++    wide <- data %>%
++      dplyr::select(dplyr::any_of(c("cell_id")), H3PTM, value) %>%
++      dplyr::group_by(cell_id, H3PTM) %>%
++      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
++      tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
++      tidyr::drop_na()
+ 
+-  h3_cols <- intersect(h3_markers, names(wide))
+-  if (length(h3_cols) < 2) return(list(error = "Need at least 2 markers"))
++    h3_cols <- intersect(h3_markers, names(wide))
++    if (length(h3_cols) < 2) return(list(error = "Need at least 2 markers"))
++  }
+ 
+   if (nrow(wide) > max_cells) {
+     set.seed(seed)
+--- a/api/R/plumber.R
++++ b/api/R/plumber.R
+@@ -149,6 +149,7 @@
+   response <- list(
+     session_id = session_id,
+     n_cells = result$n_cells,
++    phenotype_only = result$phenotype_only,
+     h3_markers = result$h3_markers,
+     phenotypic_markers = result$phenotypic_markers,
+     genotype_levels = result$genotype_levels,
+@@ -249,6 +250,7 @@
+     preset = preset,
+     example_label = preset_meta$label,
+     n_cells = result$n_cells,
++    phenotype_only = result$phenotype_only,
+     h3_markers = result$h3_markers,
+     phenotypic_markers = result$phenotypic_markers,
+     genotype_levels = result$genotype_levels,
+@@ -650,6 +652,7 @@
+         group_by   = params$group_by %||% "genotype",
+         color_by   = params$color_by %||% "marker",
+         h3_markers = store$metadata$h3_markers,
++        phenotypic_markers = store$metadata$phenotypic_markers,
+         bw         = params$bandwidth %||% "auto",
+         scale_mode = params$scale_mode %||% "robust"
+       )
+@@ -1154,6 +1157,7 @@
+     compute_elbow(
+       store$filtered_data,
+       h3_markers = store$metadata$h3_markers,
++      phenotypic_markers = store$metadata$phenotypic_markers,
+       k_range    = 2:k_max
+     ),
+     error = function(e) list(error = paste("Elbow scan failed:", e$message))
+@@ -1230,7 +1234,8 @@
+       msg <- e$message
+       if (grepl("contrasts|factor|level|classes", msg, ignore.case = TRUE))
+         msg <- "GBM classification failed — the target variable needs at least 2 levels with sufficient data in each."
+-      if (grepl("xgboost", msg, ignore.case = TRUE))
++      if (grepl("xgboost", msg, ignore.case = TRUE) &&
++          !requireNamespace("xgboost", quietly = TRUE))
+         msg <- "xgboost package not installed. Run: install.packages('xgboost')"
+       list(error = msg)
+     }
+--- a/api/R/statistics.R
++++ b/api/R/statistics.R
+@@ -670,12 +670,21 @@
+   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+   meta_cols <- c("cell_id", target_var)
+ 
+-  wide <- data %>%
+-    dplyr::select(dplyr::all_of(c(meta_cols, pheno_cols, "H3PTM", "value"))) %>%
+-    dplyr::group_by(dplyr::across(dplyr::all_of(c(meta_cols, pheno_cols))), H3PTM) %>%
+-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+-    tidyr::drop_na()
++  if (.epiflow_phenotype_only(data)) {
++    # Phenotype-only: no H3 value to pivot. The all-NA "none" sentinel would make
++    # drop_na() delete every row (RF skips drop_na, which is why it worked here).
++    wide <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(c(meta_cols, pheno_cols))) %>%
++      tidyr::drop_na(dplyr::all_of(pheno_cols))
++  } else {
++    wide <- data %>%
++      dplyr::select(dplyr::all_of(c(meta_cols, pheno_cols, "H3PTM", "value"))) %>%
++      dplyr::group_by(dplyr::across(dplyr::all_of(c(meta_cols, pheno_cols))), H3PTM) %>%
++      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
++      tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
++      tidyr::drop_na()
++  }
+ 
+   # Subsample if dataset is very large (memory protection)
+   subsampled <- FALSE
+--- a/frontend/js/app.js
++++ b/frontend/js/app.js
+@@ -138,10 +138,30 @@
+     document.getElementById('report-section').classList.remove('hidden');
+     document.getElementById('tab-nav').classList.remove('hidden');
+ 
++    this.applyPhenotypeOnlyMode(meta.phenotype_only === true);
+     this.switchTab('overview');
+     this.loadCurrentTab();
+   },
+ 
++  // Hide histone-PTM-only tabs for phenotype-only datasets (no H3 markers).
++  // Their analyses run on the long-format `value` column, which is empty in
++  // phenotype-only mode. Everything else works on phenotypic markers + metadata.
++  applyPhenotypeOnlyMode(isPhenotypeOnly) {
++    // Phenotype-only datasets (no H3-PTMs) run every analysis on the phenotypic
++    // markers instead. Nothing is hidden; we just note the mode.
++    const summary = document.getElementById('data-summary');
++    let banner = document.getElementById('phenotype-only-banner');
++    if (isPhenotypeOnly && !banner && summary) {
++      banner = document.createElement('div');
++      banner.id = 'phenotype-only-banner';
++      banner.style.cssText = 'margin-top:6px;padding:4px 8px;border-radius:4px;background:#eef4ff;color:#1b3a6b;font-size:12px;';
++      banner.innerHTML = '<i class="fas fa-info-circle"></i> Phenotype-only dataset: analyses run on your phenotypic markers (no histone PTMs).';
++      summary.appendChild(banner);
++    } else if (!isPhenotypeOnly && banner) {
++      banner.remove();
++    }
++  },
++
+   // ===== FILTERS =====
+ 
+   populateFilters(meta) {
+@@ -275,11 +295,14 @@
+     // Phase 2: Populate H3-PTM marker selectors
+     const h3Markers = ensureArray(meta.h3_markers || []);
+     const phenoMarkers = ensureArray(meta.phenotypic_markers || []);
+-    const allMarkers = [...h3Markers, ...phenoMarkers];
++    // Phenotype-only: no H3 markers, so feed phenotypic markers into the H3
++    // marker selectors (ridge/violin operate on them via the backend).
++    const uiH3Markers = h3Markers.length ? h3Markers : phenoMarkers;
++    const allMarkers = [...new Set([...uiH3Markers, ...phenoMarkers])];
+ 
+     document.querySelectorAll('.dynamic-h3-markers').forEach(sel => {
+       sel.innerHTML = '';
+-      h3Markers.forEach(mk => {
++      uiH3Markers.forEach(mk => {
+         sel.insertAdjacentHTML('beforeend', `<option value="${mk}">${mk}</option>`);
+       });
+     });
+@@ -833,7 +856,8 @@
+     // Ridge "overlay PTMs" checklist (used when Group-by or Color-by = H3-PTM)
+     const ridgeChecks = document.getElementById('ridge-marker-checks');
+     if (ridgeChecks) {
+-      ridgeChecks.innerHTML = ensureArray(h3Markers).map(m =>
++      const ridgeMarkers = (h3Markers && h3Markers.length) ? h3Markers : phenoMarkers;
++      ridgeChecks.innerHTML = ensureArray(ridgeMarkers).map(m =>
+         `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
+            <input type="checkbox" value="${m}" checked> ${m}</label>`
+       ).join('');
+--- a/frontend/js/charts/violinPlot.js
++++ b/frontend/js/charts/violinPlot.js
+@@ -294,7 +294,18 @@
+     const maxDensity = d3.max(v.density_y);
+     const widthScale = d3.scaleLinear().domain([0, maxDensity]).range([0, maxWidth / 2]);
+ 
+-    const points = v.density_x.map((dx, i) => ({ x: dx, y: v.density_y[i] }));
++    // Trim the KDE to just past the data range so violins taper smoothly toward
++    // the edges without spilling past the axis (small seaborn-style cut). The
++    // axis already pads 5%, so a 4% cut stays inside it. Falls back to the full
++    // curve if the trim would leave too few points (near-constant marker).
++    const cut = 0.04 * ((v.max - v.min) || 1);
++    const lo = v.min - cut, hi = v.max + cut;
++    let points = v.density_x
++      .map((dx, i) => ({ x: dx, y: v.density_y[i] }))
++      .filter(p => p.x >= lo && p.x <= hi);
++    if (points.length < 2) {
++      points = v.density_x.map((dx, i) => ({ x: dx, y: v.density_y[i] }));
++    }
+     const rightPath = points.map(p => [centerX + widthScale(p.y), yScale(p.x)]);
+     const leftPath = points.map(p => [centerX - widthScale(p.y), yScale(p.x)]).reverse();
+     const violinPath = [...rightPath, ...leftPath];

@@ -578,6 +578,14 @@ compute_per_group_correlation <- function(data, h3_markers, group_by = "genotype
 
   # Build wide matrix for all cells
   build_wide <- function(sub_data) {
+    # Phenotype-only: correlate phenotypic wide columns directly (no H3 value).
+    if (.epiflow_phenotype_only(sub_data)) {
+      pheno_cols <- intersect(phenotypic_markers %||% character(0), names(sub_data))
+      return(sub_data %>%
+               dplyr::distinct(cell_id, .keep_all = TRUE) %>%
+               dplyr::select(dplyr::all_of(pheno_cols)) %>%
+               as.data.frame())
+    }
     wide <- sub_data %>%
       dplyr::select(cell_id, H3PTM, value) %>%
       dplyr::filter(H3PTM %in% h3_markers) %>%

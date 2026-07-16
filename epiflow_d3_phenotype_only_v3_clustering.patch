@@ -1,0 +1,55 @@
+--- a/api/R/phase3.R
++++ b/api/R/phase3.R
+@@ -189,24 +189,37 @@
+                                     seed = 42) {
+   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+ 
+-  wide <- data %>%
+-    dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
+-                                   "identity", "cell_cycle")),
+-                  dplyr::any_of(pheno_cols),
+-                  H3PTM, value) %>%
+-    dplyr::group_by(dplyr::across(dplyr::any_of(c("cell_id", "genotype", "replicate",
+-                                                    "identity", "cell_cycle",
+-                                                    pheno_cols))),
+-                    H3PTM) %>%
+-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
+-    tidyr::drop_na()
++  if (.epiflow_phenotype_only(data)) {
++    if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for clustering"))
++    wide <- data %>%
++      dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
++                                     "identity", "cell_cycle")),
++                    dplyr::any_of(pheno_cols)) %>%
++      tidyr::drop_na(dplyr::all_of(pheno_cols))
++    h3_cols <- character(0)
++  } else {
++    wide <- data %>%
++      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
++                                     "identity", "cell_cycle")),
++                    dplyr::any_of(pheno_cols),
++                    H3PTM, value) %>%
++      dplyr::group_by(dplyr::across(dplyr::any_of(c("cell_id", "genotype", "replicate",
++                                                      "identity", "cell_cycle",
++                                                      pheno_cols))),
++                      H3PTM) %>%
++      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
++      tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
++      tidyr::drop_na()
+ 
+-  h3_cols <- intersect(h3_markers, names(wide))
+-  if (length(h3_cols) < 2) return(list(error = "Need at least 2 H3-PTM markers"))
++    h3_cols <- intersect(h3_markers, names(wide))
++    if (length(h3_cols) < 2) return(list(error = "Need at least 2 H3-PTM markers"))
++  }
+ 
+   # Include phenotypic in clustering features if requested
+-  cluster_features <- if (include_phenotypic && length(pheno_cols) > 0) {
++  cluster_features <- if (length(h3_cols) == 0) {
++    pheno_cols
++  } else if (include_phenotypic && length(pheno_cols) > 0) {
+     intersect(c(h3_cols, pheno_cols), names(wide))
+   } else {
+     h3_cols
