@@ -16,3 +16,7 @@ test_condition.rds
 # Never commit certs / server-only dirs
 /certs/
 /certbot-webroot/
+# local working artifacts
+*.zip
+epiflow_d3_phenotype_only_*.patch
+PHENOTYPE_ONLY_APPLY.md
