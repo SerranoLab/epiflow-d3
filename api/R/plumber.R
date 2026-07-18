@@ -771,6 +771,29 @@ function(session_id, req) {
   markers <- params$markers %||% store$metadata$h3_markers
   if (!is.null(params$selected_markers)) markers <- params$selected_markers
 
+  # Replicate-awareness: mixed-model inference needs >= 2 biological replicates
+  # per group. With one replicate the random effect is unidentifiable, so return
+  # a clear message instead of an opaque "no models could be fit".
+  comp_var <- params$comparison_var %||% "genotype"
+  if (!isTRUE(params$use_cells_as_replicates) &&
+      "replicate" %in% names(store$filtered_data) &&
+      comp_var %in% names(store$filtered_data)) {
+    reps_pg <- tryCatch(
+      store$filtered_data %>%
+        dplyr::distinct(.data[[comp_var]], replicate) %>%
+        dplyr::count(.data[[comp_var]], name = "n_rep"),
+      error = function(e) NULL)
+    if (!is.null(reps_pg) && nrow(reps_pg) > 0 &&
+        min(reps_pg$n_rep, na.rm = TRUE) < 2) {
+      return(list(error = paste0(
+        "This dataset has fewer than 2 biological replicates per group (minimum observed: ",
+        min(reps_pg$n_rep, na.rm = TRUE),
+        "). Mixed-model inference is not identifiable with a single replicate, so no ",
+        "p-values are reported. Use the ridge, violin, and effect-size views to describe ",
+        "the data, and add biological replicates for confirmatory testing.")))
+    }
+  }
+
   result <- tryCatch(
     run_all_markers_lmm(
       store$filtered_data,
@@ -1239,6 +1262,29 @@ function(session_id, req) {
         msg <- "xgboost package not installed. Run: install.packages('xgboost')"
       list(error = msg)
     }
+  )
+}
+
+#* Diagnostic classifier with grouped (leave-one-sample-out) cross-validation.
+#* Splits by biological sample, not cell, so accuracy reflects generalization to
+#* new samples. Refuses to report a number without >= 2 samples per class.
+#* @post /api/ml/diagnostic/<session_id>
+#* @serializer json list(auto_unbox = TRUE)
+function(session_id, req) {
+  store <- get_session(session_id)
+  if (is.null(store)) return(list(error = "Session not found"))
+  params <- req$body
+  tryCatch(
+    run_diagnostic_cv(
+      store$filtered_data,
+      target_var         = params$target_var %||% "genotype",
+      method             = params$method %||% "rf",
+      h3_markers         = store$metadata$h3_markers,
+      phenotypic_markers = store$metadata$phenotypic_markers,
+      selected_features  = params$selected_features,
+      n_trees            = params$n_trees %||% 300
+    ),
+    error = function(e) list(error = paste("Diagnostic CV failed:", e$message))
   )
 }
 

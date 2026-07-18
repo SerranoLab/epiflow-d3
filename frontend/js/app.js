@@ -967,6 +967,7 @@ const App = {
     document.getElementById('run-correlation-btn').addEventListener('click', () => this.runCorrelation());
     document.getElementById('run-rf-btn').addEventListener('click', () => this.runRandomForest());
     document.getElementById('run-gbm-btn').addEventListener('click', () => this.runGBM());
+    document.getElementById('run-groupedcv-btn').addEventListener('click', () => this.runGroupedCV());
     document.getElementById('run-signatures-btn').addEventListener('click', () => this.runSignatures());
     document.getElementById('run-all-ml-btn').addEventListener('click', () => this.runAllML());
     document.getElementById('run-diagnostic-btn').addEventListener('click', () => this.runDiagnostic());
@@ -2189,9 +2190,17 @@ const App = {
     if (!n) return '';
     const tv = data.target_var || 'target';
     const baseline = (100 / n).toFixed(1);
+    // Circularity guardrail: classifying identity from the markers that defined
+    // it is tautological, so near-perfect accuracy is not evidence of anything.
+    const circular = String(tv).toLowerCase() === 'identity'
+      ? `<div style="margin-top:6px;padding:6px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;font-size:11px;color:#9a3412;">
+      <strong>⚠ Circularity:</strong> if this identity was gated from these same markers, high accuracy is expected and not a finding. For a meaningful test, classify genotype or condition instead.</div>`
+      : '';
     return `<div style="margin-bottom:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e3a5f;">
       <strong>Classifying ${tv}</strong> — ${n} classes${classes.length ? ` (${classes.join(', ')})` : ''}
-      · chance baseline ≈ ${baseline}%</div>`;
+      · chance baseline ≈ ${baseline}%</div>
+      <div style="margin-top:6px;padding:6px 10px;background:#fefce8;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#854d0e;">
+      <strong>Exploratory (cell-level):</strong> this split is by cell, so cells from one sample land in both train and test; accuracy can reflect batch or sample fingerprints, not generalization. For a diagnostic estimate, use the grouped-CV test (splits by biological sample).</div>${circular}`;
   },
 
   async runRandomForest() {
@@ -2255,6 +2264,70 @@ const App = {
       this.addCSVExportButton('ml-gbm-results', 'epiflow-gbm-results.csv');
     } catch (err) {
       this.showInlineMessage('ml-message', err.message, 'error');
+    }
+    finally { this.hideLoading(); }
+  },
+
+  async runGroupedCV() {
+    const method = document.getElementById('diagcv-method').value;
+    this.showLoading('Grouped leave-one-sample-out CV (' + method.toUpperCase() + ')...');
+    this.hideInlineMessage('groupedcv-message');
+    try {
+      const target = document.getElementById('ml-target').value;
+      const selectedFeatures = this.getSelectedFeatures('ml-feature-checkboxes');
+      const data = await EpiFlowAPI.runDiagnosticCV({ target_var: target, method: method, selected_features: selectedFeatures });
+      const box = document.getElementById('ml-groupedcv-results');
+
+      if (data.error) {
+        const spc = data.samples_per_class
+          ? '<div style="margin-top:6px;font-size:11px;color:#64748b;">Samples per class: ' +
+            Object.entries(data.samples_per_class).map(([k, v]) => k + ' = ' + v).join(', ') + '</div>' : '';
+        box.innerHTML = '<div style="padding:10px 12px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#92400e;">' +
+          '<strong>Not reported.</strong> ' + data.error + spc + '</div>';
+        document.getElementById('ml-groupedcv-importance').innerHTML = '';
+        return;
+      }
+
+      const pct = x => (Number(x) * 100).toFixed(1) + '%';
+      const spc = data.samples_per_class
+        ? Object.entries(data.samples_per_class).map(([k, v]) => k + ' = ' + v).join(', ') : '';
+      const recalls = data.per_class_recall
+        ? Object.entries(data.per_class_recall).map(([k, v]) => k + ' ' + pct(v)).join(' \u00b7 ') : '';
+      const classes = ensureArray(data.classes);
+      const cmRows = ensureArray(data.confusion_matrix);
+      let cm = '';
+      if (cmRows.length) {
+        cm = '<div style="font-size:11px;color:#64748b;margin:8px 0 2px;">Confusion (held-out cells) \u00b7 rows = predicted, cols = actual</div>' +
+          '<table class="stats-table"><tr><th>pred \\ actual</th>' + classes.map(c => '<th>' + c + '</th>').join('') + '</tr>' +
+          cmRows.map(r => '<tr><td>' + r.predicted + '</td>' + classes.map(c => '<td>' + (r[c] != null ? r[c] : 0) + '</td>').join('') + '</tr>').join('') +
+          '</table>';
+      }
+
+      box.innerHTML =
+        '<div style="margin-bottom:6px;padding:6px 10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:11px;color:#065f46;">' +
+        '<strong>' + String(data.method || '').toUpperCase() + '</strong> \u00b7 ' + data.cv_type + ' \u00b7 ' +
+        data.n_samples + ' biological samples (' + spc + ') \u00b7 splits by sample, not cell</div>' +
+        '<table class="stats-table">' +
+        '<tr><th>Metric</th><th>Value</th></tr>' +
+        '<tr><td>Sample-level accuracy (majority vote)</td><td><strong>' + pct(data.sample_accuracy) + '</strong></td></tr>' +
+        '<tr><td>Held-out cell accuracy</td><td>' + pct(data.test_accuracy) + '</td></tr>' +
+        '<tr><td>Balanced accuracy</td><td>' + pct(data.balanced_accuracy) + '</td></tr>' +
+        '<tr><td>Macro F1</td><td>' + Number(data.macro_f1).toFixed(3) + '</td></tr>' +
+        '<tr><td>Per-fold accuracy (mean \u00b1 SD)</td><td>' + pct(data.fold_accuracy_mean) + ' \u00b1 ' + (Number(data.fold_accuracy_sd) * 100).toFixed(1) + '%</td></tr>' +
+        '<tr><td>Per-class recall</td><td>' + recalls + '</td></tr>' +
+        '</table>' + cm +
+        '<div style="margin-top:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;font-size:10px;color:#1e3a5f;">' +
+        'Sample-level accuracy is the diagnostic-relevant number: it asks whether a whole held-out sample is called correctly. ' +
+        'With few samples this is a feasibility estimate, not validation.</div>';
+
+      if (Array.isArray(data.importance) && data.importance.length && data.importance[0].feature !== undefined) {
+        this.renderImportanceChart('ml-groupedcv-importance', data.importance);
+      } else {
+        document.getElementById('ml-groupedcv-importance').innerHTML = '';
+      }
+      this.addCSVExportButton('ml-groupedcv-results', 'epiflow-groupedcv-results.csv');
+    } catch (err) {
+      this.showInlineMessage('groupedcv-message', err.message, 'error');
     }
     finally { this.hideLoading(); }
   },
@@ -3264,7 +3337,7 @@ const App = {
     svg.append('text')
       .attr('x', (size + margin.left + margin.right) / 2).attr('y', 34)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b')
-      .text('Fisher z-transform · * = BH-adjusted p<0.05');
+      .text('Δr = correlation shift (exploratory) · no valid replicate-level significance test');
 
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
@@ -3303,15 +3376,13 @@ const App = {
           .attr('x', xScale(colMk)).attr('y', yScale(rowMk))
           .attr('width', xScale.bandwidth()).attr('height', yScale.bandwidth())
           .attr('fill', colorScale(delta))
-          .attr('stroke', pVal < 0.05 ? '#1a202c' : '#fff')
-          .attr('stroke-width', pVal < 0.05 ? 1.5 : 0.5)
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 0.5)
           .attr('rx', 2)
           .on('mouseover', (event) => {
             tooltip.transition().duration(100).style('opacity', 1);
             tooltip.html(`<strong>${rowMk}</strong> × <strong>${colMk}</strong><br>
-              Δr = ${delta.toFixed(3)}<br>
-              p(adj) = ${pVal < 0.001 ? pVal.toExponential(2) : pVal.toFixed(4)}
-              ${pVal < 0.05 ? ' *' : ''}`);
+              Δr = ${delta.toFixed(3)} (exploratory)`);
           })
           .on('mousemove', (event) => {
             tooltip.style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 20) + 'px');
@@ -3824,7 +3895,7 @@ const App = {
         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
         <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication.</p>
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
-        <p><strong>Differential correlation:</strong> Fisher z-transform was used to compare per-group Pearson/Spearman correlations, with replicate-level N used by default for the standard error calculation.</p>
+        <p><strong>Differential correlation:</strong> Per-group Pearson/Spearman correlations are compared as an exploratory descriptor (Δr). No replicate-level significance test is reported: correlations are computed across cells, so putting replicate N into a cell-derived Fisher-z SE is not a coherent sampling model. Δr shows where co-regulation shifts and should be confirmed with per-replicate correlation or a hierarchical bootstrap.</p>
         <p><strong>Machine learning:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Note: cell-level train/test splits may overestimate accuracy due to replicate leakage; leave-one-replicate-out CV is recommended for rigorous validation.</p>
         <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.3.4 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
       </div>

@@ -1,0 +1,346 @@
+--- a/api/R/statistics.R
++++ b/api/R/statistics.R
+@@ -710,7 +710,12 @@
+ 
+   set.seed(42)
+   n <- nrow(wide)
+-  train_idx <- sample(n, floor(n * train_fraction))
++  # Stratified split (mirror Random Forest) so every class is represented in
++  # both train and test; a plain random split can drop rare populations.
++  train_idx <- tryCatch(
++    as.integer(caret::createDataPartition(target, p = train_fraction, list = FALSE)),
++    error = function(e) sample(n, floor(n * train_fraction))
++  )
+ 
+   X_train <- as.matrix(wide[train_idx, predictor_cols])
+   X_test <- as.matrix(wide[-train_idx, predictor_cols])
+@@ -1059,3 +1064,209 @@
+     stratify_by = stratify_by
+   )
+ }
++
++# ============================================================================
++# Grouped (leave-one-sample-out) cross-validation for diagnostic classification
++# ----------------------------------------------------------------------------
++# Splits by BIOLOGICAL SAMPLE, never by cell, so held-out samples measure
++# generalization to new samples (the diagnostic/prognostic question). Refuses to
++# report a number when there are too few samples per class to estimate it.
++# ============================================================================
++
++# Biological-sample key: cells from one prep (target label x replicate) stay
++# together. Returns NULL when there is no replicate structure to split on.
++.epiflow_sample_key <- function(df, target_var) {
++  if ("replicate" %in% names(df) && dplyr::n_distinct(df$replicate) > 1) {
++    paste(df[[target_var]], df$replicate, sep = "::")
++  } else {
++    NULL
++  }
++}
++
++# Grouped CV. fit_fn(Xtr, ytr[factor]) -> model; predict_fn(model, Xte) -> char.
++# impute_fn(Xtr) -> list(apply=fn) is fit on the TRAINING fold only.
++.epiflow_grouped_cv <- function(X, y, sample_id, fit_fn, predict_fn,
++                                impute_fn = NULL, min_samples_per_class = 2) {
++  X <- as.data.frame(X); y <- as.character(y); sid <- as.character(sample_id)
++  keep <- !is.na(y) & !is.na(sid)
++  X <- X[keep, , drop = FALSE]; y <- y[keep]; sid <- sid[keep]
++
++  samples    <- unique(sid)
++  samp_class <- vapply(samples, function(s) y[sid == s][1], character(1))
++  classes    <- sort(unique(y))
++  per_class  <- table(factor(samp_class, levels = classes))
++
++  if (length(samples) < 3 || any(per_class < min_samples_per_class)) {
++    return(list(feasible = FALSE, n_samples = length(samples),
++      samples_per_class = as.list(setNames(as.integer(per_class), names(per_class))),
++      message = paste0(
++        "Grouped cross-validation needs at least ", min_samples_per_class,
++        " biological samples per class (one to hold out, one to train on). Observed: ",
++        paste(sprintf("%s=%d", names(per_class), as.integer(per_class)), collapse = ", "),
++        ". Add biological replicates. A cell-level accuracy is not reported because it does ",
++        "not generalize to new samples.")))
++  }
++
++  set.seed(42)
++  n_samp <- length(samples)
++  k <- if (n_samp <= 10) n_samp else 5
++  fold_of <- integer(n_samp); names(fold_of) <- samples
++  for (cl in classes) {                       # stratify folds by class at sample level
++    s_cl <- sample(samples[samp_class == cl])
++    fold_of[s_cl] <- (seq_along(s_cl) - 1) %% k + 1
++  }
++
++  cell_true <- character(0); cell_pred <- character(0)
++  samp_true <- character(0); samp_pred <- character(0); fold_acc <- numeric(0)
++
++  for (f in sort(unique(fold_of))) {
++    test_s <- names(fold_of)[fold_of == f]
++    te <- sid %in% test_s; tr <- !te
++    if (length(unique(y[tr])) < 2) next
++    Xtr <- X[tr, , drop = FALSE]; Xte <- X[te, , drop = FALSE]; ytr <- y[tr]
++    if (!is.null(impute_fn)) { pp <- impute_fn(Xtr); Xtr <- pp$apply(Xtr); Xte <- pp$apply(Xte) }
++    model <- tryCatch(fit_fn(Xtr, factor(ytr)), error = function(e) NULL)
++    if (is.null(model)) next
++    pr <- tryCatch(as.character(predict_fn(model, Xte)),
++                   error = function(e) rep(NA_character_, sum(te)))
++    yte <- y[te]
++    cell_true <- c(cell_true, yte); cell_pred <- c(cell_pred, pr)
++    fold_acc  <- c(fold_acc, mean(pr == yte, na.rm = TRUE))
++    for (s in test_s) {                        # sample-level majority vote
++      idx <- sid[te] == s; prs <- pr[idx]; prs <- prs[!is.na(prs)]
++      if (!length(prs)) next
++      maj <- names(sort(table(prs), decreasing = TRUE))[1]
++      samp_true <- c(samp_true, samp_class[samples == s]); samp_pred <- c(samp_pred, maj)
++    }
++  }
++  if (!length(cell_true))
++    return(list(feasible = FALSE, n_samples = n_samp,
++                message = "Grouped CV could not fit any fold (insufficient class overlap across samples)."))
++
++  recalls <- vapply(classes, function(cl) { i <- cell_true == cl
++    if (!any(i)) NA_real_ else mean(cell_pred[i] == cl, na.rm = TRUE) }, numeric(1))
++  f1s <- vapply(classes, function(cl) {
++    tp <- sum(cell_pred == cl & cell_true == cl); fp <- sum(cell_pred == cl & cell_true != cl)
++    fn <- sum(cell_pred != cl & cell_true == cl)
++    prec <- if (tp + fp > 0) tp/(tp+fp) else 0; rec <- if (tp + fn > 0) tp/(tp+fn) else 0
++    if (prec + rec > 0) 2*prec*rec/(prec+rec) else 0 }, numeric(1))
++  cm <- table(Predicted = cell_pred, Actual = cell_true)
++
++  list(feasible = TRUE,
++    cv_type = if (n_samp <= 10) "leave-one-sample-out" else paste0("grouped ", k, "-fold"),
++    n_samples = n_samp,
++    samples_per_class = as.list(setNames(as.integer(per_class), names(per_class))),
++    test_accuracy = mean(cell_pred == cell_true, na.rm = TRUE),   # held-out cell accuracy
++    balanced_accuracy = mean(recalls, na.rm = TRUE),
++    macro_f1 = mean(f1s, na.rm = TRUE),
++    sample_accuracy = if (length(samp_true)) mean(samp_pred == samp_true, na.rm = TRUE) else NA_real_,
++    fold_accuracy_mean = mean(fold_acc, na.rm = TRUE),
++    fold_accuracy_sd = stats::sd(fold_acc, na.rm = TRUE),
++    per_class_recall = as.list(setNames(round(recalls, 4), classes)),
++    confusion_matrix = as.data.frame.matrix(cm) %>% tibble::rownames_to_column("predicted"))
++}
++
++# Diagnostic classifier: grouped-CV wrapper for rf / gbm / lda.
++run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
++                              h3_markers = NULL, phenotypic_markers = NULL,
++                              selected_features = NULL, n_trees = 300,
++                              max_cells = 50000) {
++  meta_cols  <- c("cell_id", target_var, "replicate", "identity", "cell_cycle")
++  pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
++
++  if (.epiflow_phenotype_only(data)) {
++    wide <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE) %>%
++      dplyr::select(dplyr::all_of(intersect(c(meta_cols, pheno_cols), names(data))))
++    h3_cols <- character(0)
++  } else {
++    wide <- data %>%
++      dplyr::select(dplyr::all_of(intersect(c(meta_cols, pheno_cols, "H3PTM", "value"), names(data)))) %>%
++      dplyr::group_by(dplyr::across(dplyr::all_of(intersect(c(meta_cols, pheno_cols), names(data)))), H3PTM) %>%
++      dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
++      tidyr::pivot_wider(names_from = H3PTM, values_from = value)
++    h3_cols <- intersect(h3_markers, names(wide))
++  }
++  if (nrow(wide) > max_cells) { set.seed(42); wide <- wide[sample(nrow(wide), max_cells), ] }
++
++  predictor_cols <- unique(c(h3_cols, pheno_cols))
++  predictor_cols <- predictor_cols[predictor_cols %in% names(wide)]
++  if (!is.null(selected_features) && length(selected_features) > 0)
++    predictor_cols <- intersect(selected_features, predictor_cols)
++  if (length(predictor_cols) >= 1) {
++    na_frac <- sapply(wide[, predictor_cols, drop = FALSE], function(x) mean(is.na(x)))
++    predictor_cols <- predictor_cols[na_frac < 0.1]
++  }
++  if (length(predictor_cols) < 2) return(list(error = "Not enough valid predictors"))
++
++  wide$.target <- factor(wide[[target_var]])
++  if (nlevels(wide$.target) < 2) return(list(error = "Target needs at least 2 classes"))
++
++  sample_id <- .epiflow_sample_key(wide, target_var)
++  if (is.null(sample_id)) return(list(
++    error = paste0("Diagnostic (generalization) testing needs biological replicates: this ",
++      "dataset has one replicate per group, so held-out-sample accuracy cannot be estimated. ",
++      "Add replicates, or use the LMM for per-marker inference."),
++    needs_replicates = TRUE))
++
++  learners <- switch(method,
++    rf = list(
++      fit  = function(Xtr, ytr) randomForest::randomForest(x = as.data.frame(Xtr), y = ytr, ntree = n_trees),
++      pred = function(m, Xte) predict(m, as.data.frame(Xte))),
++    lda = list(
++      fit  = function(Xtr, ytr) MASS::lda(x = as.data.frame(Xtr), grouping = ytr),
++      pred = function(m, Xte) predict(m, as.data.frame(Xte))$class),
++    gbm = list(
++      fit = function(Xtr, ytr) {
++        lv <- levels(ytr); ncl <- length(lv)
++        par <- list(objective = if (ncl == 2) "binary:logistic" else "multi:softprob",
++                    eval_metric = if (ncl == 2) "logloss" else "mlogloss", max_depth = 6, eta = 0.1)
++        if (ncl > 2) par$num_class <- ncl
++        list(m = xgboost::xgb.train(par, xgboost::xgb.DMatrix(as.matrix(Xtr), label = as.integer(ytr) - 1L),
++                                    nrounds = n_trees, verbose = 0), lv = lv, ncl = ncl)
++      },
++      pred = function(mo, Xte) {
++        raw <- predict(mo$m, xgboost::xgb.DMatrix(as.matrix(Xte)))
++        if (mo$ncl == 2) idx <- as.integer(raw > 0.5)
++        else { mm <- if (is.matrix(raw)) raw else matrix(raw, ncol = mo$ncl, byrow = TRUE)
++               idx <- max.col(mm, ties.method = "first") - 1L }
++        mo$lv[idx + 1L]
++      }),
++    NULL)
++  if (is.null(learners)) return(list(error = paste("Unknown method:", method)))
++
++  impute_fn <- function(Xtr) {
++    meds <- lapply(as.data.frame(Xtr), function(x) { md <- stats::median(x, na.rm = TRUE); if (is.na(md)) 0 else md })
++    list(apply = function(X) { X <- as.data.frame(X)
++      for (nm in names(meds)) { v <- X[[nm]]; v[is.na(v)] <- meds[[nm]]; X[[nm]] <- v }; X })
++  }
++
++  cv <- .epiflow_grouped_cv(wide[, predictor_cols, drop = FALSE], wide$.target, sample_id,
++                            fit_fn = learners$fit, predict_fn = learners$pred, impute_fn = impute_fn)
++  if (isFALSE(cv$feasible))
++    return(c(list(error = cv$message, needs_replicates = TRUE),
++             cv[intersect(c("n_samples", "samples_per_class"), names(cv))]))
++
++  importance <- tryCatch({
++    Xf <- impute_fn(wide[, predictor_cols, drop = FALSE])$apply(wide[, predictor_cols, drop = FALSE])
++    if (method == "rf") {
++      rf <- randomForest::randomForest(x = Xf, y = wide$.target, ntree = n_trees, importance = TRUE)
++      data.frame(feature = rownames(randomForest::importance(rf)),
++                 importance = as.numeric(randomForest::importance(rf)[, "MeanDecreaseGini"]),
++                 row.names = NULL)
++    } else if (method == "gbm") {
++      lv <- levels(wide$.target); ncl <- length(lv)
++      par <- list(objective = if (ncl == 2) "binary:logistic" else "multi:softprob",
++                  eval_metric = if (ncl == 2) "logloss" else "mlogloss", max_depth = 6, eta = 0.1)
++      if (ncl > 2) par$num_class <- ncl
++      m <- xgboost::xgb.train(par, xgboost::xgb.DMatrix(as.matrix(Xf), label = as.integer(wide$.target) - 1L),
++                              nrounds = n_trees, verbose = 0)
++      ii <- xgboost::xgb.importance(feature_names = predictor_cols, model = m)
++      data.frame(feature = ii$Feature, importance = ii$Gain)
++    } else NULL
++  }, error = function(e) NULL)
++
++  c(list(method = method, target_var = target_var,
++         classes = levels(wide$.target), n_classes = nlevels(wide$.target),
++         importance = importance, n_cells_used = nrow(wide)),
++    cv[setdiff(names(cv), "feasible")])
++}
+--- a/api/R/plumber.R
++++ b/api/R/plumber.R
+@@ -771,6 +771,29 @@
+   markers <- params$markers %||% store$metadata$h3_markers
+   if (!is.null(params$selected_markers)) markers <- params$selected_markers
+ 
++  # Replicate-awareness: mixed-model inference needs >= 2 biological replicates
++  # per group. With one replicate the random effect is unidentifiable, so return
++  # a clear message instead of an opaque "no models could be fit".
++  comp_var <- params$comparison_var %||% "genotype"
++  if (!isTRUE(params$use_cells_as_replicates) &&
++      "replicate" %in% names(store$filtered_data) &&
++      comp_var %in% names(store$filtered_data)) {
++    reps_pg <- tryCatch(
++      store$filtered_data %>%
++        dplyr::distinct(.data[[comp_var]], replicate) %>%
++        dplyr::count(.data[[comp_var]], name = "n_rep"),
++      error = function(e) NULL)
++    if (!is.null(reps_pg) && nrow(reps_pg) > 0 &&
++        min(reps_pg$n_rep, na.rm = TRUE) < 2) {
++      return(list(error = paste0(
++        "This dataset has fewer than 2 biological replicates per group (minimum observed: ",
++        min(reps_pg$n_rep, na.rm = TRUE),
++        "). Mixed-model inference is not identifiable with a single replicate, so no ",
++        "p-values are reported. Use the ridge, violin, and effect-size views to describe ",
++        "the data, and add biological replicates for confirmatory testing.")))
++    }
++  }
++
+   result <- tryCatch(
+     run_all_markers_lmm(
+       store$filtered_data,
+@@ -1242,6 +1265,29 @@
+   )
+ }
+ 
++#* Diagnostic classifier with grouped (leave-one-sample-out) cross-validation.
++#* Splits by biological sample, not cell, so accuracy reflects generalization to
++#* new samples. Refuses to report a number without >= 2 samples per class.
++#* @post /api/ml/diagnostic/<session_id>
++#* @serializer json list(auto_unbox = TRUE)
++function(session_id, req) {
++  store <- get_session(session_id)
++  if (is.null(store)) return(list(error = "Session not found"))
++  params <- req$body
++  tryCatch(
++    run_diagnostic_cv(
++      store$filtered_data,
++      target_var         = params$target_var %||% "genotype",
++      method             = params$method %||% "rf",
++      h3_markers         = store$metadata$h3_markers,
++      phenotypic_markers = store$metadata$phenotypic_markers,
++      selected_features  = params$selected_features,
++      n_trees            = params$n_trees %||% 300
++    ),
++    error = function(e) list(error = paste("Diagnostic CV failed:", e$message))
++  )
++}
++
+ #* Extract H3-PTM signatures per group
+ #* @post /api/ml/signatures/<session_id>
+ #* @serializer json list(auto_unbox = TRUE)
+--- a/frontend/js/app.js
++++ b/frontend/js/app.js
+@@ -2189,9 +2189,17 @@
+     if (!n) return '';
+     const tv = data.target_var || 'target';
+     const baseline = (100 / n).toFixed(1);
++    // Circularity guardrail: classifying identity from the markers that defined
++    // it is tautological, so near-perfect accuracy is not evidence of anything.
++    const circular = String(tv).toLowerCase() === 'identity'
++      ? `<div style="margin-top:6px;padding:6px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;font-size:11px;color:#9a3412;">
++      <strong>⚠ Circularity:</strong> if this identity was gated from these same markers, high accuracy is expected and not a finding. For a meaningful test, classify genotype or condition instead.</div>`
++      : '';
+     return `<div style="margin-bottom:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e3a5f;">
+       <strong>Classifying ${tv}</strong> — ${n} classes${classes.length ? ` (${classes.join(', ')})` : ''}
+-      · chance baseline ≈ ${baseline}%</div>`;
++      · chance baseline ≈ ${baseline}%</div>
++      <div style="margin-top:6px;padding:6px 10px;background:#fefce8;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#854d0e;">
++      <strong>Exploratory (cell-level):</strong> this split is by cell, so cells from one sample land in both train and test; accuracy can reflect batch or sample fingerprints, not generalization. For a diagnostic estimate, use the grouped-CV test (splits by biological sample).</div>${circular}`;
+   },
+ 
+   async runRandomForest() {
+@@ -3264,7 +3272,7 @@
+     svg.append('text')
+       .attr('x', (size + margin.left + margin.right) / 2).attr('y', 34)
+       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b')
+-      .text('Fisher z-transform · * = BH-adjusted p<0.05');
++      .text('Δr = correlation shift (exploratory) · no valid replicate-level significance test');
+ 
+     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+ 
+@@ -3303,15 +3311,13 @@
+           .attr('x', xScale(colMk)).attr('y', yScale(rowMk))
+           .attr('width', xScale.bandwidth()).attr('height', yScale.bandwidth())
+           .attr('fill', colorScale(delta))
+-          .attr('stroke', pVal < 0.05 ? '#1a202c' : '#fff')
+-          .attr('stroke-width', pVal < 0.05 ? 1.5 : 0.5)
++          .attr('stroke', '#fff')
++          .attr('stroke-width', 0.5)
+           .attr('rx', 2)
+           .on('mouseover', (event) => {
+             tooltip.transition().duration(100).style('opacity', 1);
+             tooltip.html(`<strong>${rowMk}</strong> × <strong>${colMk}</strong><br>
+-              Δr = ${delta.toFixed(3)}<br>
+-              p(adj) = ${pVal < 0.001 ? pVal.toExponential(2) : pVal.toFixed(4)}
+-              ${pVal < 0.05 ? ' *' : ''}`);
++              Δr = ${delta.toFixed(3)} (exploratory)`);
+           })
+           .on('mousemove', (event) => {
+             tooltip.style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 20) + 'px');
+@@ -3824,7 +3830,7 @@
+         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
+         <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication.</p>
+         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
+-        <p><strong>Differential correlation:</strong> Fisher z-transform was used to compare per-group Pearson/Spearman correlations, with replicate-level N used by default for the standard error calculation.</p>
++        <p><strong>Differential correlation:</strong> Per-group Pearson/Spearman correlations are compared as an exploratory descriptor (Δr). No replicate-level significance test is reported: correlations are computed across cells, so putting replicate N into a cell-derived Fisher-z SE is not a coherent sampling model. Δr shows where co-regulation shifts and should be confirmed with per-replicate correlation or a hierarchical bootstrap.</p>
+         <p><strong>Machine learning:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Note: cell-level train/test splits may overestimate accuracy due to replicate leakage; leave-one-replicate-out CV is recommended for rigorous validation.</p>
+         <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.3.4 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
+       </div>

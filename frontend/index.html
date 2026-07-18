@@ -959,6 +959,27 @@
             <div class="chart-container" id="diag-strat-chart"></div>
             <div id="diag-kmeans" class="stats-results"></div>
           </div>
+
+          <div class="ml-panel" id="ml-panel-groupedcv" style="margin-top:16px;border:2px solid #a7f3d0;border-radius:8px;padding:16px;">
+            <h3 class="ml-panel-title"><i class="fas fa-vials"></i> Diagnostic test — grouped CV (leave-one-sample-out)</h3>
+            <div class="help-panel" style="margin-bottom:12px;"><i class="fas fa-info-circle"></i>
+              The rigorous predictive test: holds out <strong>whole biological samples</strong> (not cells), so accuracy reflects generalization to a <strong>new sample</strong>. Needs at least 2 samples per class or it declines. <strong>Sample-level accuracy</strong> (majority vote per held-out sample) is the diagnostic-relevant number.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+              <label style="font-size:12px;">Model:
+                <select id="diagcv-method" class="select-input" style="width:auto;">
+                  <option value="rf">Random Forest</option>
+                  <option value="gbm">GBM (xgboost)</option>
+                  <option value="lda">LDA</option>
+                </select>
+              </label>
+              <span style="color:#94a3b8;font-size:11px;">uses the Target and feature selection above</span>
+              <button class="btn btn-primary btn-sm" id="run-groupedcv-btn"><i class="fas fa-vials"></i> Run grouped CV</button>
+            </div>
+            <div id="groupedcv-message" class="inline-message" style="display:none;"></div>
+            <div id="ml-groupedcv-results" class="stats-results"><p class="ml-placeholder">Pick a model and click "Run grouped CV"</p></div>
+            <div class="chart-container" id="ml-groupedcv-importance"></div>
+          </div>
         </div>
       </div>
 

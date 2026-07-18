@@ -84,6 +84,7 @@ const EpiFlowAPI = {
   async runRandomForest(params) { return this._post(`/api/ml/randomforest/${this.sessionId}`, params); },
   async runClustering(params) { return this._post(`/api/ml/clustering/${this.sessionId}`, params); },
   async runGBM(params) { return this._post(`/api/ml/gbm/${this.sessionId}`, params); },
+  async runDiagnosticCV(params) { return this._post(`/api/ml/diagnostic/${this.sessionId}`, params); },
   async runSignatures(params) { return this._post(`/api/ml/signatures/${this.sessionId}`, params); },
   async runSignaturesDiagnostic(params) { return this._post(`/api/ml/signatures-diagnostic/${this.sessionId}`, params); },
 
