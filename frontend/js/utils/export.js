@@ -112,6 +112,102 @@ const ExportUtils = {
     img.src = URL.createObjectURL(svgBlob);
   },
 
+  /**
+   * Measure a rendered SVG (attribute first, layout box as fallback).
+   */
+  _svgSize(svg) {
+    const box = svg.getBoundingClientRect();
+    const w = parseFloat(svg.getAttribute('width')) || box.width || 600;
+    const h = parseFloat(svg.getAttribute('height')) || box.height || 400;
+    return { w, h };
+  },
+
+  /**
+   * Build ONE svg containing every chart inside a container, laid out side by
+   * side. Used for faceted views (e.g. UMAP split by genotype) so the exported
+   * file is the comparison figure, not just the first panel.
+   */
+  _buildCombinedSVG(parentId) {
+    const parent = document.getElementById(parentId);
+    if (!parent) return null;
+    const svgs = Array.from(parent.querySelectorAll('svg'));
+    if (!svgs.length) return null;
+    if (svgs.length === 1) return this._inlineStyles(svgs[0]);
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const gap = 16;
+    const sizes = svgs.map(s => this._svgSize(s));
+    const totalW = sizes.reduce((a, s) => a + s.w, 0) + gap * (svgs.length - 1);
+    const maxH = Math.max.apply(null, sizes.map(s => s.h));
+
+    const out = document.createElementNS(NS, 'svg');
+    out.setAttribute('xmlns', NS);
+    out.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    out.setAttribute('width', totalW);
+    out.setAttribute('height', maxH);
+    out.setAttribute('viewBox', `0 0 ${totalW} ${maxH}`);
+
+    const bg = document.createElementNS(NS, 'rect');
+    bg.setAttribute('width', '100%');
+    bg.setAttribute('height', '100%');
+    bg.setAttribute('fill', 'white');
+    out.appendChild(bg);
+
+    let x = 0;
+    svgs.forEach((s, i) => {
+      const clone = this._inlineStyles(s);
+      if (!clone.getAttribute('viewBox')) {
+        clone.setAttribute('viewBox', `0 0 ${sizes[i].w} ${sizes[i].h}`);
+      }
+      clone.setAttribute('x', x);
+      clone.setAttribute('y', 0);
+      clone.setAttribute('width', sizes[i].w);
+      clone.setAttribute('height', sizes[i].h);
+      out.appendChild(clone);
+      x += sizes[i].w + gap;
+    });
+    return out;
+  },
+
+  /**
+   * SVG export that includes every panel in the container.
+   */
+  downloadCombinedSVG(parentId, filename = 'epiflow-chart') {
+    const combined = this._buildCombinedSVG(parentId);
+    if (!combined) { alert('No chart to export'); return; }
+    const svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      new XMLSerializer().serializeToString(combined);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    this._downloadBlob(blob, `${filename}.svg`);
+  },
+
+  /**
+   * PNG export that includes every panel in the container.
+   */
+  downloadCombinedPNG(parentId, filename = 'epiflow-chart', scale = 3) {
+    const combined = this._buildCombinedSVG(parentId);
+    if (!combined) { alert('No chart to export'); return; }
+
+    const w = parseFloat(combined.getAttribute('width')) || 1200;
+    const h = parseFloat(combined.getAttribute('height')) || 400;
+    const svgString = new XMLSerializer().serializeToString(combined);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w * scale;
+    canvas.height = h * scale;
+    const ctx = canvas.getContext('2d');
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => { this._downloadBlob(blob, `${filename}.png`); }, 'image/png');
+    };
+    img.onerror = () => { alert('PNG export failed — try SVG export instead'); };
+    img.src = URL.createObjectURL(new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' }));
+  },
+
   _downloadBlob(blob, filename) {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);

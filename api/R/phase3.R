@@ -187,6 +187,9 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
                                     include_phenotypic = FALSE,
                                     umap_coords = NULL,
                                     seed = 42) {
+  # Set when an algorithm substitution happens (e.g. Leiden unavailable), so
+  # the UI can say which method actually ran.
+  method_note <- NULL
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
 
   if (.epiflow_phenotype_only(data)) {
@@ -344,12 +347,36 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     if (method == "louvain") {
       comm <- igraph::cluster_louvain(g, resolution = as.numeric(resolution))
     } else {
-      if (requireNamespace("leiden", quietly = TRUE)) {
-        membership <- leiden::leiden(igraph::as_adjacency_matrix(g, attr = "weight"),
-                                     resolution_parameter = as.numeric(resolution))
-        comm <- list(membership = membership)
-      } else {
+      # Prefer igraph's native C Leiden (igraph >= 1.2.7). The `leiden` R
+      # package is only a reticulate wrapper around Python leidenalg, so it
+      # fails on servers without a Python install. objective_function =
+      # "modularity" keeps `resolution` on the same scale as Louvain above.
+      # igraph 2.x renamed `resolution_parameter` to `resolution`, so pick the
+      # formal that this installed version actually accepts.
+      comm <- tryCatch({
+        leiden_args <- list(g,
+                            objective_function = "modularity",
+                            weights = igraph::E(g)$weight,
+                            n_iterations = 10)
+        res_formal <- if ("resolution" %in% names(formals(igraph::cluster_leiden)))
+          "resolution" else "resolution_parameter"
+        leiden_args[[res_formal]] <- as.numeric(resolution)
+        do.call(igraph::cluster_leiden, leiden_args)
+      }, error = function(e) NULL)
+
+      # Fallback 1: the Python-backed leiden package, if it is usable here.
+      if (is.null(comm) && requireNamespace("leiden", quietly = TRUE)) {
+        comm <- tryCatch({
+          membership <- leiden::leiden(igraph::as_adjacency_matrix(g, attr = "weight"),
+                                       resolution_parameter = as.numeric(resolution))
+          list(membership = membership)
+        }, error = function(e) NULL)
+      }
+
+      # Fallback 2: Louvain, so clustering still returns a usable result.
+      if (is.null(comm)) {
         comm <- igraph::cluster_louvain(g, resolution = as.numeric(resolution))
+        method_note <- "Leiden was unavailable on this server, so Louvain was used instead."
       }
     }
 
@@ -491,6 +518,7 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     cross_identity = cross_identity,
     n_clusters = n_clusters,
     method = method,
+    method_note = method_note,
     silhouette = sil_val,
     subsampled = subsampled,
     n_cells = nrow(wide),           # cells clustered (analysis set)

@@ -120,6 +120,7 @@ const App = {
       <div><span class="stat-label">H3-PTMs:</span> <span class="stat-value">${markers.join(', ')}</span></div>
       <div><span class="stat-label">Groups:</span> <span class="stat-value">${genoLevels.join(', ')}</span></div>
       <div><span class="stat-label">Replicates:</span> <span class="stat-value">${replicates.length}</span></div>
+      ${meta.downsample_note ? `<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:10px;color:#92400e;"><strong>\u26a0 Downsampled.</strong> ${meta.downsample_note}</div>` : ''}
     `;
 
     this.populateFilters(meta);
@@ -901,6 +902,12 @@ const App = {
     document.getElementById('heatmap-include-pheno').addEventListener('change', () => { if (this.currentTab === 'heatmap') this.loadHeatmap(); });
     // Phase 3: PCA
     document.getElementById('run-pca-btn').addEventListener('click', () => this.runPCA());
+    // Colour is a client-side property of the cached scores, so recolour
+    // without re-running the PCA. (Toggling "+ Phenotypic" changes the feature
+    // set, so that still needs Run PCA.)
+    document.getElementById('pca-color').addEventListener('change', () => {
+      if (this._pcaData) this._renderPCA();
+    });
 
     // Phase 3: UMAP
     document.getElementById('run-umap-btn').addEventListener('click', () => this.runUMAP());
@@ -1079,9 +1086,11 @@ const App = {
         cells.forEach((c, i) => {
           const vx = Number(c.x), vy = Number(c.y);
           let q;
-          if (vx >= tx && vy >= ty) q = 'Q1';
-          else if (vx < tx && vy >= ty) q = 'Q2';
-          else if (vx < tx && vy < ty) q = 'Q3';
+          // Same convention as the plot and the gate_population column:
+          // positive = strictly above threshold.
+          if (vx > tx && vy > ty) q = 'Q1';
+          else if (vx <= tx && vy > ty) q = 'Q2';
+          else if (vx <= tx && vy <= ty) q = 'Q3';
           else q = 'Q4';
           const pop = labels[q] || q;
           csv += `${i},${vx},${vy},${q},${pop}\n`;
@@ -1105,13 +1114,22 @@ const App = {
     this.showLoading('Computing PCA...');
     try {
       const inclPheno = document.getElementById('pca-pheno').checked;
-      const colorBy = document.getElementById('pca-color').value;
       const data = await EpiFlowAPI.runPCA3D({ include_phenotypic: inclPheno, n_components: 5 });
-      PCAPlot.render('pca-chart-main', data, { colorBy, pcX: 'PC1', pcY: 'PC2' });
-      PCAPlot.render('pca-chart-secondary', data, { colorBy, pcX: 'PC1', pcY: 'PC3' });
-      PCAPlot.renderVariance('pca-variance-chart', data);
+      if (data.error) throw new Error(data.error);
+      this._pcaData = data;
+      this._renderPCA();
     } catch (err) { alert('PCA error: ' + err.message); }
     finally { this.hideLoading(); }
+  },
+
+  /** Render PCA from cached scores (no re-run needed for colour changes) */
+  _renderPCA() {
+    const data = this._pcaData;
+    if (!data) return;
+    const colorBy = document.getElementById('pca-color').value;
+    PCAPlot.render('pca-chart-main', data, { colorBy, pcX: 'PC1', pcY: 'PC2' });
+    PCAPlot.render('pca-chart-secondary', data, { colorBy, pcX: 'PC1', pcY: 'PC3' });
+    PCAPlot.renderVariance('pca-variance-chart', data);
   },
 
   // ===== PHASE 3: UMAP =====
@@ -1318,6 +1336,13 @@ const App = {
       const data = await EpiFlowAPI.runAdvancedClustering(params);
       if (data.error) throw new Error(data.error);
       this._clusterData = data;
+      // Surface an algorithm substitution (e.g. Leiden unavailable) instead of
+      // silently reporting the requested method.
+      if (data.method_note) {
+        this.showInlineMessage('cluster-message', data.method_note, 'warning');
+      } else {
+        this.hideInlineMessage('cluster-message');
+      }
       this._renderClusterScatter(colorBy);
       // Signatures
       const sigs = ensureArray(data.cluster_signatures);
@@ -3646,7 +3671,18 @@ const App = {
     bindExportPair('violin-export-svg', 'violin-export-png', 'violin-chart', 'epiflow-violin');
     bindExportPair('heatmap-export-svg', 'heatmap-export-png', 'heatmap-chart', 'epiflow-heatmap');
     bindExportPair('pca-export-svg', 'pca-export-png', 'pca-chart-main', 'epiflow-pca');
-    bindExportPair('umap-export-svg', 'umap-export-png', 'umap-chart-main', 'epiflow-umap');
+    // UMAP exports target whichever view is showing: when "split by genotype"
+    // is on, export every panel as a single side-by-side comparison figure.
+    const umapExportTarget = () => {
+      const split = document.getElementById('umap-split');
+      return (split && split.checked) ? 'umap-split-grid' : 'umap-chart-main';
+    };
+    const umapSvgBtn = document.getElementById('umap-export-svg');
+    const umapPngBtn = document.getElementById('umap-export-png');
+    if (umapSvgBtn) umapSvgBtn.addEventListener('click',
+      () => ExportUtils.downloadCombinedSVG(umapExportTarget(), 'epiflow-umap'));
+    if (umapPngBtn) umapPngBtn.addEventListener('click',
+      () => ExportUtils.downloadCombinedPNG(umapExportTarget(), 'epiflow-umap'));
     bindExportPair('cluster-export-svg', 'cluster-export-png', 'cluster-scatter-chart', 'epiflow-clustering');
     bindExportPair('volcano-export-svg', 'volcano-export-png', 'volcano-chart', 'epiflow-volcano');
     bindExportPair('forest-export-svg', 'forest-export-png', 'forest-chart', 'epiflow-forest');

@@ -124,6 +124,28 @@ load_epiflow_data <- function(path) {
     stop(paste("Missing required columns:", paste(missing_core, collapse = ", ")))
   }
 
+  # ---- Ingest cell cap ------------------------------------------------------
+  # Each session is held entirely in memory; on a small server a very large
+  # dataset can exhaust RAM and crash the R process (which wipes all sessions).
+  # Downsample by CELL (keeping every row for the cells we keep) when the
+  # unique-cell count exceeds the cap. EPIFLOW_MAX_CELLS_INGEST sets it
+  # (default 500000); set to 0 to disable.
+  ingest_cap <- suppressWarnings(as.integer(Sys.getenv("EPIFLOW_MAX_CELLS_INGEST", "500000")))
+  downsample_note <- NULL
+  if (!is.na(ingest_cap) && ingest_cap > 0) {
+    all_ids <- unique(data$cell_id)
+    n_orig <- length(all_ids)
+    if (n_orig > ingest_cap) {
+      set.seed(42)
+      keep_ids <- sample(all_ids, ingest_cap)
+      data <- data[data$cell_id %in% keep_ids, , drop = FALSE]
+      downsample_note <- sprintf(
+        "Dataset downsampled from %s to %s cells at upload to fit server memory. All rows are kept for the sampled cells, and replicate-level statistics are unaffected.",
+        format(n_orig, big.mark = ","), format(ingest_cap, big.mark = ","))
+      cat(downsample_note, "\n")
+    }
+  }
+
   # If no genotype column, try common alternatives
   if (!"genotype" %in% names(data)) {
     geno_candidates <- c("Genotype", "group", "Group", "treatment", "Treatment",
@@ -206,7 +228,9 @@ load_epiflow_data <- function(path) {
     n_cells = n_distinct(data$cell_id),
     identities = safe_I(sort(unique(data$identity))),
     cell_cycles = safe_I(sort(unique(data$cell_cycle))),
-    replicates = safe_I(sort(unique(data$replicate)))
+    replicates = safe_I(sort(unique(data$replicate))),
+    downsampled = !is.null(downsample_note),
+    downsample_note = downsample_note
   )
   # Append meta_levels for each available_meta column
   result <- c(result, meta_levels)

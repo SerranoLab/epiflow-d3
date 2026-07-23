@@ -139,9 +139,11 @@ function(req) {
     raw_data = result$data,
     filtered_data = result$data,
     metadata = result[setdiff(names(result), "data")],
-    created = Sys.time()
+    created = Sys.time(),
+    last_access = Sys.time()
   )
   prune_data_store()
+  prune_idle_sessions()
 
   # Session data is kept in memory only (data_store environment)
   # No disk persistence — sessions don't survive container restarts
@@ -161,6 +163,10 @@ function(req) {
   )
 
   # Append dynamic meta_levels (e.g., timepoint_levels, condition_levels)
+  if (!is.null(result$downsample_note)) {
+    response$downsampled <- TRUE
+    response$downsample_note <- result$downsample_note
+  }
   meta_level_names <- grep("_levels$", names(result), value = TRUE)
   meta_level_names <- setdiff(meta_level_names, "genotype_levels")
   for (nm in meta_level_names) {
@@ -240,9 +246,11 @@ function(req) {
     raw_data = result$data,
     filtered_data = result$data,
     metadata = result[setdiff(names(result), "data")],
-    created = Sys.time()
+    created = Sys.time(),
+    last_access = Sys.time()
   )
   prune_data_store()
+  prune_idle_sessions()
 
   response <- list(
     session_id = session_id,
@@ -260,6 +268,10 @@ function(req) {
     available_meta = result$available_meta,
     palette = result$palette
   )
+  if (!is.null(result$downsample_note)) {
+    response$downsampled <- TRUE
+    response$downsample_note <- result$downsample_note
+  }
   meta_level_names <- grep("_levels$", names(result), value = TRUE)
   meta_level_names <- setdiff(meta_level_names, "genotype_levels")
   for (nm in meta_level_names) {
@@ -344,11 +356,17 @@ function(session_id, req) {
       if (!is.null(vals_x) && !is.null(vals_y) && nrow(vals_x) > 0 && nrow(vals_y) > 0) {
         gate_df <- dplyr::inner_join(vals_x, vals_y, by = "cell_id") %>%
           dplyr::mutate(
+            # Must match compute_gating() exactly: Q1 = ++, Q2 = -+, Q3 = --,
+            # Q4 = +-, with "positive" meaning strictly above the threshold.
+            # Previously Q1/Q2 were transposed here, so the ++ population was
+            # annotated with the -+ label (and vice versa) once "Apply as
+            # metadata column" was used. The >=/< boundaries also disagreed with
+            # the plot, splitting cells sitting exactly on the threshold.
             quadrant = dplyr::case_when(
-              val_x >= tx & val_y >= ty ~ "Q2",
-              val_x <  tx & val_y >= ty ~ "Q1",
-              val_x <  tx & val_y <  ty ~ "Q3",
-              val_x >= tx & val_y <  ty ~ "Q4",
+              val_x >  tx & val_y >  ty ~ "Q1",
+              val_x <= tx & val_y >  ty ~ "Q2",
+              val_x <= tx & val_y <= ty ~ "Q3",
+              val_x >  tx & val_y <= ty ~ "Q4",
               TRUE ~ NA_character_
             ),
             gate_population = dplyr::case_when(
@@ -1337,6 +1355,7 @@ get_session <- function(session_id) {
   if (!nzchar(session_id)) return(NULL)
 
   if (exists(session_id, envir = data_store)) {
+    data_store[[session_id]]$last_access <- Sys.time()
     return(data_store[[session_id]])
   }
 
@@ -1350,7 +1369,8 @@ get_session <- function(session_id) {
         raw_data = result$data,
         filtered_data = result$data,
         metadata = result[setdiff(names(result), "data")],
-        created = Sys.time()
+        created = Sys.time(),
+        last_access = Sys.time()
       )
       return(data_store[[session_id]])
     }
@@ -1370,6 +1390,28 @@ prune_data_store <- function(max_sessions = 100) {
   }, numeric(1))
   drop <- ids[order(created)][seq_len(length(ids) - max_sessions)]
   if (length(drop)) rm(list = drop, envir = data_store)
+  invisible(NULL)
+}
+
+# Evict sessions untouched for longer than the TTL. Frees RAM held by
+# abandoned sessions; active sessions refresh last_access on every request via
+# get_session, so a session in use is never evicted. EPIFLOW_SESSION_TTL_MIN
+# sets the idle window in minutes (default 45); set to 0 to disable.
+prune_idle_sessions <- function(ttl_min = NULL) {
+  if (is.null(ttl_min)) ttl_min <- suppressWarnings(as.numeric(Sys.getenv("EPIFLOW_SESSION_TTL_MIN", "45")))
+  if (is.na(ttl_min) || ttl_min <= 0) return(invisible(NULL))
+  ids <- ls(envir = data_store)
+  if (!length(ids)) return(invisible(NULL))
+  cutoff <- as.numeric(Sys.time()) - ttl_min * 60
+  stale <- Filter(function(k) {
+    s <- data_store[[k]]
+    la <- if (!is.null(s$last_access)) s$last_access else s$created
+    !is.null(la) && as.numeric(la) < cutoff
+  }, ids)
+  if (length(stale)) {
+    rm(list = stale, envir = data_store)
+    cat(sprintf("Pruned %d idle session(s) (idle > %g min).\n", length(stale), ttl_min))
+  }
   invisible(NULL)
 }
 
