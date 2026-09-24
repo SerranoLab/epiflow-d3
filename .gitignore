@@ -20,3 +20,6 @@ test_condition.rds
 *.zip
 epiflow_d3_phenotype_only_*.patch
 PHENOTYPE_ONLY_APPLY.md
+
+# applied patches kept for reference
+patches_applied/
