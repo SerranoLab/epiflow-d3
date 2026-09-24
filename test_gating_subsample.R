@@ -107,6 +107,32 @@ check(all(vapply(g_all$chi_test$replicate_quadrant_tests,
                  function(q) !is.null(q$p_adjusted), logical(1))),
       "every replicate test carries p_adjusted (BH)")
 
+# ---- R2: effect sizes next to every p ----
+cat("\n--- R2: replicate-level effect sizes and Cramér's V ---\n")
+rq <- g_all$chi_test$replicate_quadrant_tests
+check(all(vapply(rq, function(q) {
+        d <- as.numeric(q$delta_pp); lo <- as.numeric(q$ci_low); hi <- as.numeric(q$ci_high)
+        is.finite(d) && is.finite(lo) && is.finite(hi) && lo <= d && d <= hi
+      }, logical(1))),
+      "every quadrant: ci_low <= delta_pp <= ci_high (Welch 95% CI)")
+check(all(vapply(rq, function(q) all(c("t_statistic", "df", "cohen_d") %in% names(q)), logical(1))),
+      "every replicate test carries t_statistic, df, cohen_d")
+# The JSON serializer rounds numerics to 4 decimals, so mean_frac arrives at
+# 1e-4 resolution while delta_pp was computed from the unrounded means: the
+# recomputed difference can drift by up to 100 * 2 * 5e-5 = 0.01 pp.
+check(all(vapply(rq, function(q) abs(
+        as.numeric(q$delta_pp) -
+        100 * (as.numeric(q$mean_frac_g2) - as.numeric(q$mean_frac_g1))) <= 0.01, logical(1))),
+      "delta_pp == 100 * (mean_frac_g2 - mean_frac_g1) within 4-decimal serialization (0.01 pp)")
+check(all(vapply(rq, function(q) {
+        m1 <- as.numeric(q$mean_frac_g1); m2 <- as.numeric(q$mean_frac_g2); d <- as.numeric(q$delta_pp)
+        is.finite(m1) && is.finite(m2) && m1 >= 0 && m1 <= 1 && m2 >= 0 && m2 <= 1 && abs(d) <= 100
+      }, logical(1))),
+      "every replicate test: mean_frac_g1/g2 in [0, 1] and |delta_pp| <= 100")
+cv <- as.numeric(g_all$chi_test$cramers_v)
+check(is.finite(cv) && cv >= 0 && cv <= 1,
+      sprintf("chi_test carries Cramér's V in [0, 1] (V = %.3f)", cv))
+
 # ---- 5. gate_population (all cells, /api/filter) agrees with quad_stats ----
 cat("\n--- /api/filter gate_population cross-check ---\n")
 q1_total <- sum(vapply(g_all$quad_stats, function(s) as.integer(s$Q1$n), integer(1)))

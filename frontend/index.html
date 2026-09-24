@@ -667,7 +667,9 @@
           <div class="help-panel"><i class="fas fa-info-circle"></i>
             Interactive bi-axial scatter plot with <strong>draggable quadrant thresholds</strong> (blue crosshairs).
             <strong>Click a quadrant</strong> to see H3-PTM density profiles and cell cycle distribution for cells in that quadrant.
-            Chi-square tests whether quadrant distributions differ between groups.
+            Percentages are computed on all cells. Group differences per quadrant are tested on biological replicates
+            (Welch t-test on per-replicate fractions, BH-adjusted); the cell-level chi-square is exploratory.
+            Quadrants are compositional (they sum to 100%), so the four tests are not independent; BH adjustment is reported as a convenience.
           </div>
           <!-- F. Custom quadrant labels -->
           <div id="gate-labels-panel" style="display:none;padding:8px 16px;background:#f8fafc;border-radius:8px;margin-bottom:12px;font-size:12px;">
@@ -1103,13 +1105,13 @@
   <script src="js/charts/volcanoPlot.js?v=1.2.2"></script>
   <script src="js/charts/markerHeatmap.js?v=1.2.2"></script>
   <script src="js/charts/positivityPlot.js?v=1.2.2"></script>
-  <script src="js/charts/gatingPlot.js?v=1.3.0"></script>
+  <script src="js/charts/gatingPlot.js?v=1.3.1"></script>
   <script src="js/charts/cellCyclePlot.js?v=1.2.2"></script>
   <script src="js/charts/correlationPlot.js?v=1.2.2"></script>
   <script src="js/charts/overviewCharts.js?v=1.2.2"></script>
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.2"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.1"></script>
+  <script src="js/app.js?v=1.3.2"></script>
 </body>
 </html>

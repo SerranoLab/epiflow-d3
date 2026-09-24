@@ -254,14 +254,47 @@ const GatingPlot = {
       });
       html += '</tbody></table>';
 
-      // Chi-square (cell-level, from the server)
-      if (data.chi_test) {
-        const p = Number(data.chi_test.p_value);
-        const sig = p < 0.001 ? '***' : p < 0.01 ? '**' : p < 0.05 ? '*' : 'ns';
+      // R2: the replicate-level test is the primary result. Effect size is
+      // Δ percentage points (g2 − g1) with its Welch 95% CI; Cohen's d and
+      // the t/df sit in the tooltip on Δ rather than as columns.
+      const fmtP = p => (Number.isFinite(p) ? (p < 0.001 ? p.toExponential(2) : p.toFixed(4)) : '—');
+      const fmtNum = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+      const repTests = ensureArray(data.chi_test?.replicate_quadrant_tests);
+      if (repTests.length > 0) {
+        const g1 = groups[0] ?? 'group 1', g2 = groups[1] ?? 'group 2';
+        html += `<h4 style="font-size:12px;margin:12px 0 4px;color:#1a202c;">
+          Replicate-level test (primary): Welch t-test on per-replicate quadrant fractions, ${g2} − ${g1}
+        </h4>`;
+        html += '<table class="stats-table" style="font-size:12px;width:100%;max-width:700px;">';
+        html += `<thead><tr><th>Quadrant</th><th>mean % ${g1}</th><th>mean % ${g2}</th>
+          <th>Δ (pp) [95% CI]</th><th>reps (n₁/n₂)</th><th>p</th><th>BH p</th></tr></thead><tbody>`;
+        repTests.forEach(t => {
+          const tip = `Cohen's d = ${fmtNum(Number(t.cohen_d), 2)} · t = ${fmtNum(Number(t.t_statistic), 2)}, df = ${fmtNum(Number(t.df), 1)}`;
+          html += `<tr>
+            <td>${t.quadrant}</td>
+            <td>${fmtNum(100 * Number(t.mean_frac_g1))}%</td>
+            <td>${fmtNum(100 * Number(t.mean_frac_g2))}%</td>
+            <td title="${tip}"><strong>${fmtNum(Number(t.delta_pp))}</strong> [${fmtNum(Number(t.ci_low))}, ${fmtNum(Number(t.ci_high))}]</td>
+            <td>${t.n_reps_g1}/${t.n_reps_g2}</td>
+            <td>${fmtP(Number(t.p_value))}</td>
+            <td>${fmtP(Number(t.p_adjusted))}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">${data.chi_test.replicate_note || ''}</p>`;
+      } else {
         html += `<p style="font-size:12px;color:#64748b;margin-top:8px;">
-          Chi-square: χ² = ${Number(data.chi_test.statistic).toFixed(2)}, df = ${data.chi_test.df},
-          p = ${p < 0.001 ? p.toExponential(2) : p.toFixed(4)} ${sig}
-          ${p < 0.05 ? ' — quadrant distributions differ significantly between groups' : ''}
+          Replicate-level test not available: it needs exactly two groups with ≥ 2 replicates each.
+        </p>`;
+      }
+
+      // Cell-level chi-square is exploratory: Cramér's V is the number shown;
+      // the cell-level p lives in the tooltip only and carries no verdict.
+      if (data.chi_test && Number.isFinite(Number(data.chi_test.statistic))) {
+        html += `<p style="font-size:12px;color:#64748b;margin-top:8px;"
+          title="cell-level p = ${fmtP(Number(data.chi_test.p_value))} — exploratory, not for inference">
+          Chi-square on individual cells (exploratory): χ² = ${Number(data.chi_test.statistic).toFixed(2)},
+          df = ${data.chi_test.df}, Cramér's V = ${fmtNum(Number(data.chi_test.cramers_v), 2)}
         </p>`;
       }
       html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">

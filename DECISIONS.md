@@ -8,7 +8,7 @@ backing paper · how we verified it. Finding IDs refer to the audit of
 ---
 
 ## R1 + R2 — Gating statistics on all cells; show the replicate-level test
-Status: accepted (2026-09-24); R1 implemented, R2 pending
+Status: done (2026-09-24)
 
 What changes. `compute_gating()` (phase2.R) assigns quadrants and computes
 per-group counts, percentages, the chi-square and the per-quadrant replicate
@@ -30,6 +30,19 @@ Review addendum (2026-09-24), applied in R1:
 - Drag preview: the table is replaced by a "release to recompute" note
   during drag; the only data in the browser is the display subsample, so a
   live recount would be exactly the wrong number.
+
+Review addendum (2026-09-24), applied in R2:
+- Replicate-level effect size is Δ percentage points (g2 − g1) with the
+  Welch 95% CI from the same t-test (run in the g2 − g1 direction so the
+  estimate, CI and t agree in sign). Cohen's d on replicate fractions is in
+  the payload and in the tooltip on Δ, not a column.
+- The chi-square line shows Cramér's V; the cell-level p stays in the
+  payload and a tooltip, is never starred, and is not cited in the Methods.
+- Quadrants are compositional, so the four replicate tests are not
+  independent; BH across them is a convenience and the help text says so.
+- Planned upgrade, not in this branch: propeller (Phipson et al. 2022,
+  Bioinformatics) — moderated t on transformed replicate proportions — as
+  the replicate-level test for quadrant composition.
 
 Benefit. The percentages on screen, in the CSV, and in the `gate_population`
 filter column agree with each other for any dataset size. The test a reviewer

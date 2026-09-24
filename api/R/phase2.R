@@ -825,6 +825,9 @@ compute_gating <- function(data, marker_x, marker_y,
         statistic = unname(cs$statistic),
         p_value = cs$p.value,
         df = unname(cs$parameter),
+        # Cramér's V is the number the UI shows for this cell-level table
+        # (R2/A5); p_value stays in the payload for a tooltip only.
+        cramers_v = sqrt(unname(cs$statistic) / (sum(ct) * (min(dim(ct)) - 1))),
         cell_level_note = "Chi-square on individual cells (exploratory). See replicate-level test for inference."
       )
     }, error = function(e) NULL)
@@ -846,14 +849,27 @@ compute_gating <- function(data, marker_x, marker_y,
         qg1 <- qd$frac[qd[[comparison_var]] == groups[1]]
         qg2 <- qd$frac[qd[[comparison_var]] == groups[2]]
         if (length(qg1) < 2 || length(qg2) < 2) return(NULL)
-        tt <- suppressWarnings(stats::t.test(qg1, qg2))
+        # Welch t-test in the delta direction (g2 - g1) so the estimate, CI
+        # and t all describe the same signed effect. R2: the effect size is
+        # the difference in percentage points with its Welch 95% CI; Cohen's d
+        # on the replicate fractions is kept for the tooltip (NA if SD = 0).
+        tt <- suppressWarnings(stats::t.test(qg2, qg1))
+        m1 <- mean(qg1, na.rm = TRUE); m2 <- mean(qg2, na.rm = TRUE)
+        n1 <- length(qg1); n2 <- length(qg2)
+        pooled_sd <- sqrt(((n1 - 1) * stats::var(qg1) + (n2 - 1) * stats::var(qg2)) / (n1 + n2 - 2))
         list(
           quadrant = qn,
           p_value = tt$p.value,
-          mean_frac_g1 = mean(qg1, na.rm = TRUE),
-          mean_frac_g2 = mean(qg2, na.rm = TRUE),
-          delta_frac = mean(qg2, na.rm = TRUE) - mean(qg1, na.rm = TRUE),
-          n_reps_g1 = length(qg1), n_reps_g2 = length(qg2)
+          mean_frac_g1 = m1,
+          mean_frac_g2 = m2,
+          delta_frac = m2 - m1,
+          delta_pp = 100 * (m2 - m1),
+          ci_low  = 100 * tt$conf.int[1],
+          ci_high = 100 * tt$conf.int[2],
+          t_statistic = unname(tt$statistic),
+          df = unname(tt$parameter),
+          cohen_d = if (is.finite(pooled_sd) && pooled_sd > 0) (m2 - m1) / pooled_sd else NA_real_,
+          n_reps_g1 = n1, n_reps_g2 = n2
         )
       })
       quad_rep_tests <- Filter(Negate(is.null), quad_rep_tests)
@@ -868,7 +884,7 @@ compute_gating <- function(data, marker_x, marker_y,
       }
 
       chi_test$replicate_quadrant_tests <- quad_rep_tests
-      chi_test$replicate_note <- "Per-quadrant t-tests on replicate proportions (BH-adjusted). Biological replicates are the unit of analysis."
+      chi_test$replicate_note <- "Welch t-tests on per-replicate quadrant fractions; biological replicates are the unit of analysis. Quadrants are compositional (they sum to 100%), so the four tests are not independent; BH adjustment across them is reported as a convenience."
     }
   }
 
