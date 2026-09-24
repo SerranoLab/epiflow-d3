@@ -987,6 +987,11 @@ function(session_id, req) {
 #*   max_points             display cap on `points` only; statistics always
 #*                          use all cells. Absent = 15000; 0 or negative = no cap.
 #*
+#* The browser sends threshold_x/y back to gating-detail and /api/filter.
+#* compute_gating() quantizes both thresholds to 4 dp before assigning
+#* quadrants, which is the serializer's default precision, so the value on
+#* the wire is the value the server gated with by construction (R13).
+#*
 #* @post /api/phase2/gating/<session_id>
 #* @serializer json list(auto_unbox = TRUE)
 function(session_id, req) {

@@ -138,6 +138,39 @@ cv <- as.numeric(g_all$chi_test$cramers_v)
 check(is.finite(cv) && cv >= 0 && cv <= 1,
       sprintf("chi_test carries Cramér's V in [0, 1] (V = %.3f)", cv))
 
+# ---- R13: thresholds are quantized to 4 dp; detail panel == quad_stats ----
+# The browser sends threshold_x/y back to gating-detail and /api/filter, so
+# the value it holds must be the value the server gated with. The server
+# quantizes thresholds to 4 dp (the serializer's precision) before gating, so
+# a dragged value comes back as round(value, 4) and is a fixed point: sending
+# it again returns it unchanged. Re-gating at the returned thresholds must
+# then reproduce every quad_stats column.
+cat("\n--- R13: threshold quantization and detail-panel agreement ---\n")
+drag_x <- as.numeric(g_all$threshold_x) + 0.0123456789012345
+drag_y <- as.numeric(g_all$threshold_y) - 0.0098765432109876
+g_drag <- gate(max_points = 0, threshold_x = drag_x, threshold_y = drag_y)
+echo_x <- as.numeric(g_drag$threshold_x); echo_y <- as.numeric(g_drag$threshold_y)
+check(isTRUE(all.equal(echo_x, round(drag_x, 4))) && isTRUE(all.equal(echo_y, round(drag_y, 4))),
+      sprintf("dragged thresholds echo as round(value, 4) (x = %s, y = %s)", echo_x, echo_y))
+g_again <- gate(max_points = 0, threshold_x = echo_x, threshold_y = echo_y)
+check(identical(as.numeric(g_again$threshold_x), echo_x) && identical(as.numeric(g_again$threshold_y), echo_y),
+      "echoed thresholds are a fixed point (re-sending returns them unchanged)")
+for (g_case in list(list(name = "default", g = g_all), list(name = "dragged", g = g_drag))) {
+  gg <- g_case$g
+  ok <- TRUE
+  for (q in quads) {
+    det <- post(paste0("/api/phase2/gating-detail/", sid),
+                list(marker_x = markers[1], marker_y = markers[2],
+                     threshold_x = gg$threshold_x, threshold_y = gg$threshold_y, quadrant = q))
+    qs_q <- sum(vapply(gg$quad_stats, function(s) as.integer(s[[q]]$n), integer(1)))
+    if (!is.null(det$error) || as.integer(det$n_cells) != qs_q) {
+      ok <- FALSE
+      cat(sprintf("      %s %s: detail n = %s, quad_stats = %d\n", g_case$name, q, det$n_cells %||% det$error, qs_q))
+    }
+  }
+  check(ok, sprintf("%s thresholds: gating-detail n_cells == quad_stats for Q1..Q4", g_case$name))
+}
+
 # ---- 5. gate_population (all cells, /api/filter) agrees with quad_stats ----
 cat("\n--- /api/filter gate_population cross-check ---\n")
 q1_total <- sum(vapply(g_all$quad_stats, function(s) as.integer(s$Q1$n), integer(1)))

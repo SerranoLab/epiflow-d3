@@ -151,12 +151,60 @@ subsample — it needs its own endpoint or an `include_cells` flag, not
 
 ---
 
+## R13 — Quadrant detail panel recounts with truncated thresholds and no tab filters
+Status: done for threshold precision (2026-09-24); the tab-filter half stays open under R11
+
+What changes. Observed on a 416k-cell dataset: the Q2 detail panel says
+n = 53,516 while the quad_stats Q2 column sums to 53,521. Both functions use
+the same quadrant rule (`>` / `<=`), so the rule is not the cause. Two
+divergences between `compute_gating()` and `compute_quadrant_detail()`:
+1. Threshold precision. `compute_gating()` assigns quadrants with the
+   full-precision threshold (median or dragged value), but the payload is
+   serialized by jsonlite with `digits = 4`, so the browser receives e.g.
+   4.7808 for a median of 4.7808487368. `loadQuadrantDetail` sends that
+   truncated value back and the detail endpoint re-assigns quadrants with
+   it. Cells whose value lies between the two thresholds — on instrument
+   data, typically a tie cluster sitting exactly at the median — change
+   quadrant. Same happens after a drag: the drop re-gate uses the exact
+   dragged value, the re-render stores the 4-dp echo.
+2. Filters. The gating endpoint applies the tab's `filter_identity` /
+   `filter_cycle`; the detail endpoint does not receive them and gates
+   `store$filtered_data` as-is (see R11).
+Reproduced: 420k synthetic cells, 1 cell inside each axis's truncation band,
+detail counts off by −1/0/−1/+2 against quad_stats.
+Fix (1). `compute_gating()` quantizes both thresholds to 4 dp (median
+defaults and user-supplied values alike) before assigning quadrants. 4 dp is
+the JSON serializer's default precision, so the wire value equals the gating
+value by construction and the serializer stays at its default. Rejected:
+`digits = NA` (15 significant digits, not bit-exact — fails exactly when the
+threshold is a tied data value) and `digits = I(17)` (bit-exact but every
+number in the payload prints at 17 digits; ~30% larger `points` array).
+Verification: `test_gating_subsample.R` sends a 15-digit dragged threshold,
+asserts the echo is `round(value, 4)` and a fixed point on re-send, and that
+gating-detail `n_cells` equals the quad_stats column for Q1..Q4 at both
+default and dragged thresholds.
+Not fixed here (2): forwarding the tab filters to the detail endpoint — R11.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
   detection, test scripts, env vars).
 - The plumber `cors` filter (`plumber.R`) defaults `EPIFLOW_CORS_ORIGIN` to
   `*`; review and set an allowlist before release.
+- Every endpoint except gating still serializes with jsonlite's default
+  `digits = 4`, which renders e.g. 1.2e-05 as `0` (checked 2026-09-24). Any
+  p-value or effect size below 5e-5 reaches the browser as zero. Audit which
+  payloads carry such values and switch them to `digits = NA` or `I()`.
+
+---
+
+## Gate Finder — motivation
+- Quadrant gating with axis-aligned thresholds is a poor fit for diagonal
+  populations (seen on the 416k-cell, 3-group dataset, 2026-09-24): a
+  population that runs along the diagonal is split across two or more
+  quadrants by any choice of X/Y thresholds. This is the motivating case.
 
 ---
 

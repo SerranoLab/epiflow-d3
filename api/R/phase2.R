@@ -733,6 +733,9 @@ compute_per_group_correlation <- function(data, h3_markers, group_by = "genotype
 #'   statistic (counts, percentages, chi-square, replicate tests) is computed on
 #'   all cells regardless; only `points` is subsampled. 0 or negative = no cap.
 #'   The endpoint owns the default (15000); there is no env-var default here.
+#'   The subsample is stratified by group and each group's share is floored,
+#'   so `n_displayed` can land a few points short of `max_points` (e.g.
+#'   14,998 of 15,000). That is expected, not a bug; it never exceeds the cap.
 compute_gating <- function(data, marker_x, marker_y,
                            threshold_x = NULL, threshold_y = NULL,
                            comparison_var = "genotype",
@@ -778,6 +781,14 @@ compute_gating <- function(data, marker_x, marker_y,
   # Defaults: medians
   if (is.null(threshold_x)) threshold_x <- median(scatter$x_val, na.rm = TRUE)
   if (is.null(threshold_y)) threshold_y <- median(scatter$y_val, na.rm = TRUE)
+
+  # R13: quantize the thresholds (median defaults and user-supplied values
+  # alike) to 4 dp BEFORE quadrant assignment. The JSON serializer emits 4 dp,
+  # and the browser sends these values back to gating-detail and /api/filter;
+  # gating with the quantized value means the wire value is the gating value
+  # by construction, so every recount reproduces quad_stats exactly.
+  threshold_x <- round(threshold_x, 4)
+  threshold_y <- round(threshold_y, 4)
 
   # R1: quadrants and every statistic below are computed on the full scatter.
   # The display subsample happens at the very end, on `points` only.
@@ -920,7 +931,9 @@ compute_gating <- function(data, marker_x, marker_y,
   }
 
   # Prepare scatter points for frontend (minimal columns). `q` is the
-  # full-data quadrant assignment carried onto the displayed subset.
+  # full-data quadrant assignment carried onto the displayed subset. Points
+  # are display-only; the thresholds above are quantized to the serializer's
+  # 4 dp, so the wire value equals the gating value (R13).
   points <- display %>%
     dplyr::transmute(
       x = x_val, y = y_val,

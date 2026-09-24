@@ -156,6 +156,8 @@ const GatingPlot = {
         .attr('x', labelPositions[q][0]).attr('y', labelPositions[q][1])
         .attr('text-anchor', 'middle').attr('font-size', '20px')
         .attr('font-weight', '700').attr('fill', '#cbd5e1').attr('opacity', 0.7)
+        // White halo so the percentages stay legible over dense clusters.
+        .attr('paint-order', 'stroke').attr('stroke', '#fff').attr('stroke-width', 3)
         .text(quadNames[q]);
     });
 
