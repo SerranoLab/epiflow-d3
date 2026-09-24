@@ -8,7 +8,7 @@ backing paper · how we verified it. Finding IDs refer to the audit of
 ---
 
 ## R1 + R2 — Gating statistics on all cells; show the replicate-level test
-Status: proposed (2026-09-24)
+Status: accepted (2026-09-24); R1 implemented, R2 pending
 
 What changes. `compute_gating()` (phase2.R) assigns quadrants and computes
 per-group counts, percentages, the chi-square and the per-quadrant replicate
@@ -16,6 +16,20 @@ t-tests on the full scatter, and subsamples only the `points` array sent to
 the browser. `gatingPlot.js` renders the replicate-level quadrant table as the
 primary result and drops the "differ significantly" sentence from the
 chi-square line; the chi-square p is cleared when a threshold is dragged.
+
+Review addendum (2026-09-24), applied in R1:
+- `max_points` semantics: absent → 15000 (endpoint default, the only default;
+  the `EPIFLOW_SCATTER_DISPLAY_CAP` env default inside `compute_gating()` is
+  gone — phase3.R scatters still read it, so AUDIT_FIXES.md's "all four
+  plots" now means the three UMAP/PCA/cluster plots); 0 or negative → no cap.
+- Display subsample is stratified by group: share ∝ sqrt(n_group), floor
+  min(n_group, 200, max_points %/% n_groups), seed 42; the total never
+  exceeds max_points. Affects `points` only; `quad_stats` unchanged.
+- Payload gains `n_displayed`, `max_points`, `filters_applied` (the tab's
+  identity/cycle dropdowns); the subtitle prints all of them.
+- Drag preview: the table is replaced by a "release to recompute" note
+  during drag; the only data in the browser is the display subsample, so a
+  live recount would be exactly the wrong number.
 
 Benefit. The percentages on screen, in the CSV, and in the `gate_population`
 filter column agree with each other for any dataset size. The test a reviewer
@@ -98,6 +112,29 @@ Backing. Zimmerman et al. 2021 (unit of inference); Murphy and Skene 2022
 Verification. Whichever option: the generated report's Methods paragraph and
 the table header state the same test; `test_corr_diff.R` asserts the payload
 has no p-values when (a), or that `n_used` equals replicate counts when (b).
+
+---
+
+## R11 — Gating tab should consume the sidebar filter object
+Status: open (2026-09-24)
+
+What changes. The gating endpoint applies its own identity/cell-cycle
+dropdowns (`plumber.R`, `/api/phase2/gating`) while `/api/filter` uses the
+sidebar filters, so the two can gate different cell populations. The tab
+should send the same filter object as `/api/filter` and drop its dropdowns.
+Until then the gating subtitle prints `filters_applied` so the reader can see
+which filters produced the numbers (R1 addendum A2).
+
+---
+
+## R12 — "Export gate assignments (CSV)" reads a field the payload never had
+Status: open (2026-09-24)
+
+What changes. `app.js` (`export-gate-labels` handler) reads `resp.cells`; the
+gating payload has always returned `points`, so the button alerts "No cell
+data available". The fix must export every analyzed cell, not the display
+subsample — it needs its own endpoint or an `include_cells` flag, not
+`points`. Not touched in the audit/gating branch.
 
 ---
 

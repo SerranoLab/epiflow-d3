@@ -977,6 +977,15 @@ function(session_id, req) {
 # ===========================================================================
 
 #* Compute gating scatter + quadrant stats
+#*
+#* Body parameters:
+#*   marker_x, marker_y     markers on the two axes
+#*   threshold_x/y          gate thresholds (default: medians)
+#*   comparison_var         grouping column (default: genotype column)
+#*   filter_identity/cycle  optional tab-level filters ("All" = none)
+#*   max_points             display cap on `points` only; statistics always
+#*                          use all cells. Absent = 15000; 0 or negative = no cap.
+#*
 #* @post /api/phase2/gating/<session_id>
 #* @serializer json list(auto_unbox = TRUE)
 function(session_id, req) {
@@ -998,8 +1007,19 @@ function(session_id, req) {
     filt_data <- filt_data %>% dplyr::filter(cell_cycle == params$filter_cycle)
   }
 
-  tryCatch(
-    compute_gating(
+  # max_points caps only the points drawn; every statistic runs on all cells
+  # (R1). Absent -> 15000. 0 or negative -> no cap, every cell is returned.
+  max_points <- if (is.null(params$max_points)) 15000L else as.numeric(params$max_points)
+
+  # Echo the filters this endpoint actually applied so the plot subtitle can
+  # state them (they are the tab's own dropdowns, not the sidebar; see R11).
+  filters_applied <- list(
+    identity   = if (!is.null(params$filter_identity)) as.character(params$filter_identity) else "All",
+    cell_cycle = if (!is.null(params$filter_cycle)) as.character(params$filter_cycle) else "All"
+  )
+
+  tryCatch({
+    res <- compute_gating(
       filt_data,
       marker_x = params$marker_x %||% all_markers[1],
       marker_y = params$marker_y %||% all_markers[min(2, length(all_markers))],
@@ -1007,10 +1027,11 @@ function(session_id, req) {
       threshold_y = if (!is.null(params$threshold_y)) as.numeric(params$threshold_y) else NULL,
       comparison_var = params$comparison_var %||% geno_col,
       h3_markers = store$metadata$h3_markers,
-      max_points = as.integer(params$max_points %||% 15000)
-    ),
-    error = function(e) list(error = paste("Gating failed:", e$message))
-  )
+      max_points = max_points
+    )
+    if (is.null(res$error)) res$filters_applied <- filters_applied
+    res
+  }, error = function(e) list(error = paste("Gating failed:", e$message)))
 }
 
 #* Get detailed H3-PTM densities + cell cycle for a selected gating quadrant

@@ -3505,7 +3505,9 @@ const App = {
 
   // ===== PHASE 2: QUADRANT GATING =====
 
-  async runGating() {
+  // `overrides` lets a threshold drop re-gate the same markers at the new
+  // thresholds (R1: stats recompute server-side on all cells, never in JS).
+  async runGating(overrides = {}) {
     this.showLoading('Computing quadrant gating...');
     try {
       const markerX = document.getElementById('gate-marker-x').value;
@@ -3518,6 +3520,7 @@ const App = {
       const params = { marker_x: markerX, marker_y: markerY };
       if (filterIdentity !== 'All') params.filter_identity = filterIdentity;
       if (filterCycle !== 'All') params.filter_cycle = filterCycle;
+      Object.assign(params, overrides);
 
       const data = await EpiFlowAPI.runGating(params);
       if (data.error) throw new Error(data.error);
@@ -3537,7 +3540,13 @@ const App = {
       GatingPlot.render('gating-chart', data, {
         onQuadrantClick: (quadrant, threshX, threshY) => {
           this.loadQuadrantDetail(data.marker_x, data.marker_y, threshX, threshY, quadrant);
-        }
+        },
+        // Fired on drop after a threshold drag: recompute on all cells at the
+        // new thresholds, keeping the markers this plot was drawn with.
+        onThresholdCommit: (threshX, threshY) => this.runGating({
+          marker_x: data.marker_x, marker_y: data.marker_y,
+          threshold_x: threshX, threshold_y: threshY
+        })
       });
       // CSV export for gating stats (rendered by GatingPlot)
       setTimeout(() => this.addCSVExportButton('gating-stats', 'epiflow-gating-stats.csv'), 200);

@@ -49,10 +49,19 @@ const GatingPlot = {
     svg.append('text').attr('class', 'chart-title')
       .attr('x', totalW / 2).attr('y', 18).attr('text-anchor', 'middle')
       .text(`Quadrant Gating — ${data.marker_x} vs ${data.marker_y}`);
+    // R1: n_cells is every cell behind the statistics; n_displayed is the
+    // stratified display subsample. State the filters the endpoint applied.
+    const fa = data.filters_applied || {};
+    const shownStr = data.subsampled
+      ? ` · ${Number(data.n_displayed).toLocaleString()} shown (display subsample)` : '';
     svg.append('text')
       .attr('x', totalW / 2).attr('y', 34).attr('text-anchor', 'middle')
       .attr('font-size', '11px').attr('fill', '#64748b')
-      .text(`n = ${data.n_cells.toLocaleString()}${data.subsampled ? ' (subsampled)' : ''} · Drag blue lines to adjust thresholds`);
+      .text(`n = ${Number(data.n_cells).toLocaleString()} analyzed${shownStr} · filters: identity = ${fa.identity ?? 'All'}, cycle = ${fa.cell_cycle ?? 'All'}`);
+    svg.append('text')
+      .attr('x', totalW / 2).attr('y', 47).attr('text-anchor', 'middle')
+      .attr('font-size', '10px').attr('fill', '#94a3b8')
+      .text('Drag blue lines to adjust thresholds — statistics recompute on all cells when released');
 
     const points = ensureArray(data.points);
     const allX = points.map(p => Number(p.x));
@@ -201,85 +210,82 @@ const GatingPlot = {
 
     // Stats container ref
     const statsContainer = document.getElementById('gating-stats');
+    const quadOrder = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const quadStats = ensureArray(data.quad_stats);
 
-    const updateQuadrants = () => {
-      // Recompute quadrant stats client-side
-      const quadCounts = {};
-      groups.forEach(gr => {
-        quadCounts[gr] = { Q1: 0, Q2: 0, Q3: 0, Q4: 0, total: 0 };
-      });
-      points.forEach(p => {
-        const gr = String(p.group);
-        if (!quadCounts[gr]) return;
-        quadCounts[gr].total++;
-        const x = Number(p.x), y = Number(p.y);
-        if (x > threshX && y > threshY) quadCounts[gr].Q1++;
-        else if (x <= threshX && y > threshY) quadCounts[gr].Q2++;
-        else if (x <= threshX && y <= threshY) quadCounts[gr].Q3++;
-        else quadCounts[gr].Q4++;
-      });
-
-      // Update quad labels with combined percentages
-      ['Q1', 'Q2', 'Q3', 'Q4'].forEach(q => {
-        const pcts = groups.map(gr => {
-          const t = quadCounts[gr].total || 1;
-          return `${(100 * quadCounts[gr][q] / t).toFixed(1)}%`;
-        });
-        quadLabels[q].text(pcts.join(' / '));
-      });
-
-      // Update positions
+    const positionQuadLabels = () => {
       const tx = xScale(threshX);
       const ty = yScale(threshY);
       labelPositions.Q1 = [(tx + size) / 2, ty / 2];
       labelPositions.Q2 = [tx / 2, ty / 2];
       labelPositions.Q3 = [tx / 2, (ty + size) / 2];
       labelPositions.Q4 = [(tx + size) / 2, (ty + size) / 2];
-      ['Q1', 'Q2', 'Q3', 'Q4'].forEach(q => {
+      quadOrder.forEach(q => {
         quadLabels[q].attr('x', labelPositions[q][0]).attr('y', labelPositions[q][1]);
       });
+    };
 
-      // Update stats table
-      if (statsContainer) {
-        let html = '<table class="stats-table" style="font-size:12px;width:100%;max-width:700px;">';
-        html += `<thead><tr><th>Group</th><th>n</th>
-          <th>Q1 (${data.marker_x}+ / ${data.marker_y}+)</th>
-          <th>Q2 (${data.marker_x}− / ${data.marker_y}+)</th>
-          <th>Q3 (${data.marker_x}− / ${data.marker_y}−)</th>
-          <th>Q4 (${data.marker_x}+ / ${data.marker_y}−)</th>
-        </tr></thead><tbody>`;
-        groups.forEach(gr => {
-          const c = quadCounts[gr]; const t = c.total || 1;
-          html += `<tr>
-            <td><span style="display:inline-block;width:10px;height:10px;background:${colorScale(gr)};border-radius:2px;margin-right:4px;"></span>${gr}</td>
-            <td>${c.total.toLocaleString()}</td>
-            <td><strong>${(100*c.Q1/t).toFixed(1)}%</strong> <span style="color:#94a3b8">(${c.Q1})</span></td>
-            <td><strong>${(100*c.Q2/t).toFixed(1)}%</strong> <span style="color:#94a3b8">(${c.Q2})</span></td>
-            <td><strong>${(100*c.Q3/t).toFixed(1)}%</strong> <span style="color:#94a3b8">(${c.Q3})</span></td>
-            <td><strong>${(100*c.Q4/t).toFixed(1)}%</strong> <span style="color:#94a3b8">(${c.Q4})</span></td>
-          </tr>`;
+    // R1: the table is the server's quad_stats, computed on every analyzed
+    // cell. It is never a client-side recount of the display subsample.
+    const renderStats = () => {
+      quadOrder.forEach(q => {
+        const pcts = quadStats.map(s => `${Number(s[q]?.pct ?? 0).toFixed(1)}%`);
+        quadLabels[q].text(pcts.join(' / '));
+      });
+      positionQuadLabels();
+      if (!statsContainer) return;
+
+      let html = '<table class="stats-table" style="font-size:12px;width:100%;max-width:700px;">';
+      html += `<thead><tr><th>Group</th><th>n (all cells)</th>
+        <th>Q1 (${data.marker_x}+ / ${data.marker_y}+)</th>
+        <th>Q2 (${data.marker_x}− / ${data.marker_y}+)</th>
+        <th>Q3 (${data.marker_x}− / ${data.marker_y}−)</th>
+        <th>Q4 (${data.marker_x}+ / ${data.marker_y}−)</th>
+      </tr></thead><tbody>`;
+      quadStats.forEach(s => {
+        const gr = String(s.group);
+        html += `<tr>
+          <td><span style="display:inline-block;width:10px;height:10px;background:${colorScale(gr)};border-radius:2px;margin-right:4px;"></span>${gr}</td>
+          <td>${Number(s.n).toLocaleString()}</td>`;
+        quadOrder.forEach(q => {
+          html += `<td><strong>${Number(s[q]?.pct ?? 0).toFixed(1)}%</strong> <span style="color:#94a3b8">(${Number(s[q]?.n ?? 0)})</span></td>`;
         });
-        html += '</tbody></table>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
 
-        // Chi-square (from initial computation)
-        if (data.chi_test) {
-          const p = Number(data.chi_test.p_value);
-          const sig = p < 0.001 ? '***' : p < 0.01 ? '**' : p < 0.05 ? '*' : 'ns';
-          html += `<p style="font-size:12px;color:#64748b;margin-top:8px;">
-            Chi-square: χ² = ${Number(data.chi_test.statistic).toFixed(2)}, df = ${data.chi_test.df},
-            p = ${p < 0.001 ? p.toExponential(2) : p.toFixed(4)} ${sig}
-            ${p < 0.05 ? ' — quadrant distributions differ significantly between groups' : ''}
-          </p>`;
-        }
-        html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">
-          Thresholds: X = ${threshX.toFixed(3)}, Y = ${threshY.toFixed(3)}
+      // Chi-square (cell-level, from the server)
+      if (data.chi_test) {
+        const p = Number(data.chi_test.p_value);
+        const sig = p < 0.001 ? '***' : p < 0.01 ? '**' : p < 0.05 ? '*' : 'ns';
+        html += `<p style="font-size:12px;color:#64748b;margin-top:8px;">
+          Chi-square: χ² = ${Number(data.chi_test.statistic).toFixed(2)}, df = ${data.chi_test.df},
+          p = ${p < 0.001 ? p.toExponential(2) : p.toFixed(4)} ${sig}
+          ${p < 0.05 ? ' — quadrant distributions differ significantly between groups' : ''}
         </p>`;
-        statsContainer.innerHTML = html;
+      }
+      html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">
+        Thresholds: X = ${threshX.toFixed(3)}, Y = ${threshY.toFixed(3)}
+      </p>`;
+      statsContainer.innerHTML = html;
+    };
+
+    // While a threshold is being dragged the crosshairs move but no numbers
+    // are shown: the only data in the browser is the display subsample, and a
+    // live recount of it would be exactly the wrong number (R1). Stats come
+    // back from the server on release via onThresholdCommit.
+    const previewDrag = () => {
+      quadOrder.forEach(q => quadLabels[q].text(quadNames[q]));
+      positionQuadLabels();
+      if (statsContainer) {
+        statsContainer.innerHTML = `<p style="font-size:12px;color:#64748b;padding:8px 0;">
+          Thresholds moved (X = ${threshX.toFixed(3)}, Y = ${threshY.toFixed(3)}) — release to recompute on all cells.
+        </p>`;
       }
     };
 
     // Initial stats
-    updateQuadrants();
+    renderStats();
 
     // Expose state for external access
     this._threshX = () => threshX;
@@ -319,28 +325,42 @@ const GatingPlot = {
     };
     updateQuadRects();
 
-    // Drag behaviors
+    // Drag behaviors. d3 fires 'end' after a plain click too, so only commit
+    // (server recompute on all cells) when a threshold actually moved.
+    let dragMoved = false;
+    const commitThresholds = () => {
+      if (!dragMoved) return;
+      dragMoved = false;
+      if (options.onThresholdCommit) options.onThresholdCommit(threshX, threshY);
+    };
+
     const dragV = d3.drag()
+      .on('start', () => { dragMoved = false; })
       .on('drag', (event) => {
         const newX = Math.max(0, Math.min(size, event.x));
         threshX = xScale.invert(newX);
+        dragMoved = true;
         vLine.attr('x1', newX).attr('x2', newX);
         vHandle.attr('x', newX - 8);
         vLabel.attr('x', newX).text(threshX.toFixed(3));
-        updateQuadrants();
+        previewDrag();
         updateQuadRects();
-      });
+      })
+      .on('end', commitThresholds);
 
     const dragH = d3.drag()
+      .on('start', () => { dragMoved = false; })
       .on('drag', (event) => {
         const newY = Math.max(0, Math.min(size, event.y));
         threshY = yScale.invert(newY);
+        dragMoved = true;
         hLine.attr('y1', newY).attr('y2', newY);
         hHandle.attr('y', newY - 8);
         hLabel.attr('y', newY + 4).text(threshY.toFixed(3));
-        updateQuadrants();
+        previewDrag();
         updateQuadRects();
-      });
+      })
+      .on('end', commitThresholds);
 
     vHandle.call(dragV);
     vLine.call(dragV);

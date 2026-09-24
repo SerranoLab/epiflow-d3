@@ -729,11 +729,15 @@ compute_per_group_correlation <- function(data, h3_markers, group_by = "genotype
 #' @param threshold_y Y threshold (default = median)
 #' @param comparison_var Grouping variable
 #' @param h3_markers H3-PTM marker names
+#' @param max_points Cap on the number of points returned for display. Every
+#'   statistic (counts, percentages, chi-square, replicate tests) is computed on
+#'   all cells regardless; only `points` is subsampled. 0 or negative = no cap.
+#'   The endpoint owns the default (15000); there is no env-var default here.
 compute_gating <- function(data, marker_x, marker_y,
                            threshold_x = NULL, threshold_y = NULL,
                            comparison_var = "genotype",
                            h3_markers = NULL,
-                           max_points = as.integer(Sys.getenv("EPIFLOW_SCATTER_DISPLAY_CAP", "12000"))) {
+                           max_points = 0L) {
 
   cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
 
@@ -775,13 +779,8 @@ compute_gating <- function(data, marker_x, marker_y,
   if (is.null(threshold_x)) threshold_x <- median(scatter$x_val, na.rm = TRUE)
   if (is.null(threshold_y)) threshold_y <- median(scatter$y_val, na.rm = TRUE)
 
-  # Subsample for rendering
-  subsampled <- FALSE
-  if (nrow(scatter) > max_points) {
-    set.seed(42)
-    scatter <- scatter[sample(nrow(scatter), max_points), ]
-    subsampled <- TRUE
-  }
+  # R1: quadrants and every statistic below are computed on the full scatter.
+  # The display subsample happens at the very end, on `points` only.
 
   # Quadrant assignment
   scatter$quadrant <- dplyr::case_when(
@@ -873,8 +872,40 @@ compute_gating <- function(data, marker_x, marker_y,
     }
   }
 
-  # Prepare scatter points for frontend (minimal columns)
-  points <- scatter %>%
+  # Display subsample — points only; nothing above sees it (R1). Stratified by
+  # group: each group's share of max_points is proportional to sqrt(n_group),
+  # with a floor of min(n_group, 200, max_points %/% n_groups) so a small group
+  # never vanishes from the plot. The floors sum to at most max_points, so
+  # any overshoot from raising a group to its floor can always be taken back
+  # from groups above their floor: the total never exceeds max_points.
+  # max_points <= 0 means no cap.
+  display <- scatter
+  subsampled <- FALSE
+  if (is.finite(max_points) && max_points > 0 && nrow(scatter) > max_points) {
+    grp <- as.character(scatter[[comparison_var]])
+    grp_names <- as.character(groups)
+    n_g <- vapply(grp_names, function(g) sum(grp == g, na.rm = TRUE), integer(1))
+    w <- sqrt(n_g)
+    alloc <- floor(max_points * w / sum(w))
+    floor_g <- pmin(n_g, 200L, max_points %/% length(n_g))
+    alloc <- pmin(pmax(alloc, floor_g), n_g)
+    excess <- sum(alloc) - max_points
+    slack <- alloc - floor_g
+    if (excess > 0 && sum(slack) > 0) {
+      alloc <- alloc - pmin(slack, ceiling(excess * slack / sum(slack)))
+    }
+    set.seed(42)
+    keep <- unlist(lapply(grp_names, function(g) {
+      idx <- which(grp == g)
+      if (alloc[[g]] >= length(idx)) idx else sample(idx, alloc[[g]])
+    }))
+    display <- scatter[sort(keep), ]
+    subsampled <- TRUE
+  }
+
+  # Prepare scatter points for frontend (minimal columns). `q` is the
+  # full-data quadrant assignment carried onto the displayed subset.
+  points <- display %>%
     dplyr::transmute(
       x = x_val, y = y_val,
       group = .data[[comparison_var]],
@@ -886,7 +917,9 @@ compute_gating <- function(data, marker_x, marker_y,
     marker_y = marker_y,
     threshold_x = threshold_x,
     threshold_y = threshold_y,
-    n_cells = nrow(scatter),
+    n_cells = nrow(scatter),        # analyzed: all cells behind every statistic
+    n_displayed = nrow(points),     # drawn: the display subsample
+    max_points = max_points,
     subsampled = subsampled,
     points = safe_I(points),
     quad_stats = safe_I(quad_stats),
