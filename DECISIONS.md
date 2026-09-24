@@ -151,6 +151,15 @@ subsample — it needs its own endpoint or an `include_cells` flag, not
 
 ---
 
+## Open items without a finding ID (2026-09-24)
+- `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
+  reference it; rewritten 2026-09-24 (loopback binding, api.js base
+  detection, test scripts, env vars).
+- The plumber `cors` filter (`plumber.R`) defaults `EPIFLOW_CORS_ORIGIN` to
+  `*`; review and set an allowlist before release.
+
+---
+
 ## Template for the next entry
 
 ## <ID> — <one-line title>
