@@ -256,6 +256,7 @@ function(req) {
     session_id = session_id,
     is_example = TRUE,
     preset = preset,
+    seed = seed,   # echoed so callers (and test scripts) can pin the dataset
     example_label = preset_meta$label,
     n_cells = result$n_cells,
     phenotype_only = result$phenotype_only,

@@ -39,8 +39,13 @@ check <- function(ok, label) {
 }
 
 # ---- 1. Load the synthetic example: 2 genotypes x 3 replicates x 600 cells ----
-ex <- post("/api/example", list(preset = "ipsc_npc", cells_per_rep = 600))
+# Pass the seed explicitly (it is also the preset default) so the numbers this
+# script prints are pinned to the dataset, not to whatever the default becomes.
+EXAMPLE_SEED <- 4242L
+ex <- post("/api/example", list(preset = "ipsc_npc", cells_per_rep = 600, seed = EXAMPLE_SEED))
 if (!is.null(ex$error)) stop("example load failed: ", ex$error)
+if (!identical(as.integer(ex$seed), EXAMPLE_SEED))
+  stop("API did not echo the requested seed (got ", ex$seed, ")")
 sid     <- ex$session_id
 n_total <- as.integer(ex$n_cells)
 markers <- unlist(ex$h3_markers)

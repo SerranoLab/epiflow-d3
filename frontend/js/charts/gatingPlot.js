@@ -27,7 +27,9 @@ const GatingPlot = {
 
     this._currentData = data;
 
-    const margin = { top: 55, right: 30, bottom: 55, left: 65 };
+    // top: title (y 18), subtitle (34), drag hint (47), then the X-threshold
+    // value label sits 4px above the plot area — 70 keeps them from touching.
+    const margin = { top: 70, right: 30, bottom: 55, left: 65 };
     const size = Math.min(Math.max(100, container.clientWidth - margin.left - margin.right), 550);
     const totalW = size + margin.left + margin.right;
     const totalH = size + margin.top + margin.bottom;
@@ -258,7 +260,12 @@ const GatingPlot = {
       // Δ percentage points (g2 − g1) with its Welch 95% CI; Cohen's d and
       // the t/df sit in the tooltip on Δ rather than as columns.
       const fmtP = p => (Number.isFinite(p) ? (p < 0.001 ? p.toExponential(2) : p.toFixed(4)) : '—');
-      const fmtNum = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+      // toFixed keeps the sign of tiny negatives ("-0.0"); render those as 0.0.
+      const fmtNum = (v, d = 1) => {
+        if (!Number.isFinite(v)) return '—';
+        const s = v.toFixed(d);
+        return Number(s) === 0 ? (0).toFixed(d) : s;
+      };
       const repTests = ensureArray(data.chi_test?.replicate_quadrant_tests);
       if (repTests.length > 0) {
         const g1 = groups[0] ?? 'group 1', g2 = groups[1] ?? 'group 2';
