@@ -2,7 +2,14 @@
 // api.js — Communication layer with the R Plumber backend
 // ============================================================================
 
-const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:8000' : '';
+// Local dev serves the static frontend on :8080 and the plumber API on :8000
+// (CLAUDE_CODE_RUNBOOK.md step 1), so on any loopback hostname the API base
+// mirrors that host on port 8000. Everywhere else (nginx in production) /api
+// is same-origin.
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+const API_BASE = LOOPBACK_HOSTS.includes(window.location.hostname)
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : '';
 
 // Global utility: always returns an array regardless of auto_unbox
 function ensureArray(val) {
