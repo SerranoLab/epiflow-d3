@@ -66,16 +66,34 @@ n_distinct(cell_id)` and that percentages equal those from `max_points = Inf`.
 ---
 
 ## R3 — Grouped cross-validation is the headline; cell-level LDA and MANOVA are exploratory
-Status: proposed (2026-09-24)
+Status: done (2026-09-24)
 
 What changes. In the Diagnostic panel the grouped (leave-one-sample-out) CV
 becomes the first card, with a per-blind-sample table (held-out sample, true
 label, predicted label, fraction of cells voting). The cell-level 5-fold LDA
 accuracy moves below it, labeled exploratory, with no color grading. MANOVA
-on cells is either replaced by PERMANOVA on per-replicate mean profiles
-(vegan::adonis2, reporting R-squared) or labeled exploratory with the verdict
-text removed. Decision pending: PERMANOVA cannot reach p < 0.10 at 3 vs 3
-replicates, so at current sample sizes it is an effect-size tool only.
+on cells is replaced by PERMANOVA on per-replicate mean profiles, reporting
+R-squared as the effect size. PERMANOVA cannot reach p < 0.10 at 3 vs 3
+replicates, so at current sample sizes it is an effect-size tool; the card
+states the smallest attainable p for the replicate count at hand.
+
+Decisions (2026-09-24). (a) PERMANOVA is implemented without vegan:
+Anderson 2001 sum-of-squares partitioning on the Euclidean distance between
+per-sample mean profiles, every distinct label arrangement enumerated when
+that is feasible (exact p), 999 seeded permutations otherwise. Rejected
+`vegan::adonis2`: not installed locally nor in the image; the exact
+enumeration needs no dependency and gives the exact p the audit asked for.
+`test_diagnostic_cv.R` cross-checks R² and pseudo-F against adonis2 to 1e-8
+when vegan happens to be present, and skips with a message otherwise.
+(b) The headline grouped CV uses LDA on the same H3 features as the
+exploratory cell-split card, so the two numbers differ only by the split.
+(c) Effect size next to the headline: k of n held-out samples correct with
+an exact (Clopper-Pearson) 95% CI on n = samples; per row, the vote fraction.
+No p and no kappa at n = 6. (d) The two grouped-CV flows (headline card and
+the standalone RF/GBM/LDA card) both stay in this branch; see R15.
+(e) `runDiagnostic()` uses `Promise.allSettled`: a failed or slow grouped-CV
+call must not blank the PERMANOVA and LDA cards, and vice versa; each card
+renders its own result with any error inside that card.
 
 Benefit. The number a reader remembers is the one that generalizes to a new
 sample. The claim "diagnostic potential supported" no longer rests on a
@@ -93,8 +111,13 @@ Backing. Saeb et al. 2017, GigaScience (record-wise vs subject-wise CV);
 Luke 2017 for the small-sample df question.
 
 Verification. `test_diagnostic_cv.R`: on the synthetic example, assert the
-grouped CV returns `n_samples = 6`, a 6-row per-sample table, and that the
-cell-level LDA result carries `exploratory = TRUE` in the payload.
+grouped CV returns `n_samples = 6`, a 6-row per-sample table whose vote
+fractions are >= 1/n_classes, `n_samples_correct / n_samples_tested ==
+sample_accuracy` inside its exact CI; that the cell-level LDA result carries
+`exploratory = TRUE` and a `caution_note`; that `manova` is gone and
+`permanova` reports R² in [0, 1], `exact = TRUE`, 20 arrangements and a
+smallest attainable p of 0.10; and, when vegan is installed, that R² and
+pseudo-F match `vegan::adonis2(dist(means) ~ genotype)` to 1e-8.
 
 ---
 
@@ -187,6 +210,20 @@ Not fixed here (2): forwarding the tab filters to the detail endpoint — R11.
 
 ---
 
+## R15 — Standalone grouped-CV card duplicates the diagnostic computation
+Status: open (2026-09-24)
+
+What changes. After R3 the Diagnostic panel runs the grouped
+leave-one-sample-out CV (LDA) as its headline, while the separate
+"Diagnostic test — grouped CV" card (`index.html`, `ml-panel-groupedcv`;
+`app.js`, `runGroupedCV`) runs the same endpoint again with its own model
+dropdown and its own renderer without the per-sample table. Make the
+standalone card a shortcut into the Diagnostic panel (its model dropdown
+feeding the same render) rather than a second computation. Not in the
+audit/diagnostic branch.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
@@ -205,6 +242,21 @@ Not fixed here (2): forwarding the tab filters to the detail endpoint — R11.
   populations (seen on the 416k-cell, 3-group dataset, 2026-09-24): a
   population that runs along the diagonal is split across two or more
   quadrants by any choice of X/Y thresholds. This is the motivating case.
+
+## Milo: prerequisites and open questions
+Three points to settle before building neighborhood differential abundance
+(Milo, Dann et al. 2022, Nat Biotechnol) into EpiFlow:
+1. Neighborhood tuning for a 5- to 15-dimensional marker space versus the
+   30- to 50-PC scRNA setting Milo was designed for: k, refinement, and the
+   expected neighborhood size all need re-deriving for cytometry-scale
+   dimensionality.
+2. Power at 3 versus 3: four residual degrees of freedom in the NB GLM, so
+   expect few neighborhoods to pass spatial FDR on small experiments.
+   propeller-style cluster-level DA first tells you whether the replicate
+   count supports any DA claim at all before neighborhoods are tested.
+3. Batch: pooled datasets need a stamped batch field (data contract) and
+   alignment on the marker matrix, checked against a marker known not to
+   change, before Milo runs.
 
 ---
 

@@ -816,6 +816,100 @@ compute_signatures <- function(data, target_var = "genotype", h3_markers = NULL)
   )
 }
 
+# ---- Exact PERMANOVA on per-replicate mean profiles (R3) ----
+# One row per biological sample (target label x replicate), Euclidean distance
+# between mean marker profiles, sum-of-squares partitioning after Anderson 2001
+# (Austral Ecology 26:32-46). With few samples every distinct label arrangement
+# is enumerated, so the p-value is exact and its floor is known; otherwise 999
+# seeded random permutations. Dependency-free: r2 and pseudo_f equal
+# vegan::adonis2(dist(M) ~ g) on the same means (test_diagnostic_cv.R checks
+# this when vegan happens to be installed).
+
+# All distinct arrangements of a label multiset, one per row (no deps).
+.epiflow_label_arrangements <- function(g) {
+  rec <- function(counts) {
+    if (sum(counts) == 0) return(list(character(0)))
+    out <- list()
+    for (lab in names(counts)[counts > 0]) {
+      c2 <- counts; c2[lab] <- c2[lab] - 1L
+      for (tail in rec(c2)) out[[length(out) + 1L]] <- c(lab, tail)
+    }
+    out
+  }
+  do.call(rbind, rec(table(g)))
+}
+
+.epiflow_permanova_replicates <- function(wide_df, target_var, marker_cols,
+                                         n_perm = 999, max_arrangements = 20000) {
+  if (!"replicate" %in% names(wide_df))
+    return(list(error = "PERMANOVA needs biological replicates: no replicate column.",
+                needs_replicates = TRUE))
+  means <- wide_df %>%
+    dplyr::group_by(.data[[target_var]], replicate) %>%
+    dplyr::summarise(dplyr::across(dplyr::all_of(marker_cols), ~ mean(.x, na.rm = TRUE)),
+                     n_cells = dplyr::n(), .groups = "drop")
+  g <- as.character(means[[target_var]])
+  per_class <- table(g)
+  if (length(per_class) < 2 || any(per_class < 2))
+    return(list(error = paste0(
+      "PERMANOVA needs at least 2 biological samples per class. Observed: ",
+      paste(sprintf("%s=%d", names(per_class), as.integer(per_class)), collapse = ", "), "."),
+      needs_replicates = TRUE,
+      samples_per_class = as.list(setNames(as.integer(per_class), names(per_class)))))
+
+  M  <- as.matrix(means[, marker_cols, drop = FALSE])
+  D2 <- as.matrix(stats::dist(M))^2
+  N  <- nrow(M)
+  a  <- length(per_class)
+
+  # Anderson 2001: SS_T over all pairs, SS_W over within-group pairs, pseudo-F
+  # on the between/within ratio with (a - 1) and (N - a) df.
+  stat_of <- function(lab) {
+    ss_t <- sum(D2[upper.tri(D2)]) / N
+    ss_w <- 0
+    for (cl in unique(lab)) {
+      i <- which(lab == cl)
+      ss_w <- ss_w + sum(D2[i, i][upper.tri(D2[i, i], diag = FALSE)]) / length(i)
+    }
+    ss_a <- ss_t - ss_w
+    c(f = (ss_a / (a - 1)) / (ss_w / (N - a)), r2 = ss_a / ss_t)
+  }
+  obs <- stat_of(g)
+
+  # Exact when the arrangements can be enumerated. Arrangements that only
+  # relabel equal-sized groups give the same partition and the same F, so the
+  # smallest attainable p is that count over all arrangements (3 vs 3: 2/20).
+  n_arr <- factorial(N) / prod(factorial(as.integer(per_class)))
+  if (n_arr <= max_arrangements) {
+    arr <- .epiflow_label_arrangements(g)
+    f_perm <- apply(arr, 1, function(lab) stat_of(lab)[["f"]])
+    p_value <- mean(f_perm >= obs[["f"]] - 1e-12)
+    n_equiv <- prod(factorial(as.integer(table(as.integer(per_class)))))
+    perm_info <- list(exact = TRUE, n_arrangements = nrow(arr),
+                      min_attainable_p = n_equiv / nrow(arr))
+  } else {
+    set.seed(42)
+    f_perm <- vapply(seq_len(n_perm), function(i) stat_of(sample(g))[["f"]], numeric(1))
+    p_value <- (1 + sum(f_perm >= obs[["f"]] - 1e-12)) / (n_perm + 1)
+    perm_info <- list(exact = FALSE, n_permutations = n_perm,
+                      min_attainable_p = 1 / (n_perm + 1))
+  }
+
+  c(list(
+    test = "PERMANOVA on per-replicate mean profiles (Euclidean; Anderson 2001)",
+    target_var = target_var,
+    r2 = unname(obs[["r2"]]),
+    pseudo_f = unname(obs[["f"]]),
+    df1 = a - 1L, df2 = N - a,
+    p_value = p_value,
+    n_samples = N,
+    samples_per_class = as.list(setNames(as.integer(per_class), names(per_class))),
+    sample_means = data.frame(sample = paste(g, means$replicate, sep = "::"), group = g,
+                              n_cells = means$n_cells, M, check.names = FALSE,
+                              stringsAsFactors = FALSE)
+  ), perm_info)
+}
+
 # ---- Enhanced signatures: stratified + diagnostic assessment ----
 
 compute_signatures_diagnostic <- function(data, target_var = "genotype",
@@ -893,22 +987,13 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
     strat_sigs <- Filter(Negate(is.null), strat_sigs)
   }
 
-  # ---- 3. MANOVA: multivariate test of genotype effect ----
-  manova_result <- tryCatch({
-    mat <- as.matrix(wide_df[, marker_cols])
-    formula_str <- paste("mat ~", target_var)
-    m <- stats::manova(as.formula(formula_str), data = wide_df)
-    s <- summary(m, test = "Pillai")
-    pillai_row <- s$stats[1, ]  # first row = target_var effect
-    list(
-      test = "Pillai's trace",
-      statistic = unname(pillai_row["Pillai"]),
-      approx_f = unname(pillai_row["approx F"]),
-      df1 = unname(pillai_row["num Df"]),
-      df2 = unname(pillai_row["den Df"]),
-      p_value = unname(pillai_row["Pr(>F)"])
-    )
-  }, error = function(e) list(error = e$message))
+  # ---- 3. PERMANOVA on per-replicate mean profiles (R3) ----
+  # Replaces the cell-level MANOVA (df2 = cells, pseudoreplicated). The
+  # biological sample is the unit; R-squared is the effect size, the exact
+  # permutation p is secondary and its floor is reported.
+  permanova_result <- tryCatch(
+    .epiflow_permanova_replicates(wide_df, target_var, marker_cols),
+    error = function(e) list(error = e$message))
 
   # ---- 4. LDA diagnostic classifier ----
   lda_result <- tryCatch({
@@ -971,7 +1056,16 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
       per_class = per_class,
       strat_accuracy = strat_accuracy,
       n_cells = n,
-      n_folds = 5
+      n_folds = 5,
+      # R3: folds are drawn over cells, so this is exploratory. The frontend
+      # renders caution_note; the flag lets tests and the report see it too.
+      exploratory = TRUE,
+      split = "cell",
+      caution_note = paste0(
+        "5-fold split by cell: cells from every biological sample appear in both ",
+        "training and test folds, so this accuracy can reflect sample fingerprints ",
+        "rather than generalization to a new sample. The grouped leave-one-sample-out ",
+        "CV above is the diagnostic estimate.")
     )
   }, error = function(e) list(error = e$message))
 
@@ -1054,7 +1148,7 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
   list(
     global_signatures = global_sigs,
     stratified_signatures = strat_sigs,
-    manova = manova_result,
+    permanova = permanova_result,
     lda_diagnostic = lda_result,
     consistency = consistency,
     kmeans = kmeans_result,
@@ -1118,6 +1212,7 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
 
   cell_true <- character(0); cell_pred <- character(0)
   samp_true <- character(0); samp_pred <- character(0); fold_acc <- numeric(0)
+  samp_name <- character(0); samp_n <- integer(0); samp_vote <- numeric(0)   # per-sample table (R3)
 
   for (f in sort(unique(fold_of))) {
     test_s <- names(fold_of)[fold_of == f]
@@ -1135,8 +1230,11 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
     for (s in test_s) {                        # sample-level majority vote
       idx <- sid[te] == s; prs <- pr[idx]; prs <- prs[!is.na(prs)]
       if (!length(prs)) next
-      maj <- names(sort(table(prs), decreasing = TRUE))[1]
+      votes <- sort(table(prs), decreasing = TRUE)
+      maj <- names(votes)[1]
       samp_true <- c(samp_true, samp_class[samples == s]); samp_pred <- c(samp_pred, maj)
+      samp_name <- c(samp_name, s); samp_n <- c(samp_n, length(prs))
+      samp_vote <- c(samp_vote, as.numeric(votes[1]) / length(prs))   # share of cells behind the call
     }
   }
   if (!length(cell_true))
@@ -1152,6 +1250,14 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
     if (prec + rec > 0) 2*prec*rec/(prec+rec) else 0 }, numeric(1))
   cm <- table(Predicted = cell_pred, Actual = cell_true)
 
+  # R3: the headline is k of n held-out samples called correctly, with an
+  # exact (Clopper-Pearson) 95% CI on n = samples — the replicate-level
+  # effect size; no p. The per-sample table is what a reader can check.
+  n_tested  <- length(samp_true)
+  k_correct <- sum(samp_pred == samp_true)
+  sample_ci <- if (n_tested > 0) as.numeric(stats::binom.test(k_correct, n_tested)$conf.int)
+               else c(NA_real_, NA_real_)
+
   list(feasible = TRUE,
     cv_type = if (n_samp <= 10) "leave-one-sample-out" else paste0("grouped ", k, "-fold"),
     n_samples = n_samp,
@@ -1159,7 +1265,13 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
     test_accuracy = mean(cell_pred == cell_true, na.rm = TRUE),   # held-out cell accuracy
     balanced_accuracy = mean(recalls, na.rm = TRUE),
     macro_f1 = mean(f1s, na.rm = TRUE),
-    sample_accuracy = if (length(samp_true)) mean(samp_pred == samp_true, na.rm = TRUE) else NA_real_,
+    sample_accuracy = if (n_tested > 0) k_correct / n_tested else NA_real_,
+    n_samples_tested = n_tested,
+    n_samples_correct = k_correct,
+    sample_accuracy_ci = sample_ci,
+    per_sample = data.frame(sample = samp_name, true = samp_true, predicted = samp_pred,
+                            n_cells = samp_n, vote_fraction = round(samp_vote, 4),
+                            correct = samp_pred == samp_true, stringsAsFactors = FALSE),
     fold_accuracy_mean = mean(fold_acc, na.rm = TRUE),
     fold_accuracy_sd = stats::sd(fold_acc, na.rm = TRUE),
     per_class_recall = as.list(setNames(round(recalls, 4), classes)),

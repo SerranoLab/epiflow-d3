@@ -2494,7 +2494,7 @@ const App = {
   },
 
   async runDiagnostic() {
-    this.showLoading('Running diagnostic signature assessment (MANOVA + LDA + LMM)...');
+    this.showLoading('Running diagnostic assessment (grouped CV + PERMANOVA + LDA + LMM)...');
     this.hideInlineMessage('diag-message');
     try {
       const target = document.getElementById('ml-target').value;
@@ -2503,62 +2503,55 @@ const App = {
       const selectedMarkers = this.getSelectedFeatures('ml-feature-checkboxes');
       const h3Only = selectedMarkers ? selectedMarkers.filter(m =>
         ensureArray(DataManager.metadata?.h3_markers).includes(m)) : null;
+      // The headline grouped CV uses the same LDA on the same H3 features as the
+      // exploratory cell-split card, so the two differ only by the split.
+      const cvFeatures = h3Only || ensureArray(DataManager.metadata?.h3_markers);
 
-      const data = await EpiFlowAPI.runSignaturesDiagnostic({
-        target_var: target,
-        selected_markers: h3Only,
-        stratify_by: stratify === 'None' ? null : stratify,
-        n_clusters: kVal > 0 ? kVal : null
-      });
+      // R3: the grouped leave-one-sample-out CV is the headline and runs
+      // alongside the signature assessment. allSettled, never all: a failed
+      // or slow call must not blank the other cards; each renders its own
+      // result and a failure shows inside the card that failed.
+      const [sigRes, cvRes] = await Promise.allSettled([
+        EpiFlowAPI.runSignaturesDiagnostic({
+          target_var: target,
+          selected_markers: h3Only,
+          stratify_by: stratify === 'None' ? null : stratify,
+          n_clusters: kVal > 0 ? kVal : null
+        }),
+        EpiFlowAPI.runDiagnosticCV({ target_var: target, method: 'lda', selected_features: cvFeatures })
+      ]);
 
+      // 1. Grouped CV — the diagnostic headline
+      const cv = cvRes.status === 'fulfilled' ? cvRes.value
+        : { error: cvRes.reason?.message || String(cvRes.reason) };
+      this.renderDiagnosticGroupedCv('diag-groupedcv', cv);
+
+      if (sigRes.status !== 'fulfilled') {
+        this.showInlineMessage('diag-message', sigRes.reason?.message || String(sigRes.reason), 'error');
+        return;
+      }
+      const data = sigRes.value;
       if (data.error) {
         this.showInlineMessage('diag-message', data.error, 'error');
         return;
       }
 
-      // 1. MANOVA results
-      const manova = data.manova;
-      if (manova && !manova.error) {
-        const pVal = Number(manova.p_value);
-        const hasPval = !isNaN(pVal) && manova.p_value !== null;
-        const sig = hasPval && pVal < 0.05;
-        const nReps = manova.n_replicates ? ` (n=${manova.n_replicates} replicates)` : '';
-        document.getElementById('diag-manova').innerHTML = `
-          <h4 style="margin:8px 0 4px;"><i class="fas fa-chart-bar"></i> MANOVA — Multivariate Profile Test</h4>
-          <table class="stats-table">
-            <tr><th>Test</th><th>Statistic</th><th>Approx. F</th><th>df₁</th><th>df₂</th><th>p-value</th><th>Interpretation</th></tr>
-            <tr>
-              <td>${manova.test}${nReps}</td>
-              <td>${Number(manova.statistic).toFixed(4)}</td>
-              <td>${hasPval ? Number(manova.approx_f).toFixed(2) : '—'}</td>
-              <td>${hasPval ? manova.df1 : '—'}</td>
-              <td>${hasPval ? manova.df2 : '—'}</td>
-              <td class="${hasPval ? (sig ? 'sig' : 'ns') : ''}">${hasPval ? (pVal < 0.001 ? pVal.toExponential(2) : pVal.toFixed(4)) : '— suppressed'}</td>
-              <td style="font-size:11px;color:${hasPval ? (sig ? '#16a34a' : '#dc2626') : '#f59e0b'};">
-                ${hasPval ? (sig ? '✓ H3-PTM profiles significantly differ — diagnostic potential supported'
-                      : '✗ No significant multivariate difference')
-                    : '⚠ p-value suppressed (see note below)'}
-              </td>
-            </tr>
-          </table>
-          ${manova.note ? '<p style="font-size:11px;color:#64748b;margin:4px 0 0;padding:4px 8px;background:#f8fafc;border-radius:4px;"><i class="fas fa-info-circle"></i> ' + manova.note + '</p>' : ''}`;
-      } else {
-        document.getElementById('diag-manova').innerHTML = manova?.error ?
-          `<p style="color:#dc2626;padding:8px;">MANOVA error: ${manova.error}</p>` : '';
-      }
+      // 2. PERMANOVA on per-replicate mean profiles — R² first, p secondary
+      this.renderDiagnosticPermanova('diag-permanova', data.permanova);
 
-      // 2. LDA diagnostic
+      // 3. Cell-split LDA — exploratory (R3): folds are drawn over cells, so
+      // no colour grading and no "diagnostic" in the title.
       const lda = data.lda_diagnostic;
       if (lda && !lda.error) {
         const acc = Number(lda.cv_accuracy);
-        const accColor = acc > 0.8 ? '#16a34a' : acc > 0.6 ? '#d97706' : '#dc2626';
-        let html = `<h4 style="margin:12px 0 4px;"><i class="fas fa-crosshairs"></i> LDA Diagnostic Classifier (${lda.n_folds}-fold CV, n=${Number(lda.n_cells).toLocaleString()})</h4>`;
+        const accColor = '#64748b';
+        let html = `<h4 style="margin:12px 0 4px;"><i class="fas fa-crosshairs"></i> Cell-split ${lda.n_folds}-fold LDA — exploratory (n=${Number(lda.n_cells).toLocaleString()} cells)</h4>`;
         html += `<div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">`;
 
-        // Accuracy card
-        html += `<div style="text-align:center;padding:12px 20px;background:${accColor}11;border:2px solid ${accColor};border-radius:8px;">
+        // Accuracy card — neutral: a cell-split accuracy is not a diagnostic number
+        html += `<div style="text-align:center;padding:12px 20px;background:#f8fafc;border:2px solid ${accColor};border-radius:8px;">
           <div style="font-size:28px;font-weight:700;color:${accColor};">${(acc * 100).toFixed(1)}%</div>
-          <div style="font-size:11px;color:#64748b;">CV Accuracy</div>
+          <div style="font-size:11px;color:#64748b;">cell-split CV accuracy (exploratory)</div>
         </div>`;
 
         // Per-class metrics
@@ -2731,14 +2724,101 @@ const App = {
       }
 
       // Add CSV export buttons for diagnostic tables
-      this.addCSVExportButton('diag-manova', 'epiflow-diagnostic-manova.csv');
-      this.addCSVExportButton('diag-lda', 'epiflow-diagnostic-lda.csv');
+      this.addCSVExportButton('diag-groupedcv', 'epiflow-diagnostic-grouped-cv.csv');
+      this.addCSVExportButton('diag-permanova', 'epiflow-diagnostic-permanova.csv');
+      this.addCSVExportButton('diag-lda', 'epiflow-diagnostic-lda-exploratory.csv');
       this.addCSVExportButton('diag-consistency', 'epiflow-diagnostic-consistency.csv');
       this.addCSVExportButton('diag-kmeans', 'epiflow-diagnostic-kmeans.csv');
 
     } catch (err) {
       this.showInlineMessage('diag-message', err.message, 'error');
     } finally { this.hideLoading(); }
+  },
+
+  // R3: grouped leave-one-sample-out CV card — the diagnostic headline. The
+  // number is k of n held-out biological samples called correctly with an
+  // exact binomial 95% CI; no colour grading. A refusal (needs_replicates)
+  // IS the headline: "not estimable" is the honest number.
+  renderDiagnosticGroupedCv(containerId, cv) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const pct = x => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(1) + '%' : '—');
+    const head = `<h4 style="margin:8px 0 4px;"><i class="fas fa-vials"></i> Diagnostic accuracy — grouped leave-one-sample-out CV (LDA)</h4>`;
+    const spcOf = o => (o ? Object.entries(o).map(([g, v]) => g + ' = ' + v).join(', ') : '');
+
+    if (!cv || cv.error) {
+      const spc = cv?.samples_per_class
+        ? `<div style="margin-top:6px;font-size:11px;color:#64748b;">Samples per class: ${spcOf(cv.samples_per_class)}</div>` : '';
+      el.innerHTML = head + `<div style="padding:10px 12px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#92400e;">
+        <strong>Not estimable.</strong> ${cv?.error || 'Grouped CV returned no result.'}${spc}</div>`;
+      return;
+    }
+
+    const k = Number(cv.n_samples_correct), n = Number(cv.n_samples_tested);
+    const ci = ensureArray(cv.sample_accuracy_ci).map(Number);
+    let html = head + `<div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">`;
+    html += `<div style="text-align:center;padding:12px 20px;background:#ecfdf5;border:2px solid #10b981;border-radius:8px;">
+      <div style="font-size:28px;font-weight:700;color:#065f46;">${k} / ${n}</div>
+      <div style="font-size:11px;color:#065f46;">held-out samples called correctly</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px;">${pct(cv.sample_accuracy)} · exact 95% CI ${ci.length === 2 ? `[${pct(ci[0])}, ${pct(ci[1])}]` : '—'}</div>
+    </div>`;
+
+    const rows = ensureArray(cv.per_sample);
+    if (rows.length) {
+      html += `<div><table class="stats-table" style="font-size:12px;"><thead>
+        <tr><th>Held-out sample</th><th>True</th><th>Predicted</th><th>Cells</th><th>Vote fraction</th><th></th></tr></thead><tbody>`;
+      rows.forEach(r => {
+        const ok = r.correct === true || r.correct === 'TRUE';
+        html += `<tr><td>${r.sample}</td><td>${r.true}</td><td>${r.predicted}</td>
+          <td>${Number(r.n_cells).toLocaleString()}</td><td>${pct(r.vote_fraction)}</td>
+          <td style="color:${ok ? '#16a34a' : '#dc2626'};font-weight:700;">${ok ? '✓' : '✗'}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    const recalls = cv.per_class_recall
+      ? Object.entries(cv.per_class_recall).map(([g, v]) => g + ' ' + pct(v)).join(' · ') : '—';
+    html += `<p style="font-size:11px;color:#64748b;margin:8px 0 0;">
+      ${cv.cv_type} · ${cv.n_samples} biological samples (${spcOf(cv.samples_per_class)}) · splits by sample, never by cell ·
+      held-out cell accuracy ${pct(cv.test_accuracy)} · balanced accuracy ${pct(cv.balanced_accuracy)} ·
+      macro F1 ${Number.isFinite(Number(cv.macro_f1)) ? Number(cv.macro_f1).toFixed(3) : '—'} · per-class recall ${recalls}
+    </p>
+    <p style="font-size:10px;color:#94a3b8;margin:4px 0 0;">With this few samples the interval is the finding: a feasibility estimate, not validation.</p>`;
+    el.innerHTML = html;
+  },
+
+  // R3: PERMANOVA on per-replicate mean profiles (Anderson 2001). R² is the
+  // effect size and the headline; p is secondary and its floor at this
+  // replicate count is stated. Never a verdict sentence.
+  renderDiagnosticPermanova(containerId, pm) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const head = `<h4 style="margin:12px 0 4px;"><i class="fas fa-chart-bar"></i> PERMANOVA — per-replicate mean H3-PTM profiles</h4>`;
+    if (!pm || pm.error) {
+      el.innerHTML = head + `<div style="padding:10px 12px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#92400e;">
+        <strong>Not estimable.</strong> ${pm?.error || 'PERMANOVA returned no result.'}</div>`;
+      return;
+    }
+    const fmtP = x => (Number.isFinite(x) ? (x < 0.001 ? x.toExponential(2) : x.toFixed(3)) : '—');
+    const r2 = Number(pm.r2), p = Number(pm.p_value), minP = Number(pm.min_attainable_p);
+    const spc = pm.samples_per_class
+      ? Object.entries(pm.samples_per_class).map(([g, v]) => g + ' = ' + v).join(', ') : '';
+    const pHead = pm.exact ? `p (exact, ${pm.n_arrangements} label arrangements)` : `p (${pm.n_permutations} permutations)`;
+    el.innerHTML = head + `
+      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
+        <div style="text-align:center;padding:12px 20px;background:#f8fafc;border:2px solid #64748b;border-radius:8px;">
+          <div style="font-size:28px;font-weight:700;color:#1e293b;">R² = ${Number.isFinite(r2) ? r2.toFixed(3) : '—'}</div>
+          <div style="font-size:11px;color:#64748b;">share of between-sample variance explained by ${pm.target_var || 'group'}</div>
+        </div>
+        <table class="stats-table" style="font-size:12px;">
+          <tr><th>Test</th><th>pseudo-F</th><th>df₁</th><th>df₂</th><th>${pHead}</th><th>Smallest attainable p</th></tr>
+          <tr><td>${pm.test}</td><td>${Number(pm.pseudo_f).toFixed(2)}</td><td>${pm.df1}</td><td>${pm.df2}</td>
+              <td>${fmtP(p)}</td><td>${fmtP(minP)}</td></tr>
+        </table>
+      </div>
+      <p style="font-size:11px;color:#64748b;margin:6px 0 0;">${pm.n_samples} biological samples (${spc}); one mean profile per sample, Euclidean distance.
+        At this replicate count no p below ${fmtP(minP)} is possible, so R² is the number to read; p only says whether the observed partition is the most extreme one.</p>`;
   },
 
   renderStratifiedSignaturesChart(containerId, stratSigs, strata, groups, markers, stratifyBy) {
@@ -3892,7 +3972,7 @@ const App = {
       { id: 'panel-ml', title: 'Machine Learning', charts: ['ml-rf-importance', 'ml-gbm-importance', 'ml-signatures-chart'],
         stats: ['ml-rf-results', 'ml-gbm-results', 'ml-sig-results'] },
       { id: 'panel-ml', title: 'Diagnostic Assessment', charts: ['diag-strat-chart'],
-        stats: ['diag-manova', 'diag-lda', 'diag-consistency'] }
+        stats: ['diag-groupedcv', 'diag-permanova', 'diag-lda', 'diag-consistency'] }
     ];
 
     let panelCount = 0;
@@ -3941,7 +4021,7 @@ const App = {
         <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Per-group Pearson/Spearman correlations are compared as an exploratory descriptor (Δr). No replicate-level significance test is reported: correlations are computed across cells, so putting replicate N into a cell-derived Fisher-z SE is not a coherent sampling model. Δr shows where co-regulation shifts and should be confirmed with per-replicate correlation or a hierarchical bootstrap.</p>
-        <p><strong>Machine learning:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Note: cell-level train/test splits may overestimate accuracy due to replicate leakage; leave-one-replicate-out CV is recommended for rigorous validation.</p>
+        <p><strong>Machine learning and diagnostic assessment:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Diagnostic accuracy was estimated by leave-one-sample-out cross-validation of an LDA classifier on held-out biological samples (majority vote per sample; exact binomial 95% confidence interval on the number of samples). Multivariate differences between per-replicate mean H3-PTM profiles were tested by exact PERMANOVA (Anderson 2001, Austral Ecology 26:32-46) with R² as the effect size; the smallest attainable p is 1 over the number of distinct label arrangements (0.10 for 3 vs 3 replicates). Cell-level classification accuracy and any cell-level multivariate test are exploratory: cells from one sample fall in both training and test folds, so they do not measure generalization to a new sample.</p>
         <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.3.4 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
       </div>
     `);
