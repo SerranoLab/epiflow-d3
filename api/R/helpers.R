@@ -584,7 +584,7 @@ compute_violin_data <- function(data, marker, group_by = "genotype",
           p_value = test$p.value,
           direction = ifelse(mean(g2_reps, na.rm = TRUE) > mean(g1_reps, na.rm = TRUE), "up", "down"),
           n_replicates = paste0(n1, " vs ", n2),
-          test_type = "t-test (replicate means)"
+          test_type = "Welch t (replicate means)"
         )
       })
       sig_tests <- Filter(Negate(is.null), sig_tests)
@@ -640,7 +640,7 @@ compute_violin_data <- function(data, marker, group_by = "genotype",
             p_adjusted = test$p.value,   # single test, no BH needed
             direction = ifelse(mean(g2_reps, na.rm = TRUE) > mean(g1_reps, na.rm = TRUE), "up", "down"),
             n_replicates = paste0(n1, " vs ", n2),
-            test_type = "t-test (replicate means)"
+            test_type = "Welch t (replicate means)"
           ))
         }
       }

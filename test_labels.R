@@ -20,5 +20,13 @@ check(has(f, "' (arcsinh intensity)'", 2), "both violin y-axis labels read '(arc
 check(lacks(f, "(z-score)"), "no '(z-score)' label remains in violinPlot.js")
 check(ver_of("violinPlot.js") >= "1.2.3", "violinPlot.js cache-busting bump (>= 1.2.3)")
 
+# ---- L2: grouped violin subtitle names the Welch t on replicate means ----
+cat("\n--- L2 grouped violin subtitle ---\n")
+check(lacks(f, "Wilcoxon test per group"), "no fixed 'Wilcoxon test per group' subtitle in violinPlot.js")
+check(has(f, "${testName} per group, BH across groups"), "subtitle is built from the payload's test_type")
+check(has("api/R/helpers.R", 'test_type = "Welch t (replicate means)"', 2) && lacks("api/R/helpers.R", 'test_type = "t-test (replicate means)"'),
+      "helpers.R test_type reads 'Welch t (replicate means)' in both violin payloads")
+check(ver_of("violinPlot.js") >= "1.2.4", "violinPlot.js cache-busting bump (>= 1.2.4)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

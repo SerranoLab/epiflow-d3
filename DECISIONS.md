@@ -784,6 +784,16 @@ imported arcsinh intensity for H3 marks and phenotypic markers alike (the
 medians on the axis read ~4.9, not 0). Both y-axis labels in
 `violinPlot.js` now read "marker (arcsinh intensity)".
 
+### L2 — Grouped violin subtitle said "Wilcoxon test per group"; the payload runs a Welch t on replicate means
+Status: done (2026-09-25)
+
+`compute_violin_data` aggregates to replicate means within each group and
+runs `t.test` (Welch) between the two colour levels, BH across groups
+(`helpers.R`); `test_type` now reads "Welch t (replicate means)" in both the
+grouped and the simple payloads, and the subtitle is built from that field
+("Welch t (replicate means) per group, BH across groups: * p<0.05 …"), so
+the label can no longer drift from the test.
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

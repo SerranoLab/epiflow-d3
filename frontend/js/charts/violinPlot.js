@@ -133,13 +133,17 @@ const ViolinPlot = {
       .text(options.title || `${data.marker} — by ${data.group_by}, colored by ${data.color_by}`);
 
     // Subtitle with significance info
-    const hasSig = data.significance && ensureArray(data.significance).length > 0;
+    // L2: the subtitle names the test the payload ran (a Welch t on replicate
+    // means per group, BH across groups) — never a fixed "Wilcoxon" string.
+    const sigList = ensureArray(data.significance || []);
+    const hasSig = sigList.length > 0;
+    const testName = hasSig ? (sigList[0].test_type || 'replicate-level test') : '';
     svg.append('text')
       .attr('x', (width + margin.left + margin.right) / 2)
       .attr('y', 33)
       .attr('text-anchor', 'middle')
       .attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text(hasSig ? 'Wilcoxon test per group (BH-adjusted): * p<0.05, ** p<0.01, *** p<0.001' : '');
+      .text(hasSig ? `${testName} per group, BH across groups: * p<0.05, ** p<0.01, *** p<0.001` : '');
 
     // Outer scale (groups) and inner scale (colors within group)
     const xOuter = d3.scaleBand()
