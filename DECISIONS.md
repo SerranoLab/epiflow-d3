@@ -293,6 +293,67 @@ at 2–3 significant digits.
 
 ---
 
+## R17 — LMM endpoints hid the fit error behind "Model could not be fit"
+Status: done (2026-09-24)
+
+What changes. `fit_stratified_lmm()` returns NULL from five places (marker
+not found, < 2 groups, < 100 cells in a subset, `lm` failure, `lmer`
+failure — the last two via `try(..., silent = TRUE)`), and the endpoints
+turned every one of them into the same sentence. Each site now returns a
+zero-row data frame carrying the reason as `attr(, "reason")`
+(`.lmm_empty()` / `.lmm_reason()`), so callers keep their "no rows"
+contract and `run_all_markers_lmm()` carries one reason per marker;
+`/api/stats/lmm` and `/api/stats/all-markers` append them: "Model could
+not be fit: subset 'All cells', lmer (416,000 cells, 6 samples): <lmer
+message>". Rejected: a global last-error slot — `run_all_markers_lmm()`
+fits many markers and a single slot keeps only the last reason. Surfaced
+by R18.
+
+---
+
+## R18 — LMM for H3K27ac by genotype fails on the 416k-cell dataset; by identity it fits
+Status: done (2026-09-24)
+
+Resolution. With R17's message in place the alert read: stratify_by =
+genotype with comparison_var = genotype. Every stratum then holds a single
+group, the per-stratum guard fires for each, and the old wording ("... or
+fewer than 2 groups") hid which of its two conditions applied. Fix: (1)
+`run_one_model()` has two guards with two reasons — "N cells, fewer than
+100" and "only one <var> level ('<level>') in this stratum" — and reports
+only the one that applied; (2) `.lmm_same_var_error()` makes stratify_by ==
+comparison_var a dedicated error on `/api/stats/lmm` and
+`/api/stats/all-markers` (and a zero-row reason inside
+`fit_stratified_lmm()`), not "could not be fit"; (3) the Statistics/forest
+stratify-by dropdowns disable the current comparison variable with a
+"(comparison variable)" hint and fall back to None when it changes — the
+dropdown lists every categorical column, so excluding is the right move
+(mapping it to "no stratification" would misdescribe the control). The
+diagnostic panel's dropdown is keyed to ml-target and keeps its own
+same-as-target handling. `test_lmm_errors.R` covers all three.
+
+Earlier reproduction attempt (kept for the record):
+
+What changes. On the 416k-cell, 3-group dataset
+(`iPER_June26_epiflow_data_20260614.rds`: 416,094 cells, HBVP / mesPC
+WTC11 / ncPC WTC11 × R1–R4), "Run LMM" for H3K27ac by Genotype without
+stratification returned "Model could not be fit" in the browser, while the
+same marker stratified by Identity fit every stratum.
+
+Reproduction (2026-09-24). Not reproduced with a clean session. In-process
+`fit_stratified_lmm(d, "H3K27ac", comparison_var = "genotype")` on all
+416,094 cells fits in 2 s (mesPC β = 0.082, p = 0.259; ncPC β = 0.371,
+p = 0.00041; n_reps = 12); stratified by identity fits 8 rows. Through the
+API on a fresh upload, `/api/stats/lmm` returns 2 rows for every body the
+frontend can send (marker only; `stratify_by = "None"`; explicit
+`comparison_var`; `ref_level = "HBVP"`). So the failure is session state,
+not the model: the endpoint fits `store$filtered_data`, which in the
+browser session carried the gating pass's state (Q1 quadrant filter /
+`gate_population` metadata) and any sidebar filters, none of which a clean
+session has. With R17 the alert now shows the actual reason; next
+occurrence: re-run and record the message here. Not fixed in this branch.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base

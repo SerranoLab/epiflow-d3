@@ -278,6 +278,7 @@ const App = {
       // Default to genotype if available
       if (uniqueGroupOpts.includes('genotype')) compSelect.value = 'genotype';
     }
+    this.syncStratifyOptions();   // R18: comparison variable is never a stratum
 
     // Populate ML target dropdown dynamically
     const mlTarget = document.getElementById('ml-target');
@@ -357,6 +358,7 @@ const App = {
       compSelect.addEventListener('change', () => {
         this.populateRefLevel(this._getLevelsForVar(compSelect.value));
         this.populateCustomColors(compSelect.value);
+        this.syncStratifyOptions();   // R18
       });
     }
     // Clear quadrant gate filter
@@ -604,6 +606,28 @@ const App = {
   getRefLevel() {
     const el = document.getElementById('filter-ref-level');
     return el && el.value ? el.value : null;
+  },
+
+  // R18: the LMM stratify-by dropdowns offer every categorical column,
+  // including the comparison variable itself. Stratifying by it puts one
+  // group in every stratum, so that option is disabled (and the selection
+  // falls back to None) whenever the comparison variable changes. The
+  // diagnostic panel's dropdown is keyed to ml-target, not the sidebar
+  // comparison variable, and keeps its own same-as-target handling.
+  syncStratifyOptions() {
+    const compVar = DataManager.getComparisonVar();
+    ['stats-stratify', 'forest-stratify'].forEach(selId => {
+      const sel = document.getElementById(selId);
+      if (!sel) return;
+      Array.from(sel.options).forEach(opt => {
+        if (opt.value === 'None') return;
+        const isComp = opt.value === compVar;
+        opt.disabled = isComp;
+        opt.textContent = opt.textContent.replace(/ \(comparison variable\)$/, '') +
+          (isComp ? ' (comparison variable)' : '');
+      });
+      if (sel.value === compVar) sel.value = 'None';
+    });
   },
 
   // Resolve the category levels for a given comparison variable so the reference
@@ -3125,8 +3149,8 @@ const App = {
               <td>${r.contrast_level} vs ${r.ref_level}</td>
               <td>${!isNaN(r.estimate) ? r.estimate.toFixed(4) : '-'}</td>
               <td>${!isNaN(r['std.error']) ? r['std.error'].toFixed(4) : '-'}</td>
-              <td class="${sigClass}">${!isNaN(r['p.value']) ? r['p.value'].toExponential(2) : '-'}</td>
-              <td>${r.omnibus_p != null && !isNaN(r.omnibus_p) ? r.omnibus_p.toExponential(2) : '-'}</td>
+              <td class="${sigClass}">${fmtP(r['p.value'])}</td>
+              <td>${fmtP(r.omnibus_p)}</td>
               <td>${r.cohens_d != null && !isNaN(r.cohens_d) ? r.cohens_d.toFixed(3) : '-'}</td>
               <td>${emdCell}</td>
               <td>${ksCell}</td>

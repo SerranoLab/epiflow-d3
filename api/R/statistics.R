@@ -38,10 +38,32 @@ cohens_d_ci <- function(x, g, ref = levels(g)[1]) {
 
 # ---- Fit LMM with stratification ----
 # Direct extraction from app.R fit_stratified_lmm()
+# ---- LMM fit diagnostics (R17) ----
+# A fit that cannot run returns a ZERO-ROW data frame carrying the reason as
+# attr(, "reason") instead of a bare NULL, so callers keep their "no rows"
+# contract and the endpoints can say why. Per-marker reasons survive
+# run_all_markers_lmm(), which a single last-error slot could not provide.
+.lmm_empty  <- function(reason) structure(data.frame(), reason = reason)
+.lmm_reason <- function(x) if (is.null(x)) NULL else attr(x, "reason", exact = TRUE)
+
+# R18: stratifying by the comparison variable puts one group in every stratum,
+# so nothing can be compared. The endpoints call this first and return the
+# message as the error itself (not "could not be fit: ..."); NULL = fine.
+.lmm_same_var_error <- function(stratify_by, comparison_var) {
+  if (is.null(stratify_by) || identical(stratify_by, "None") ||
+      !identical(as.character(stratify_by), as.character(comparison_var))) return(NULL)
+  list(error = paste0("Stratify-by and the comparison variable are the same ('", comparison_var,
+                      "'): every stratum would hold a single group, so there is nothing to compare. ",
+                      "Choose a different stratification, or none."))
+}
+
 fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
                                 ref_level = NULL, comparison_var = "genotype",
                                 h3_marks = NULL,
                                 use_cells_as_replicates = FALSE) {
+  # R18: same guard at the function level, for callers that skip the endpoint.
+  same_var <- .lmm_same_var_error(stratify_by, comparison_var)
+  if (!is.null(same_var)) return(.lmm_empty(same_var$error))
   # Determine marker type
   is_h3 <- FALSE
   if (!is.null(h3_marks)) {
@@ -64,7 +86,8 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
         }
       )
   } else {
-    if (!marker %in% names(data)) return(NULL)
+    if (!marker %in% names(data))
+      return(.lmm_empty(paste0("marker '", marker, "' is neither an H3 mark nor a column of the data")))
     model_data <- data %>%
       dplyr::distinct(cell_id, .data[[comparison_var]], replicate,
                       identity, cell_cycle, .data[[marker]]) %>%
@@ -81,7 +104,9 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
       )
   }
 
-  if (dplyr::n_distinct(model_data$comparison_group) < 2) return(NULL)
+  if (dplyr::n_distinct(model_data$comparison_group) < 2)
+    return(.lmm_empty(paste0("fewer than 2 levels of '", comparison_var, "' with non-missing ",
+                             comparison_var, " and replicate for marker '", marker, "'")))
 
   # Set reference level
   if (is.null(ref_level) || !ref_level %in% levels(model_data$comparison_group)) {
@@ -91,11 +116,17 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
 
   # Helper: fit one model
   run_one_model <- function(model_df, subset_label) {
-    if (nrow(model_df) < 100 || dplyr::n_distinct(model_df$comparison_group) < 2) return(NULL)
+    # R18: two guards, two reasons — report only the one that applied.
+    if (nrow(model_df) < 100)
+      return(.lmm_empty(sprintf("subset '%s': %d cells, fewer than 100", subset_label, nrow(model_df))))
+    if (dplyr::n_distinct(model_df$comparison_group) < 2)
+      return(.lmm_empty(sprintf("subset '%s': only one %s level ('%s') in this stratum", subset_label,
+                                comparison_var, as.character(model_df$comparison_group[1]))))
 
     if (use_cells_as_replicates) {
       m <- try(stats::lm(value ~ comparison_group, data = model_df), silent = TRUE)
-      if (inherits(m, "try-error")) return(NULL)
+      if (inherits(m, "try-error"))
+        return(.lmm_empty(paste0("subset '", subset_label, "', lm: ", conditionMessage(attr(m, "condition")))))
       td <- broom::tidy(m)
       model_type_val <- "lm (exploratory - cells as replicates)"
     } else {
@@ -104,7 +135,10 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
                        data = model_df, REML = TRUE),
         silent = TRUE
       )))
-      if (inherits(m, "try-error")) return(NULL)
+      if (inherits(m, "try-error"))
+        return(.lmm_empty(paste0("subset '", subset_label, "', lmer (", nrow(model_df), " cells, ",
+                                 dplyr::n_distinct(model_df$sample_id), " samples): ",
+                                 conditionMessage(attr(m, "condition")))))
       td <- broom.mixed::tidy(m, effects = "fixed")
       model_type_val <- "LMM (value ~ group + (1|replicate))"
     }
@@ -164,22 +198,26 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
       )
   }
 
-  # Run models
+  # Run models. A subset that cannot be fit yields a zero-row result with a
+  # reason (R17); collect those so an all-failed call can say why.
   results_list <- list()
+  reasons <- character(0)
+  keep <- function(res, key) {
+    if (!is.null(res) && nrow(res) > 0) results_list[[key]] <<- res
+    else reasons <<- c(reasons, .lmm_reason(res) %||% paste0(key, ": no result"))
+  }
 
   if (is.null(stratify_by) || stratify_by == "None" ||
       !stratify_by %in% names(model_data)) {
-    res <- run_one_model(model_data, "All cells")
-    if (!is.null(res)) results_list[["overall"]] <- res
+    keep(run_one_model(model_data, "All cells"), "overall")
   } else {
     for (s in sort(unique(model_data[[stratify_by]]))) {
       subset_df <- model_data[model_data[[stratify_by]] == s, , drop = FALSE]
-      res <- run_one_model(subset_df, as.character(s))
-      if (!is.null(res)) results_list[[as.character(s)]] <- res
+      keep(run_one_model(subset_df, as.character(s)), as.character(s))
     }
   }
 
-  if (length(results_list) == 0) return(NULL)
+  if (length(results_list) == 0) return(.lmm_empty(paste(reasons, collapse = "; ")))
   dplyr::bind_rows(results_list)
 }
 
@@ -353,12 +391,18 @@ run_all_markers_lmm <- function(data, markers, comparison_var = "genotype",
                           comparison_var = comparison_var,
                           h3_marks = h3_markers,
                           use_cells_as_replicates = use_cells_as_replicates),
-      error = function(e) NULL
+      error = function(e) .lmm_empty(conditionMessage(e))
     )
   })
 
-  results <- Filter(Negate(is.null), results)
-  if (length(results) == 0) return(NULL)
+  # R17: zero-row results carry their reason; keep every marker's reason so an
+  # all-failed run reports each one, not just the last.
+  fitted <- vapply(results, function(r) !is.null(r) && nrow(r) > 0, logical(1))
+  if (!any(fitted)) {
+    reasons <- paste0(markers, ": ", vapply(results, function(r) .lmm_reason(r) %||% "no result", character(1)))
+    return(.lmm_empty(paste(reasons, collapse = " | ")))
+  }
+  results <- results[fitted]
 
   combined <- dplyr::bind_rows(results)
 

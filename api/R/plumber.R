@@ -773,6 +773,9 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R18: stratifying by the comparison variable can never be fit; say so plainly.
+  same_var <- .lmm_same_var_error(params$stratify_by, params$comparison_var %||% "genotype")
+  if (!is.null(same_var)) return(same_var)
   result <- fit_stratified_lmm(
     store$filtered_data,
     marker          = params$marker,
@@ -783,7 +786,9 @@ function(session_id, req) {
     use_cells_as_replicates = isTRUE(params$use_cells_as_replicates)
   )
 
-  if (is.null(result)) return(list(error = "Model could not be fit"))
+  # R17: a zero-row result carries the reason in attr(, "reason"); say why.
+  if (is.null(result) || nrow(result) == 0)
+    return(list(error = paste0("Model could not be fit: ", .lmm_reason(result) %||% "no reason recorded")))
   list(results = result)
 }
 
@@ -795,6 +800,9 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R18: stratifying by the comparison variable can never be fit; say so plainly.
+  same_var <- .lmm_same_var_error(params$stratify_by, params$comparison_var %||% "genotype")
+  if (!is.null(same_var)) return(same_var)
   # Use selected markers from frontend, fall back to all H3-PTMs
   markers <- params$markers %||% store$metadata$h3_markers
   if (!is.null(params$selected_markers)) markers <- params$selected_markers
@@ -836,7 +844,10 @@ function(session_id, req) {
   )
 
   if ("error" %in% names(result)) return(result)
-  if (is.null(result)) return(list(error = "No models could be fit — check that the comparison variable has at least 2 levels in the filtered data."))
+  # R17: a zero-row result carries one reason per marker in attr(, "reason").
+  if (is.null(result) || nrow(result) == 0) return(list(error = paste0(
+    "No models could be fit. ", .lmm_reason(result) %||% "No reason recorded",
+    ". Check that the comparison variable has at least 2 levels in the filtered data.")))
 
   # Add EMD + KS distribution metrics per (marker, subset, contrast) for the
   # heatmap toggle. Cheap (sub-second for typical datasets); always computed.

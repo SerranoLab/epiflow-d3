@@ -196,10 +196,10 @@ const MarkerHeatmap = {
               ? `EMD = ${isFinite(d.emd) ? d.emd.toFixed(4) : '—'}<br>` +
                 `EMD/IQR = ${isFinite(d.emd_norm) ? d.emd_norm.toFixed(3) : '—'}` + interpHTML + dirHTML
               : `KS D = ${isFinite(d.ks_d) ? d.ks_d.toFixed(3) : '—'}<br>` +
-                `KS p(adj) = ${isFinite(d.ks_p_adj) ? d.ks_p_adj.toExponential(2) : '—'}`) +
+                `KS p(adj) = ${fmtP(d.ks_p_adj)}`) +
             `<br>—<br>` +
             `LMM β = ${isFinite(d.cohens_d * d.cohens_d) ? '' : ''}` +
-            `${isFinite(d.lmm_p_adj) ? 'LMM p(adj) = ' + d.lmm_p_adj.toExponential(2) + '<br>' : ''}` +
+            `${isFinite(d.lmm_p_adj) ? 'LMM p(adj) = ' + fmtP(d.lmm_p_adj) + '<br>' : ''}` +
             `${isFinite(d.cohens_d) ? "Cohen's d = " + d.cohens_d.toFixed(3) : ''}` +
             `${d.contrast ? '<br><span style="color:#94a3b8;">' + d.contrast + ' vs ' + d.ref + '</span>' : ''}`
           );

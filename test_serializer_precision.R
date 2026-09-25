@@ -91,17 +91,18 @@ bare_fixed <- unlist(lapply(names(js), function(f) {
   if (length(hits)) paste0(f, ":", hits) else character(0)
 }))
 check(length(bare_fixed) == 0, paste("no bare toFixed() on a p-value", if (length(bare_fixed)) paste("->", paste(bare_fixed, collapse = ", ")) else ""))
-# Lines inside the fmtP definition are the formatter itself, not a call site.
+# Any toExponential() outside fmtP's own body is a p formatted unconditionally
+# in scientific notation (0.365 shown as "3.65e-1"), guarded or not. The only
+# place scientific notation is chosen is fmtP, below 0.001.
 fmtP_start <- grep("^function fmtP\\(", js[["frontend/js/api.js"]])
 fmtP_end   <- fmtP_start + (grep("^\\}", js[["frontend/js/api.js"]][fmtP_start:length(js[["frontend/js/api.js"]])])[1] - 1)
-unguarded_exp <- unlist(lapply(names(js), function(f) {
+any_exp <- unlist(lapply(names(js), function(f) {
   hits <- grep("\\.toExponential\\(", js[[f]])
   if (f == "frontend/js/api.js") hits <- hits[!(hits >= fmtP_start & hits <= fmtP_end)]
-  hits <- hits[!grepl("isFinite\\(|isNaN\\(|!= null|fmtP", js[[f]][hits])]   # a guard on the same line
   if (length(hits)) paste0(f, ":", hits) else character(0)
 }))
-check(length(unguarded_exp) == 0, paste("every toExponential() sits behind a null/finite guard or inside fmtP",
-                                       if (length(unguarded_exp)) paste("->", paste(unguarded_exp, collapse = ", ")) else ""))
+check(length(any_exp) == 0, paste("no toExponential() anywhere outside fmtP (no unconditional scientific p)",
+                                  if (length(any_exp)) paste("->", paste(any_exp, collapse = ", ")) else ""))
 bh_js <- unlist(lapply(names(js), function(f) {
   hits <- grep("p\\.adjust\\(|p_adjust\\(|bhAdjust|adjustP\\(|benjamini", js[[f]], ignore.case = TRUE)
   hits <- hits[!grepl("Benjamini-Hochberg", js[[f]][hits])]   # Methods prose is allowed
