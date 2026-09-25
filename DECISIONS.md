@@ -987,11 +987,16 @@ into the Diagnostic panel, not a second computation.
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
   detection, test scripts, env vars).
-- The plumber `cors` filter (`plumber.R`) defaults `EPIFLOW_CORS_ORIGIN` to
-  `*`; review and set an allowlist before release.
-- `deploy/Dockerfile.api` is a stale copy of `Dockerfile.api` (no igraph,
-  leiden, viridisLite, libglpk-dev); `docker-compose.yml` builds from the
-  root file. Delete the copy or make deploy/ reference the root Dockerfile.
+- Resolved 2026-09-25 (release prep 1.4.1): the plumber `cors` filter now
+  defaults `EPIFLOW_CORS_ORIGIN` to `https://epiflow.serranolab.org`; `*` is
+  honoured only when the variable is set to `*` explicitly (LOCAL_DEV.md's
+  start command does that for the :8080 → :8000 local setup).
+- Resolved 2026-09-25 (release prep 1.4.1): `deploy/Dockerfile.api` and
+  `deploy/docker-compose.yml` are reconciled with the root files (libglpk-dev,
+  igraph, leiden, viridisLite, emmeans; CORS env). The droplet builds from
+  the root files (`/opt/epiflow-d3`, runbook step 5); `deploy/` is the
+  template `deploy/DEPLOYMENT.md` copies from on a fresh host and must be
+  kept identical to the root copies.
 
 ---
 

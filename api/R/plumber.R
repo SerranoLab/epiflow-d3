@@ -11,7 +11,7 @@ library(jsonlite)
 # R10: single source of the app version. /api/health returns it, /api/metadata
 # echoes it, and the frontend fills its badge, footers and report from it —
 # no version literal lives in index.html or app.js. Bump here at deploy.
-EPIFLOW_VERSION <- "1.3.4"
+EPIFLOW_VERSION <- "1.4.1"
 
 # Source helper functions
 # NOTE: plumber::plumb() evaluates this file from its own directory (R/),
@@ -28,13 +28,17 @@ source("interpret.R")
 data_store <- new.env(parent = emptyenv())
 
 # ---- CORS configuration ----
-# EPIFLOW_CORS_ORIGIN: "*" (default, dev) or a comma-separated allowlist of
-# exact origins (production, e.g. "https://epiflow.serranolab.org"). When an
-# allowlist is set, only matching origins get an Access-Control-Allow-Origin
-# header; everything else is blocked by the browser.
+# EPIFLOW_CORS_ORIGIN: a comma-separated allowlist of exact origins. The
+# default is the production origin (release 1.4.1); "*" is honoured only when
+# the variable is set to "*" explicitly (local dev: frontend on :8080 against
+# the API on :8000 — see LOCAL_DEV.md). When an allowlist is in force, only
+# matching origins get an Access-Control-Allow-Origin header; everything else
+# is blocked by the browser.
+EPIFLOW_CORS_DEFAULT <- "https://epiflow.serranolab.org"
 #* @filter cors
 function(req, res) {
-  allowed <- Sys.getenv("EPIFLOW_CORS_ORIGIN", "*")
+  allowed <- Sys.getenv("EPIFLOW_CORS_ORIGIN", EPIFLOW_CORS_DEFAULT)
+  if (!nzchar(allowed)) allowed <- EPIFLOW_CORS_DEFAULT
   if (identical(allowed, "*")) {
     res$setHeader("Access-Control-Allow-Origin", "*")
   } else {

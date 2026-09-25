@@ -24,6 +24,7 @@ services:
       - uploads:/app/uploads
     environment:
       - R_MAX_UPLOAD_SIZE=200  # MB
+      - EPIFLOW_CORS_ORIGIN=https://epiflow.serranolab.org
     # Internal only — nginx proxies to this
     expose:
       - "8000"

@@ -15,7 +15,10 @@ behind nginx via docker compose (see CLAUDE_CODE_RUNBOOK.md for deploys).
 
 ```bash
 cd api/R
-Rscript -e "pr <- plumber::plumb('plumber.R'); pr\$run(host='127.0.0.1', port=8000)"
+EPIFLOW_CORS_ORIGIN='*' Rscript -e "pr <- plumber::plumb('plumber.R'); pr\$run(host='127.0.0.1', port=8000)"
+# EPIFLOW_CORS_ORIGIN='*' is required locally: since 1.4.1 the API defaults its
+# CORS allowlist to https://epiflow.serranolab.org, and the :8080 frontend is a
+# different origin from the :8000 API.
 ```
 
 Bind to `127.0.0.1` for local work; use `0.0.0.0` only if another machine
@@ -58,7 +61,7 @@ unreachable.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `EPIFLOW_CORS_ORIGIN` | `*` | CORS allowlist (comma-separated origins). `*` is fine for local dev; set an allowlist before release. |
+| `EPIFLOW_CORS_ORIGIN` | `https://epiflow.serranolab.org` | CORS allowlist (comma-separated exact origins). Set it to `*` explicitly for local dev (the start command above does); production leaves the default. |
 | `EPIFLOW_SCATTER_DISPLAY_CAP` | `12000` | Display cap for the UMAP/PCA/cluster scatters (phase3.R). The gating endpoint has its own `max_points` (default 15000; 0 = no cap) and ignores this. |
 
 ## If something goes wrong
