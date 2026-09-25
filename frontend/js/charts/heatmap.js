@@ -33,7 +33,10 @@ const Heatmap = {
     svg.append('text')
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 34)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b')
-      .text(options.subtitle || 'Mean z-scores: blue = below global mean, red = above');
+      // L6: the backend z-scores the GROUP MEANS per marker across groups
+      // (helpers.R scale(mat)), so with two groups every cell is ±0.71 —
+      // the sign is readable, the size is not.
+      .text(options.subtitle || 'z of group means per marker, across groups (blue = below, red = above); with 2 groups every cell is ±0.71 — read sign, not size');
 
     const g = svg.append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);

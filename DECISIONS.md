@@ -828,6 +828,18 @@ quantiles. Axis labels, the section heading, README and USER_GUIDE now say
 (and splitting the overview by condition) stays the audit's feature request
 F1, not a label fix.
 
+### L6 — Heatmap subtitle "blue = below global mean" on a z-score of group means
+Status: done (2026-09-25)
+
+`compute_heatmap_data` (`helpers.R`) z-scores the **group means** per marker
+across the groups shown (`scale(mat)`), so with two groups every cell is
+±0.71 whatever the effect size. The heatmap subtitle and the tab help now
+say so ("read sign, not size; the LMM table carries the effect sizes"). The
+signature-profile heatmap in the Diagnostic panel is a different quantity —
+(group mean − global cell mean) / global cell SD (`statistics.R`
+`compute_signatures`) — and its subtitle now says that instead of "mean
+z-scores".
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

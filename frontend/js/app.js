@@ -3031,7 +3031,8 @@ const App = {
       .attr('x', totalW / 2).attr('y', 33)
       .attr('text-anchor', 'middle')
       .attr('font-size', '11px').attr('fill', '#64748b')
-      .text('Mean z-scores: blue = depleted vs global mean, red = enriched vs global mean');
+      // L6: (group mean − global cell mean) / global cell SD per marker (statistics.R compute_signatures)
+      .text('(group mean − global mean) / global cell SD per marker: blue = below the global mean, red = above');
 
     // Build data matrix
     const allVals = sigs.map(s => Number(s.mean_zscore || s.mean || 0));

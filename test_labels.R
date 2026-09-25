@@ -57,5 +57,13 @@ check(has("frontend/index.html", "not quartiles"), "overview heading says not qu
 check(lacks("README.md", "box-and-whisker") && lacks("USER_GUIDE.md", "Box-and-whisker"), "README / USER_GUIDE no longer say box-and-whisker")
 check(ver_of("overviewCharts.js") >= "1.2.3", "overviewCharts.js cache-busting bump (>= 1.2.3)")
 
+# ---- L6: heatmap subtitles name the z of group means / the signature z ----
+cat("\n--- L6 heatmap subtitles ---\n")
+check(has("frontend/js/charts/heatmap.js", "with 2 groups every cell is ±0.71 — read sign, not size"), "heatmap.js subtitle explains the ±0.71 two-group case")
+check(lacks("frontend/js/charts/heatmap.js", "Mean z-scores: blue = below global mean"), "old heatmap subtitle is gone")
+check(has("frontend/js/app.js", "(group mean − global mean) / global cell SD per marker") && lacks("frontend/js/app.js", "Mean z-scores: blue = depleted"), "signature heatmap subtitle names its quantity")
+check(has("frontend/index.html", "read the sign, not the size"), "heatmap tab help says read sign, not size")
+check(ver_of("heatmap.js") >= "1.2.3" && ver_of("js/app.js") >= "1.3.12", "heatmap.js / app.js cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
