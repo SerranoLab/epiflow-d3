@@ -103,14 +103,35 @@ sm <- pm$sample_means
 check(length(sm) == 6, sprintf("sample_means has 6 rows (got %d)", length(sm)))
 
 # ---- 4. Cross-check against vegan::adonis2 when it is installed ----
-cat("\n--- vegan cross-check ---\n")
+# In-process, on identical inputs: the API serializes at 4 decimals, so a
+# wire-level comparison can never meet 1e-8. Here the same code builds the
+# same per-sample mean matrix M from the same seed-4242 example, and adonis2
+# runs on that exact M. This checks the mathematics, not the JSON.
+cat("\n--- vegan cross-check (in-process, identical M) ---\n")
 if (requireNamespace("vegan", quietly = TRUE)) {
-  markers <- setdiff(names(sm[[1]]), c("sample", "group", "n_cells"))
-  M <- do.call(rbind, lapply(sm, function(r) vapply(markers, function(m) num(r[[m]]), numeric(1))))
-  grp <- vapply(sm, function(r) as.character(r$group), character(1))
+  suppressPackageStartupMessages({
+    library(dplyr); library(tidyr); library(rlang); library(tibble)
+    source("api/R/helpers.R"); source("api/R/statistics.R")
+  })
+  ex_df <- generate_example_data(seed = EXAMPLE_SEED, cells_per_rep = 600)
+  tmp <- tempfile(fileext = ".rds"); saveRDS(ex_df, tmp)
+  loaded <- load_epiflow_data(tmp)
+  pm_local <- compute_signatures_diagnostic(loaded$data, target_var = "genotype",
+                                            h3_markers = loaded$h3_markers)$permanova
+  markers <- setdiff(names(pm_local$sample_means), c("sample", "group", "n_cells"))
+  M   <- as.matrix(pm_local$sample_means[, markers, drop = FALSE])
+  grp <- as.character(pm_local$sample_means$group)
   a <- vegan::adonis2(stats::dist(M) ~ grp, data = data.frame(grp = grp), permutations = 999)
-  check(abs(a$R2[1] - r2) < 1e-8, sprintf("R2 matches vegan::adonis2 to 1e-8 (%.10f vs %.10f)", a$R2[1], r2))
-  check(abs(a$F[1] - pf) < 1e-8, sprintf("pseudo-F matches vegan::adonis2 to 1e-8 (%.10f vs %.10f)", a$F[1], pf))
+  check(abs(a$R2[1] - pm_local$r2) < 1e-8,
+        sprintf("R2 matches vegan::adonis2 to 1e-8 on identical M (%.10f vs %.10f)", a$R2[1], pm_local$r2))
+  check(abs(a$F[1] - pm_local$pseudo_f) < 1e-8,
+        sprintf("pseudo-F matches vegan::adonis2 to 1e-8 on identical M (%.10f vs %.10f)", a$F[1], pm_local$pseudo_f))
+  check(isTRUE(all.equal(a$`Pr(>F)`[1], pm_local$p_value)),
+        sprintf("exact p matches vegan's complete enumeration (%.4f vs %.4f)", a$`Pr(>F)`[1], pm_local$p_value))
+  # The API's 4-decimal echo of the same quantities must agree within serialization.
+  check(abs(r2 - pm_local$r2) < 5e-5 && abs(pf - pm_local$pseudo_f) < 5e-3,
+        sprintf("API payload equals in-process values within 4-dp serialization (R2 %.4f vs %.6f; F %.3f vs %.4f)",
+                r2, pm_local$r2, pf, pm_local$pseudo_f))
 } else {
   cat("  [SKIP] vegan not installed - R2 / pseudo-F cross-check not run\n")
 }

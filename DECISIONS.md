@@ -85,6 +85,15 @@ that is feasible (exact p), 999 seeded permutations otherwise. Rejected
 enumeration needs no dependency and gives the exact p the audit asked for.
 `test_diagnostic_cv.R` cross-checks R² and pseudo-F against adonis2 to 1e-8
 when vegan happens to be present, and skips with a message otherwise.
+Verified 2026-09-24 with vegan 2.7.6 installed locally (not in the image),
+in-process on the identical per-sample mean matrix from the seed-4242
+example: R² = 0.9152811687, pseudo-F = 43.2150045062, exact p = 0.1000 —
+EpiFlow and `vegan::adonis2` agree to all printed digits, and vegan itself
+reports complete enumeration of the 20 arrangements. The cross-check must
+run in-process: across the API the payload is serialized at 4 decimals
+(R14), so adonis2 on rounded means gave 0.9152836874 / 43.2164082436 and a
+wire-level 1e-8 comparison is not meaningful; the test also asserts the
+API echo agrees with the in-process values within that serialization.
 (b) The headline grouped CV uses LDA on the same H3 features as the
 exploratory cell-split card, so the two numbers differ only by the split.
 (c) Effect size next to the headline: k of n held-out samples correct with
