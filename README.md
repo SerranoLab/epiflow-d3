@@ -192,7 +192,7 @@ epiflow-d3/
 ## Statistical Methods
 
 ### Linear Mixed Models
-Marker expression is modeled as `value ~ group + (1|replicate)` using `lme4::lmer()` with Satterthwaite degrees of freedom via `lmerTest`. This accounts for the nested structure of cells within biological replicates, avoiding pseudoreplication. P-values are corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d.
+Marker expression is modeled as `value ~ group + (1|replicate)` using `lme4::lmer()` with Satterthwaite degrees of freedom via `lmerTest`. This accounts for the nested structure of cells within biological replicates, avoiding pseudoreplication. Every contrast — vs-reference and all-pairwise alike (`emmeans`) — is a Satterthwaite t on its own degrees of freedom with a matching 95% t interval. P-values are corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d.
 
 ### Positivity Analysis
 Marker positivity thresholds are determined by two-component Gaussian Mixture Models (`mclust::Mclust(G=2)`). Fraction-positive values are computed per replicate, and group comparisons use replicate-level t-tests or Wilcoxon tests.

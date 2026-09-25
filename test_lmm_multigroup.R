@@ -38,11 +38,12 @@ cat("EXPECT: KO and Rescue rows; estimates ~1.0 and ~0.4; omnibus_p tiny\n")
 
 cat("\n=== (2) lmm_pairwise: ALL pairwise (incl. KO-Rescue) ===\n")
 pw <- lmm_pairwise(df, "H3K27ac", comparison_var = "genotype", ref_level = "WT")
-print(as.data.frame(pw[, c("comparison", "estimate", "se", "statistic",
-                           "p.value", "p_adj", "omnibus_p", "significant",
-                           "direction")]))
-cat("EXPECT: 3 rows (WT-KO, WT-Rescue, KO-Rescue);\n")
-cat("        WT-KO est ~-1.0, KO-Rescue est ~+0.6, all significant\n")
+print(as.data.frame(pw[, c("comparison", "estimate", "se", "df", "ci_lo", "ci_hi",
+                           "statistic", "p.value", "p_adj", "omnibus_p",
+                           "significant", "direction")]))
+cat("EXPECT: 3 rows (WT-KO, WT-Rescue, KO-Rescue); df near 6 (Satterthwaite, R5);\n")
+cat("        WT-KO est ~-1.0 significant, KO-Rescue est ~+0.6 — at these df it may\n")
+cat("        read ns; that is the point of R5 (the old z-test called it significant)\n")
 cat("        (KO-Rescue is the pair fit_stratified_lmm never reported)\n")
 
 cat("\n=== (3) 2-group sanity: omnibus p ~ contrast p (F = t^2) ===\n")

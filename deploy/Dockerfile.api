@@ -36,6 +36,7 @@ RUN install2.r --error --skipinstalled \
     broom \
     lme4 \
     lmerTest \
+    emmeans \
     broom.mixed \
     MASS \
     caret \

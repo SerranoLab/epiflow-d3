@@ -1736,19 +1736,21 @@ const App = {
     const pw = ensureArray(data.pairwise);
     if (pw.length) {
       const omni = pw[0].omnibus_p;
-      html += `<div style="font-size:12px;margin-bottom:4px;"><strong>All-pairwise LMM contrasts</strong>`;
+      html += `<div style="font-size:12px;margin-bottom:4px;"><strong>All-pairwise LMM contrasts</strong> <span style="color:#64748b;">(Satterthwaite t on each contrast's own df; BH across pairs)</span>`;
       if (omni != null && !isNaN(Number(omni)))
         html += ` &nbsp;·&nbsp; omnibus p = ${fmtP(omni)} ${sigMark(omni)}`;
       html += `</div><table class="stats-table" style="font-size:11px;"><thead><tr>
-        <th>Subset</th><th>Comparison</th><th>Δ (a−b)</th><th>SE</th>
-        <th>p</th><th>p.adj</th><th></th><th>Direction</th></tr></thead><tbody>`;
+        <th>Subset</th><th>Comparison</th><th>Δβ [95% CI]</th><th>SE</th><th>df</th>
+        <th>p (t)</th><th>p.adj</th><th></th><th>Direction</th></tr></thead><tbody>`;
+      const f3 = v => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(3) : '—');
       pw.forEach(r => {
         const padj = r.p_adj;
         html += `<tr>
           <td>${Array.isArray(r.subset) ? r.subset[0] : r.subset}</td>
           <td>${r.comparison}</td>
-          <td>${r.estimate != null ? Number(r.estimate).toFixed(3) : '-'}</td>
-          <td>${r.se != null ? Number(r.se).toFixed(3) : '-'}</td>
+          <td><strong>${f3(r.estimate)}</strong> <span style="color:#64748b;">[${f3(r.ci_lo)}, ${f3(r.ci_hi)}]</span></td>
+          <td>${f3(r.se)}</td>
+          <td>${r.df != null && Number.isFinite(Number(r.df)) ? Number(r.df).toFixed(1) : '—'}</td>
           <td>${fmtP(r['p.value'])}</td>
           <td>${fmtP(padj)}</td>
           <td>${sigMark(padj)}</td>
@@ -4036,7 +4038,7 @@ const App = {
       <div class="report-section methods">
         <h2>Methods</h2>
         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
-        <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
+        <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each reported with a 95% t interval on its own df. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Per-group Pearson/Spearman correlations are compared as an exploratory descriptor (Δr). No replicate-level significance test is reported: correlations are computed across cells, so putting replicate N into a cell-derived Fisher-z SE is not a coherent sampling model. Δr shows where co-regulation shifts and should be confirmed with per-replicate correlation or a hierarchical bootstrap.</p>
         <p><strong>Machine learning and diagnostic assessment:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Diagnostic accuracy was estimated by leave-one-sample-out cross-validation of an LDA classifier on held-out biological samples (majority vote per sample; exact binomial 95% confidence interval on the number of samples). Multivariate differences between per-replicate mean H3-PTM profiles were tested by exact PERMANOVA (Anderson 2001, Austral Ecology 26:32-46) with R² as the effect size; the smallest attainable p is 1 over the number of distinct label arrangements (0.10 for 3 vs 3 replicates). Cell-level classification accuracy and any cell-level multivariate test are exploratory: cells from one sample fall in both training and test folds, so they do not measure generalization to a new sample.</p>

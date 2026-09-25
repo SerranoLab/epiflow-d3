@@ -160,6 +160,52 @@ has no p-values when (a), or that `n_used` equals replicate counts when (b).
 
 ---
 
+## R5 — Pairwise LMM contrasts used a z-test; vs-reference contrasts used Satterthwaite t
+Status: done (2026-09-25)
+
+What changes. `fit_stratified_lmm()` reports vs-reference contrasts from
+`broom.mixed::tidy()` on an lmerTest fit — Satterthwaite t and df — while
+`lmm_pairwise()` (the "Pairwise + EMD" drill-down) built each pairwise
+contrast by hand and tested `estimate / se` against the normal
+(`.pairwise_wald`). With three replicates per group the denominator df sit
+near 4, so the same contrast carried two p-values: on the seed-4242 example
+KO vs WT reads 8.3e-4 in the LMM table and 1.5e-19 in the pairwise table;
+within-WT identity contrasts moved 3–17 orders of magnitude (mesPC − ncPC
+2.0e-9 → 4.5e-4, df 7.4; H3K4me1 mesPC − NPC 2.5e-4 → 0.043, df 2.7); on the
+416k-cell dataset HBVP − ncPC 5.2e-8 → 4.1e-4 (df 9). `.pairwise_wald` is
+replaced by `.pairwise_satterthwaite()`: `emmeans::emmeans(m, ~
+comparison_group, lmer.df = "satterthwaite", lmerTest.limit = nobs(m))` with
+named manual contrasts (keeps the a − b sign convention and level names
+with spaces), residual-df t on the cells-as-replicates `lm` path, BH across
+pairs unchanged. Every contrast — pairwise and vs-reference — now carries a
+95% t interval on its own df (`ci_lo`/`ci_hi`); the forest plot draws that
+interval from the payload instead of a normal ±1.96·SE, so the forest plot
+and the pairwise table share one reference distribution. The marker-detail
+table shows Δβ [95% CI], df and "p (t)".
+
+Decision. emmeans, added to the Docker image (`Dockerfile.api` and the
+deploy copy). Justification beyond R5: future group × stratum conditional
+contrasts (`emmeans(m, pairwise ~ comparison_group | stratum)`), tracked as
+R22. Rejected: `lmerTest::contest(m, L)` per pair — identical numbers, no
+dependency, but no path to conditional contrasts.
+
+Trap recorded. emmeans disables the Satterthwaite calculation above 3000
+observations (`lmerTest.limit`) and silently falls back to z — on the
+3,600-cell example it reproduced the old p-values exactly until the limit
+was raised to `nobs(m)`. With the limit raised it costs 0.2 s on 416,094
+cells and matches `lmerTest::summary()`/`contest()` to all digits. A z
+fallback returns `df = Inf`; `test_lmm_contrasts.R` asserts every pairwise
+df is finite and below the number of samples on a > 3000-cell fit.
+
+Verification. `test_lmm_contrasts.R`: pairwise p equals an independent
+emmeans call to 1e-8 on three groups; the 2-group pairwise p and CI equal
+the vs-reference row's to 1e-8; every new p ≥ the old z p; CI width equals
+2·qt(0.975, df)·se; lm path df = n − 2; the df-finite regression check; an
+optional block on the 416k file (`EPIFLOW_IPER_RDS`) covering 3 genotype
+pairs and 6 identity pairs.
+
+---
+
 ## R11 — Gating tab should consume the sidebar filter object
 Status: open (2026-09-24)
 
@@ -439,12 +485,87 @@ them echoes transform and cofactor in `/api/metadata`.
 
 ---
 
+## R22 — Conditional contrasts group × stratum from one model
+Status: open (2026-09-25)
+
+What changes. Stratified analyses (`stratify_by`) refit one LMM per stratum
+and report contrasts within each; nothing tests whether the group effect
+differs between strata. With emmeans in place (R5), fit `value ~
+comparison_group * stratum + (1 | sample_id)` once and report
+`emmeans(m, pairwise ~ comparison_group | stratum, lmer.df =
+"satterthwaite", lmerTest.limit = nobs(m))` plus the interaction F from
+`anova()`. Plan with the `stratify_by` semantics (per-stratum sample sizes,
+strata with a single group — see R18) before building. Not in this branch.
+
+---
+
+## R23 — The random effect assumes replicates nested within the comparison variable
+Status: open (2026-09-25)
+
+What changes. Every LMM builds `sample_id = paste(comparison_var, replicate)`
+(`fit_stratified_lmm`, `lmm_pairwise`, `.epiflow_sample_key`), i.e. it
+assumes a replicate is a distinct biological unit inside each level of the
+comparison variable (genotype::replicate — three WT preps, three KO preps).
+For timepoint, drug or condition comparisons the replicate is usually the
+same unit measured under every level (the same differentiation run sampled
+at day 0/7/14, or split across doses); then the correct model is
+`value ~ var + (1 | replicate)` with replicates crossed with the comparison
+variable, and the current nesting both throws away the pairing and
+overstates the number of independent units. Needs (a) a schema column that
+names the shared unit (e.g. `donor` / `run`) so the model can tell nesting
+from crossing, and (b) until then a warning whenever the comparison
+variable is not the genotype column and replicate labels repeat across its
+levels. Plan with R21 (data contract).
+
+---
+
+## R24 — Ordered comparison variables need trend contrasts, not all-pairwise
+Status: open (2026-09-25)
+
+What changes. Timepoint and dose are ordered; the all-pairwise table (R5)
+treats their levels as nominal, spending the BH family on every pair and
+never asking the question of interest (monotone trend). With emmeans in
+place, ordered factors get polynomial trend contrasts —
+`emmeans::contrast(emm, "poly")` (linear, quadratic) — or a single slope on
+the numeric dose, reported alongside or instead of the pairwise table. Needs
+the schema/contract to mark a comparison variable as ordered. Plan with R22
+(conditional contrasts) since both are emmeans contrast families on the
+same model.
+
+---
+
+## R25 — Singular or near-singular fits silently remove the pseudoreplication protection
+Status: open (2026-09-25)
+
+What changes. The LMM's protection against pseudoreplication is the
+replicate random effect: with it, a between-group contrast is judged on
+roughly (samples − groups) degrees of freedom. When the replicate variance
+is estimated at zero (a singular fit, `lme4::isSingular()`), the random
+effect vanishes from the fit and the Satterthwaite df fall back toward the
+cell level — the p-values become cell-level p-values again, with no
+warning. The same drift happens short of singularity: on the 416k-cell file,
+comparing cell-cycle identities (867 Mitotic vs 387,450 G0/G1 cells) with a
+non-singular fit (replicate variance 0.0025 vs residual 0.33) gave df 16.9
+on 16 samples, because for the small groups the cell-level term σ²/nᵢ
+outweighs the replicate variance. Fix: every LMM row carries `singular`,
+`re_var` (replicate variance), `resid_var` and `n_samples`; rows whose df
+exceed the sample count, or whose fit is singular, are flagged and the
+table, forest plot and report Methods show: "replicate variance estimated
+at (or near) zero; degrees of freedom fall back toward the cell level;
+interpret with caution". `test_lmm_contrasts.R` asserts df < n_samples
+whenever the row is not flagged.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
   detection, test scripts, env vars).
 - The plumber `cors` filter (`plumber.R`) defaults `EPIFLOW_CORS_ORIGIN` to
   `*`; review and set an allowlist before release.
+- `deploy/Dockerfile.api` is a stale copy of `Dockerfile.api` (no igraph,
+  leiden, viridisLite, libglpk-dev); `docker-compose.yml` builds from the
+  root file. Delete the copy or make deploy/ reference the root Dockerfile.
 
 ---
 

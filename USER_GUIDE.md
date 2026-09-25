@@ -128,7 +128,7 @@ The primary statistical method. For each marker:
 value ~ group + (1|replicate)
 ```
 
-This accounts for cell nesting within biological replicates, avoiding pseudoreplication. P-values use Satterthwaite degrees of freedom with Benjamini-Hochberg FDR correction.
+This accounts for cell nesting within biological replicates, avoiding pseudoreplication. P-values use Satterthwaite degrees of freedom with Benjamini-Hochberg FDR correction — for every contrast, vs-reference and all-pairwise alike, each with a 95% t interval on its own degrees of freedom.
 
 **To run:**
 1. Go to the **Statistics** tab

@@ -42,12 +42,14 @@ const ForestPlot = {
       return;
     }
 
-    // Compute CIs
+    // CIs come from the payload (R5): a t interval on each row's Satterthwaite
+    // df, the same reference distribution as the all-pairwise table. The
+    // normal ±1.96·SE is only a fallback for a payload without ci_lo/ci_hi.
     data = data.map(d => ({
       ...d,
-      ci_lo: d.estimate - 1.96 * d['std.error'],
-      ci_hi: d.estimate + 1.96 * d['std.error'],
-      significant: d['p.value'] < 0.05
+      ci_lo: Number.isFinite(Number(d.ci_lo)) ? Number(d.ci_lo) : d.estimate - 1.96 * d['std.error'],
+      ci_hi: Number.isFinite(Number(d.ci_hi)) ? Number(d.ci_hi) : d.estimate + 1.96 * d['std.error'],
+      significant: isSig(d['p.value'])
     }));
 
     // Each (marker × subset × contrast) is its own row — previously all

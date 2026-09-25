@@ -172,9 +172,18 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
              (sum(group_sds$n_g) - nrow(group_sds)))
     }, error = function(e) NA_real_)
 
+    # R5: one reference distribution everywhere. tidy() on an lmerTest fit
+    # carries the Satterthwaite df; broom's lm tidy does not, so use the
+    # residual df there. The 95% interval is then the t interval on that df —
+    # the same one the all-pairwise table uses — and the forest plot draws it
+    # from the payload instead of a normal ±1.96·SE.
+    if (!"df" %in% names(td)) td$df <- stats::df.residual(m)
+
     td %>%
       dplyr::filter(grepl("^comparison_group", term)) %>%
       dplyr::mutate(
+        ci_lo = estimate - stats::qt(0.975, df) * std.error,
+        ci_hi = estimate + stats::qt(0.975, df) * std.error,
         subset = subset_label,
         marker = marker,
         n_cells = n_cells_val,
@@ -221,44 +230,47 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
   dplyr::bind_rows(results_list)
 }
 
-# ---- All-pairwise Wald contrasts from a fitted single-factor model ----
-# Works for both lm and lmer fits with one reference-coded fixed factor
-# `comparison_group`. Returns EVERY pairwise group difference (not just
-# vs-reference) as a Wald z-test on a linear contrast of the fixed effects,
-# with Benjamini-Hochberg adjustment across the family of pairs.
+# ---- All-pairwise contrasts on the model's own reference distribution (R5) ----
+# Works for both lm and lmer fits with one fixed factor `comparison_group`.
+# Returns EVERY pairwise group difference (not just vs-reference) with the
+# same test the vs-reference rows use: Satterthwaite t for lmer (emmeans,
+# lmer.df = "satterthwaite"), residual-df t for lm. The previous version
+# tested a Wald z against the normal; with three replicates per group the
+# denominator df sit near 4, and the z p-values were anti-conservative by
+# many orders of magnitude (KO vs WT on the example: 1.5e-19 vs 8.3e-4).
+# Named manual contrasts keep the a - b sign convention and survive level
+# names with spaces. lmerTest.limit MUST be raised: above 3000 observations
+# emmeans silently drops the df calculation and falls back to z — the exact
+# bug this replaces. Each contrast carries a 95% t interval on its own df.
 # Sign convention: estimate = mean(level_a) - mean(level_b).
-.pairwise_wald <- function(m, levels_all, ref_level) {
-  b <- if (inherits(m, "merMod") || inherits(m, "lmerModLmerTest")) {
-    lme4::fixef(m)
+.pairwise_satterthwaite <- function(m) {
+  if (!requireNamespace("emmeans", quietly = TRUE))
+    stop("emmeans package not installed. Run: install.packages('emmeans')")
+  is_mer <- inherits(m, "merMod") || inherits(m, "lmerModLmerTest")
+  emm <- if (is_mer) {
+    emmeans::emmeans(m, ~ comparison_group, lmer.df = "satterthwaite",
+                     lmerTest.limit = stats::nobs(m))
   } else {
-    stats::coef(m)
+    emmeans::emmeans(m, ~ comparison_group)
   }
-  V  <- as.matrix(stats::vcov(m))
-  nm <- names(b)
-  coef_name <- function(lv) {
-    if (identical(as.character(lv), as.character(ref_level))) NA_character_
-    else paste0("comparison_group", lv)
-  }
-  prs <- utils::combn(as.character(levels_all), 2, simplify = FALSE)
-  rows <- lapply(prs, function(pr) {
-    a <- pr[1]; bb <- pr[2]
-    cvec <- stats::setNames(rep(0, length(b)), nm)
-    ca <- coef_name(a); cb <- coef_name(bb)
-    if (!is.na(ca)) { if (!ca %in% nm) return(NULL); cvec[ca] <- cvec[ca] + 1 }
-    if (!is.na(cb)) { if (!cb %in% nm) return(NULL); cvec[cb] <- cvec[cb] - 1 }
-    est <- sum(cvec * b)
-    v   <- as.numeric(t(cvec) %*% V %*% cvec)
-    if (!is.finite(v) || v <= 0) return(NULL)
-    se <- sqrt(v); z <- est / se
-    tibble::tibble(
-      comparison = paste0(a, " - ", bb),
-      level_a = a, level_b = bb,
-      estimate = est, se = se, statistic = z,
-      p.value = 2 * stats::pnorm(-abs(z))
-    )
-  })
-  out <- dplyr::bind_rows(rows)
-  if (nrow(out) > 0) out$p_adj <- stats::p.adjust(out$p.value, method = "BH")
+  lv  <- as.character(summary(emm)$comparison_group)
+  if (length(lv) < 2) return(tibble::tibble())
+  prs <- utils::combn(lv, 2, simplify = FALSE)
+  meth <- stats::setNames(
+    lapply(prs, function(p) { v <- rep(0, length(lv)); v[lv == p[1]] <- 1; v[lv == p[2]] <- -1; v }),
+    vapply(prs, function(p) paste(p[1], "-", p[2]), character(1)))
+  ct <- as.data.frame(emmeans::contrast(emm, method = meth, adjust = "none", infer = TRUE))
+  out <- tibble::tibble(
+    comparison = as.character(ct$contrast),
+    level_a = vapply(prs, `[`, character(1), 1),
+    level_b = vapply(prs, `[`, character(1), 2),
+    estimate = ct$estimate, se = ct$SE, df = ct$df,
+    ci_lo = ct$lower.CL, ci_hi = ct$upper.CL,
+    statistic = ct$t.ratio,
+    p.value = ct$p.value,
+    test = if (is_mer) "Satterthwaite t" else "t (residual df)"
+  )
+  out$p_adj <- stats::p.adjust(out$p.value, method = "BH")
   out
 }
 
@@ -332,8 +344,7 @@ lmm_pairwise <- function(data, marker, stratify_by = NULL,
     }
     if (inherits(m, "try-error")) return(NULL)
 
-    pw <- tryCatch(.pairwise_wald(m, levels(df$comparison_group), eff_ref),
-                   error = function(e) NULL)
+    pw <- tryCatch(.pairwise_satterthwaite(m), error = function(e) NULL)
     if (is.null(pw) || nrow(pw) == 0) return(NULL)
 
     omni <- tryCatch({
