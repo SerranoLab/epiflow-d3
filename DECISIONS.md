@@ -992,17 +992,17 @@ and "MAD" was unexpanded. The toggle, the backend `x_label` (`helpers.R`
 MAD; MAD = median absolute deviation)". Static checks in `test_labels.R`.
 
 ### L15 — Ridge subtitle "n" counts long-format rows (cells × markers), not cells
-Status: open (2026-09-25), from the v1.4.1 browser check; fix in the next label pass
+Status: done (2026-09-25), branch fix/ridge-labels, from the v1.4.1 browser check
 
-On the 416k file the HBVP ridge reads n = 693,570 for 138,714 HBVP cells —
-5 markers × cells. `compute_ridge_data` (`helpers.R`, `row_entry`) sets
+On the 416k file the HBVP ridge read n = 693,570 for 138,714 HBVP cells —
+5 markers × cells. `compute_ridge_data` (`helpers.R`, `row_entry`) set
 `n = length(env_vals)` on the group envelope row, i.e. the number of
-long-format rows pooled into the density, and `ridgePlot.js` prints it as
-"n=…" with no unit. Fix: every `n` in the ridge payload is
+long-format rows pooled into the density, and `ridgePlot.js` printed it as
+"n=…" with no unit. Now every `n` in the ridge payload is
 `dplyr::n_distinct(cell_id)` of the rows it was computed from (group row and
-per-colour rows alike), and the label reads "n = 138,714 cells". Test: on the
-example data the ridge n for a genotype equals that genotype's cell count
-from `/api/metadata`, not 5× it.
+per-colour rows alike) and the label reads "n = 138,714 cells". Test
+(`test_labels.R`, live block): on the example the ridge n for each genotype
+equals that genotype's distinct-cell count, not 5× it.
 
 ---
 

@@ -284,7 +284,7 @@ const RidgePlot = {
         .attr('text-anchor', 'end')
         .attr('font-size', '10px')
         .attr('fill', '#94a3b8')
-        .text(`n=${Number(dens.n).toLocaleString()}`);
+        .text(`n = ${Number(dens.n).toLocaleString()} cells`);   // L15: distinct cells, not rows
 
       // Hover area
       g.append('rect')
@@ -298,13 +298,13 @@ const RidgePlot = {
           const med = Number(dens.median);
           const mn = Number(dens.mean);
           let html = `<strong>${dens.group}</strong><br>
-            n = ${Number(dens.n).toLocaleString()}<br>
+            n = ${Number(dens.n).toLocaleString()} cells<br>
             median = ${isNaN(med) ? '—' : med.toFixed(3)}<br>
             mean = ${isNaN(mn) ? '—' : mn.toFixed(3)}`;
           if (dens.sub_colors && dens.sub_colors.length > 0) {
             html += '<br><br>';
             dens.sub_colors.forEach(sc => {
-              html += `<span style="color:${subColorScale(sc.color_level)}">●</span> ${sc.color_level}: n=${Number(sc.n).toLocaleString()}<br>`;
+              html += `<span style="color:${subColorScale(sc.color_level)}">●</span> ${sc.color_level}: n = ${Number(sc.n).toLocaleString()} cells<br>`;
             });
           }
           tooltip.transition().duration(100).style('opacity', 1);

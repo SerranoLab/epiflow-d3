@@ -175,5 +175,31 @@ check(has("frontend/index.html", s_std, 2) && has("frontend/index.html", s_raw, 
 check(has("api/R/helpers.R", paste0('"', s_std, '"')) && has("api/R/helpers.R", paste0('"', s_raw, '"')), "helpers.R x_label strings match the toggle")
 check(lacks("frontend/index.html", "raw (arcsinh)") && lacks("frontend/index.html", "per-marker (median/MAD)") && lacks("api/R/helpers.R", "Standardized intensity (per-marker, median/MAD)"), "old 'raw (arcsinh)' / 'per-marker (median/MAD)' labels are gone")
 
+# ---- L15: ridge n counts distinct cells, labelled "n = … cells" ----
+cat("\n--- L15 ridge n ---\n")
+rp <- "frontend/js/charts/ridgePlot.js"
+check(has(rp, "n = ${Number(dens.n).toLocaleString()} cells") && has(rp, "n = ${Number(sc.n).toLocaleString()} cells") && lacks(rp, "n=${"), "ridge labels read 'n = … cells' (row label, tooltip, sub-curves)")
+check(has("api/R/helpers.R", "row_entry(mk, md$value, subs, dplyr::n_distinct(md$cell_id))") && has("api/R/helpers.R", "row_entry(gr, gd$value, subs, dplyr::n_distinct(gd$cell_id))") && has("api/R/helpers.R", "n = dplyr::n_distinct(s$cell_id)", 2),
+      "compute_ridge_overlay counts distinct cell_id for group rows and sub-curves")
+check(ver_of("ridgePlot.js") >= "1.2.5", "ridgePlot.js cache-busting bump (>= 1.2.5)")
+# Live: on the example (2 genotypes x 3 replicates x 600 cells x 5 markers) every ridge n is a cell count (1,800), not 9,000 rows.
+api_base <- Sys.getenv("EPIFLOW_API", "http://127.0.0.1:8000")
+live <- tryCatch({ suppressPackageStartupMessages({ library(httr); library(jsonlite) })
+  ex <- fromJSON(content(POST(paste0(api_base, "/api/example"), body = list(preset = "ipsc_npc", cells_per_rep = 600, seed = 4242L), encode = "json", timeout(120)), as = "text", encoding = "UTF-8"), simplifyVector = FALSE)
+  md <- fromJSON(content(GET(paste0(api_base, "/api/metadata/", ex$session_id)), as = "text", encoding = "UTF-8"), simplifyVector = FALSE)
+  ov <- fromJSON(content(POST(paste0(api_base, "/api/viz/ridge/", ex$session_id), body = list(markers = as.list(unlist(ex$h3_markers)), group_by = "genotype", color_by = "marker", scale_mode = "raw"), encode = "json", timeout(120)), as = "text", encoding = "UTF-8"), simplifyVector = FALSE)
+  sg <- fromJSON(content(POST(paste0(api_base, "/api/viz/ridge/", ex$session_id), body = list(marker = unlist(ex$h3_markers)[1], group_by = "genotype", color_by = "genotype"), encode = "json", timeout(120)), as = "text", encoding = "UTF-8"), simplifyVector = FALSE)
+  list(md = md, ov = ov, sg = sg) }, error = function(e) NULL)
+if (is.null(live)) cat("  [SKIP] API not reachable; live ridge-n check skipped\n") else {
+  n_total <- as.integer(live$md$n_cells); n_groups <- length(live$ov$densities)
+  ov_n <- vapply(live$ov$densities, function(d) as.integer(unlist(d$n)), integer(1))
+  sub_n <- unlist(lapply(live$ov$densities, function(d) vapply(d$sub_colors, function(s) as.integer(unlist(s$n)), integer(1))))
+  check(n_groups == 2 && all(ov_n == n_total / n_groups) && sum(ov_n) == n_total, sprintf("overlay ridge: n per genotype = %s = metadata n_cells / 2 (rows would be 5x)", paste(ov_n, collapse = ", ")))
+  check(all(sub_n == n_total / n_groups), "overlay sub-curves (one per marker): n = cells of that genotype")
+  check(identical(live$ov$x_label, "arcsinh intensity (as imported)"), "overlay x_label carries the L14 wording")
+  sg_n <- vapply(live$sg$densities, function(d) as.integer(unlist(d$n)), integer(1))
+  check(length(sg_n) == 2 && all(sg_n == n_total / n_groups), sprintf("single-marker ridge: n per genotype = %s", paste(sg_n, collapse = ", ")))
+}
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

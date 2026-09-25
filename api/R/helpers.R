@@ -336,7 +336,7 @@ compute_ridge_data <- function(data, marker, group_by = "genotype",
         sub <- subset %>% dplyr::filter(.data[[color_by]] == cl)
         if (nrow(sub) < 3) return(NULL)
         sd <- density(sub$value, bw = h, n = 256)
-        list(color_level = cl, x = sd$x, y = sd$y, n = nrow(sub),
+        list(color_level = cl, x = sd$x, y = sd$y, n = dplyr::n_distinct(sub$cell_id),   # L15: cells
              median = median(sub$value, na.rm = TRUE),
              mean = mean(sub$value, na.rm = TRUE))
       })
@@ -347,7 +347,7 @@ compute_ridge_data <- function(data, marker, group_by = "genotype",
       group = g,
       x = d$x,
       y = d$y,
-      n = nrow(subset),
+      n = dplyr::n_distinct(subset$cell_id),   # L15: cells, not rows
       median = median(subset$value, na.rm = TRUE),
       mean = mean(subset$value, na.rm = TRUE),
       sub_colors = if (is.null(sub_colors)) list() else safe_I(sub_colors)
@@ -433,9 +433,11 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
     d <- stats::density(v, bw = h, n = 256)
     list(x = d$x, y = d$y)
   }
-  row_entry <- function(group_label, env_vals, subs) {
+  # L15: n is the number of distinct cells behind a curve, never the number of
+  # long-format rows (cells × markers) pooled into it.
+  row_entry <- function(group_label, env_vals, subs, n_cells) {
     dd <- dens(env_vals)
-    list(group = group_label, x = dd$x, y = dd$y, n = length(env_vals),
+    list(group = group_label, x = dd$x, y = dd$y, n = n_cells,
          median = median(env_vals, na.rm = TRUE), mean = mean(env_vals, na.rm = TRUE),
          sub_colors = if (length(subs)) safe_I(subs) else list())
   }
@@ -452,11 +454,11 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
           s <- md %>% dplyr::filter(.data[[color_by]] == cl)
           if (nrow(s) < 3) return(NULL)
           dd <- dens(s$value)
-          list(color_level = cl, x = dd$x, y = dd$y, n = nrow(s),
+          list(color_level = cl, x = dd$x, y = dd$y, n = dplyr::n_distinct(s$cell_id),
                median = median(s$value, na.rm = TRUE), mean = mean(s$value, na.rm = TRUE))
         }))
       }
-      row_entry(mk, md$value, subs)
+      row_entry(mk, md$value, subs, dplyr::n_distinct(md$cell_id))
     })
     color_out <- if (has_color) color_by else "marker"
   } else {
@@ -471,10 +473,10 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
         s <- gd %>% dplyr::filter(H3PTM == mk)
         if (nrow(s) < 3) return(NULL)
         dd <- dens(s$value)
-        list(color_level = mk, x = dd$x, y = dd$y, n = nrow(s),
+        list(color_level = mk, x = dd$x, y = dd$y, n = dplyr::n_distinct(s$cell_id),
              median = median(s$value, na.rm = TRUE), mean = mean(s$value, na.rm = TRUE))
       }))
-      row_entry(gr, gd$value, subs)
+      row_entry(gr, gd$value, subs, dplyr::n_distinct(gd$cell_id))
     })
     color_out <- "marker"
   }
