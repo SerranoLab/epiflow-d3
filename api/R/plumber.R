@@ -1348,7 +1348,8 @@ function(session_id, req) {
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
       selected_features  = params$selected_features,
-      n_trees            = params$n_trees %||% 300
+      n_trees            = params$n_trees %||% 300,
+      stratify_by        = params$stratify_by   # R28: per-stratum grouped CV; NULL / "None" = off
     ),
     error = function(e) list(error = paste("Diagnostic CV failed:", e$message))
   )

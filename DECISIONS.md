@@ -685,6 +685,62 @@ are shown to two decimals.
 
 ---
 
+## R28 — Grouped leave-one-sample-out CV per stratum (stratify_by)
+Status: done (2026-09-25), branch audit/stratified-cv
+
+What changes. The Diagnostic panel's stratify dropdown fed only the
+exploratory cell-split LDA and the signatures heatmap; the replicate-honest
+number (R3's grouped CV) was never stratified. `run_diagnostic_cv()` now
+takes `stratify_by`: after the unstratified headline it reruns the same
+leave-one-sample-out CV inside every level of the column (identity,
+cell_cycle, and the dynamic gate_population / cluster_identity columns),
+with `.epiflow_sample_key` = target::replicate within the stratum. Each row
+carries n_cells used, samples per class, k / n samples correct, the exact
+binomial 95% CI on that stratum's own n, balanced accuracy on held-out
+cells, and top features. The 50k cell cap is applied per stratum, not
+before stratifying, so a rare stratum keeps its cells (Mitotic: 867 of 416k
+would otherwise keep ~100).
+
+Guards. A stratum with fewer than 2 samples per class, one class only, or
+no replicate structure reads "not estimable" with the reason; rows are never
+dropped. stratify_by == target is a dedicated error (every stratum one
+class), in the R18 style. When the headline itself declines (< 2 samples
+per class overall) no stratum can be estimable, so the endpoint returns the
+headline refusal and no strata.
+
+Top features. LDA has no importance; the rows (and now the unstratified
+`importance` for method = lda) carry standardized LDA weights: |coef| × SD
+per feature, summed over discriminants weighted by their share of the trace,
+normalised to 1 — fit on all cells of the stratum and labelled
+"standardized LDA weight (fit on all cells; descriptive)". Not
+cross-validated; it says what the discriminant leans on, not what each
+marker contributes to held-out accuracy.
+
+Wording. Help text, the card note and the guide say that at 3 vs 3 a
+per-stratum row means "which cell states carry the signal", not a
+diagnostic accuracy. The exact binomial CI is computed per row on that
+stratum's own n: at 6 samples, 6/6 gives [0.54, 1].
+
+Verification. `test_diagnostic_stratified.R`: identity gives three
+estimable rows whose k/n and CI equal an in-process `.epiflow_grouped_cv` on
+the same stratum; the headline equals the unstratified call; a stratum whose
+KO cells come from one replicate reads not estimable with the observed
+counts; stratify_by == genotype returns the same-variable error; no
+`stratified` key without stratify_by; feature weights sum to 1.
+
+---
+
+## R29 — Strata × features heatmap of the per-stratum LDA weights
+Status: open (2026-09-25)
+
+What changes. Draw the R28 rows as a heatmap (rows = strata, columns =
+markers, cell = standardized LDA weight, row annotation = k / n with CI) so
+the "which cell states carry the signal" reading is visual. Deferred: the
+table came first; the weights are descriptive and the annotation must keep
+the not-estimable rows visible (greyed), not drop them.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base

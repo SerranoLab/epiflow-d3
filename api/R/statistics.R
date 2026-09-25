@@ -1372,12 +1372,40 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
     confusion_matrix = as.data.frame.matrix(cm) %>% tibble::rownames_to_column("predicted"))
 }
 
+# LDA feature weights (R28): standardized discriminant coefficients fitted on
+# ALL cells passed in — |coef| x feature SD, summed over discriminants weighted
+# by their share of the trace, normalised to sum 1. Descriptive, not
+# cross-validated: it says which markers the discriminant leans on, not how
+# much each one contributes to held-out accuracy.
+.epiflow_lda_weight_label <- "standardized LDA weight (fit on all cells; descriptive)"
+.epiflow_lda_feature_weights <- function(X, y) {
+  tryCatch({
+    X <- as.data.frame(X); y <- factor(y)
+    m <- MASS::lda(x = X, grouping = y)
+    sc <- abs(m$scaling) * vapply(X[, rownames(m$scaling), drop = FALSE], stats::sd, numeric(1))
+    w  <- as.numeric(sc %*% (m$svd^2 / sum(m$svd^2)))
+    if (sum(w) > 0) w <- w / sum(w)
+    out <- data.frame(feature = rownames(m$scaling), weight = w, row.names = NULL)
+    out[order(-out$weight), , drop = FALSE]
+  }, error = function(e) NULL)
+}
+.epiflow_top_features <- function(fw, n = 3) {
+  if (is.null(fw) || !nrow(fw)) return(NA_character_)
+  fw <- utils::head(fw, n)
+  paste(sprintf("%s (%.2f)", fw$feature, fw$weight), collapse = ", ")
+}
+
 # Diagnostic classifier: grouped-CV wrapper for rf / gbm / lda.
+# stratify_by (R28): rerun the same grouped CV inside every level of that
+# column; the per-stratum cap is applied per stratum so a rare stratum keeps
+# its cells. At few replicates the per-stratum rows say which cell states
+# carry the signal, not a diagnostic accuracy.
 run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
                               h3_markers = NULL, phenotypic_markers = NULL,
                               selected_features = NULL, n_trees = 300,
-                              max_cells = 50000) {
-  meta_cols  <- c("cell_id", target_var, "replicate", "identity", "cell_cycle")
+                              max_cells = 50000, stratify_by = NULL) {
+  if (!is.null(stratify_by) && (identical(stratify_by, "None") || !nzchar(stratify_by))) stratify_by <- NULL
+  meta_cols  <- unique(c("cell_id", target_var, "replicate", "identity", "cell_cycle", stratify_by))
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
 
   if (.epiflow_phenotype_only(data)) {
@@ -1392,6 +1420,7 @@ run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
       tidyr::pivot_wider(names_from = H3PTM, values_from = value)
     h3_cols <- intersect(h3_markers, names(wide))
   }
+  wide_all <- wide   # uncapped; the per-stratum loop caps each stratum on its own (R28)
   if (nrow(wide) > max_cells) { set.seed(42); wide <- wide[sample(nrow(wide), max_cells), ] }
 
   predictor_cols <- unique(c(h3_cols, pheno_cols))
@@ -1468,11 +1497,75 @@ run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
                               nrounds = n_trees, verbose = 0)
       ii <- xgboost::xgb.importance(feature_names = predictor_cols, model = m)
       data.frame(feature = ii$Feature, importance = ii$Gain)
-    } else NULL
+    } else {
+      fw <- .epiflow_lda_feature_weights(Xf, wide$.target)   # R28: descriptive, fit on all cells
+      if (is.null(fw)) NULL else data.frame(feature = fw$feature, importance = fw$weight)
+    }
   }, error = function(e) NULL)
+  importance_type <- switch(method, rf = "MeanDecreaseGini", gbm = "xgboost gain", lda = .epiflow_lda_weight_label)
+
+  # ---- Per-stratum grouped CV (R28) ----
+  stratified <- NULL
+  if (!is.null(stratify_by)) {
+    if (identical(stratify_by, target_var)) {
+      stratified <- list(stratify_by = stratify_by, error = paste0(
+        "stratify_by and the target are the same variable (", target_var, "): every stratum ",
+        "holds a single class, so a within-stratum grouped CV is undefined. Choose a different ",
+        "stratification, or none."))
+    } else if (!stratify_by %in% names(wide_all)) {
+      stratified <- list(stratify_by = stratify_by,
+                         error = paste0("Column '", stratify_by, "' is not in the current data."))
+    } else {
+      strata <- sort(unique(as.character(wide_all[[stratify_by]])))
+      rows <- lapply(strata, function(s) {
+        sub <- wide_all[as.character(wide_all[[stratify_by]]) == s, , drop = FALSE]
+        # Cap per stratum, not before stratifying: a rare stratum keeps its cells.
+        if (nrow(sub) > max_cells) { set.seed(42); sub <- sub[sample(nrow(sub), max_cells), ] }
+        sub$.target <- droplevels(factor(sub[[target_var]]))
+        base <- list(stratum = s, n_cells = nrow(sub),
+                     classes_present = levels(sub$.target), n_classes = nlevels(sub$.target))
+        if (nlevels(sub$.target) < 2) {
+          return(c(base, list(estimable = FALSE, n_samples = NA_integer_, samples_per_class = NULL,
+                              reason = paste0("only one ", target_var, " level present (",
+                                              paste(levels(sub$.target), collapse = ", "), ")"))))
+        }
+        sid <- .epiflow_sample_key(sub, target_var)
+        if (is.null(sid)) {
+          return(c(base, list(estimable = FALSE, n_samples = NA_integer_, samples_per_class = NULL,
+                              reason = "no replicate structure in this stratum")))
+        }
+        r <- .epiflow_grouped_cv(sub[, predictor_cols, drop = FALSE], sub$.target, sid,
+                                 fit_fn = learners$fit, predict_fn = learners$pred, impute_fn = impute_fn)
+        if (isFALSE(r$feasible)) {
+          spc <- r$samples_per_class
+          obs <- if (!is.null(spc)) paste0(" (observed: ", paste(sprintf("%s=%d", names(spc), as.integer(unlist(spc))), collapse = ", "), ")") else ""
+          return(c(base, list(estimable = FALSE, n_samples = r$n_samples, samples_per_class = spc,
+                              reason = paste0("fewer than 2 samples per class", obs))))
+        }
+        Xf <- impute_fn(sub[, predictor_cols, drop = FALSE])$apply(sub[, predictor_cols, drop = FALSE])
+        fw <- if (method == "lda") .epiflow_lda_feature_weights(Xf, sub$.target) else NULL
+        c(base, list(estimable = TRUE, reason = NA_character_,
+                     n_samples = r$n_samples, samples_per_class = r$samples_per_class,
+                     n_samples_correct = r$n_samples_correct, n_samples_tested = r$n_samples_tested,
+                     sample_accuracy = r$sample_accuracy, sample_accuracy_ci = r$sample_accuracy_ci,
+                     balanced_accuracy = r$balanced_accuracy, test_accuracy = r$test_accuracy,
+                     per_sample = r$per_sample,
+                     feature_weights = fw, feature_weight_type = if (is.null(fw)) NA_character_ else .epiflow_lda_weight_label,
+                     top_features = .epiflow_top_features(fw)))
+      })
+      stratified <- list(
+        stratify_by = stratify_by, strata = rows,
+        n_estimable = sum(vapply(rows, function(r) isTRUE(r$estimable), logical(1))),
+        note = paste0("Same leave-one-sample-out CV inside each ", stratify_by, " level. At this ",
+                      "few replicates a per-stratum row says which cell states carry the signal, ",
+                      "not a diagnostic accuracy; each CI is on that stratum's own n samples. ",
+                      "Top features are ", .epiflow_lda_weight_label, "."))
+    }
+  }
 
   c(list(method = method, target_var = target_var,
          classes = levels(wide$.target), n_classes = nlevels(wide$.target),
-         importance = importance, n_cells_used = nrow(wide)),
-    cv[setdiff(names(cv), "feasible")])
+         importance = importance, importance_type = importance_type, n_cells_used = nrow(wide)),
+    cv[setdiff(names(cv), "feasible")],
+    if (is.null(stratified)) NULL else list(stratified = stratified))
 }

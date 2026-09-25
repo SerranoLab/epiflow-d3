@@ -946,7 +946,8 @@
             <div class="help-panel" style="margin-bottom:12px;"><i class="fas fa-info-circle"></i>
               Can H3-PTM signatures discriminate the target? The headline is the <strong>grouped leave-one-sample-out CV</strong>: an LDA trained with whole biological samples held out, scored as samples called correctly (majority vote) with an exact binomial 95% CI — the only accuracy here that speaks to a new sample.
               <strong>PERMANOVA</strong> tests per-replicate mean profiles with R² as the effect size; with k vs k replicates the smallest attainable p is 1 over the number of distinct label arrangements (0.10 at 3 vs 3) — the card shows the value for your replicate count.
-              The <strong>cell-split 5-fold LDA</strong> is exploratory (cells from every sample sit in both folds). <strong>Consistency</strong> tests if effects hold within each identity (via LMM). Stratify to test cell-type or cell-cycle specificity.
+              The <strong>cell-split 5-fold LDA</strong> is exploratory (cells from every sample sit in both folds). <strong>Consistency</strong> tests if effects hold within each identity (via LMM).
+              <strong>Stratify</strong> runs the same leave-one-sample-out CV inside each identity / cell-cycle phase / gate / cluster: at 3 vs 3 the per-stratum result means <em>which cell states carry the signal</em>, not a diagnostic accuracy. A stratum with fewer than 2 samples per class reads <em>not estimable</em>.
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
               <select id="diag-stratify" class="select-input" style="width:auto;">
@@ -1119,6 +1120,6 @@
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.2"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.10"></script>
+  <script src="js/app.js?v=1.3.11"></script>
 </body>
 </html>

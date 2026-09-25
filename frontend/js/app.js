@@ -2550,7 +2550,9 @@ const App = {
           stratify_by: stratify === 'None' ? null : stratify,
           n_clusters: kVal > 0 ? kVal : null
         }),
-        EpiFlowAPI.runDiagnosticCV({ target_var: target, method: 'lda', selected_features: cvFeatures })
+        // R28: the same grouped CV is also run inside each stratum.
+        EpiFlowAPI.runDiagnosticCV({ target_var: target, method: 'lda', selected_features: cvFeatures,
+                                     stratify_by: stratify === 'None' ? null : stratify })
       ]);
 
       // 1. Grouped CV — the diagnostic headline
@@ -2816,7 +2818,54 @@ const App = {
       macro F1 ${Number.isFinite(Number(cv.macro_f1)) ? Number(cv.macro_f1).toFixed(3) : '—'} · per-class recall ${recalls}
     </p>
     <p style="font-size:10px;color:#94a3b8;margin:4px 0 0;">With this few samples the interval is the finding: a feasibility estimate, not validation.</p>`;
+    html += this.renderStratifiedGroupedCv(cv.stratified);
     el.innerHTML = html;
+  },
+
+  // R28: the same leave-one-sample-out CV inside each stratum. A row is k of n
+  // samples correct with its own exact CI; a stratum with fewer than 2 samples
+  // per class reads "not estimable" and is never dropped. Top features are
+  // standardized LDA weights fit on all stratum cells — descriptive only.
+  renderStratifiedGroupedCv(st) {
+    if (!st) return '';
+    const pct = x => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(1) + '%' : '—');
+    const spcOf = o => (o ? Object.entries(o).map(([g, v]) => g + ' = ' + v).join(', ') : '—');
+    const by = st.stratify_by || 'stratum';
+    let html = `<h4 style="margin:14px 0 4px;"><i class="fas fa-layer-group"></i> Per-stratum grouped CV — by ${by}</h4>`;
+    if (st.error) {
+      return html + `<div style="padding:10px 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;">
+        <i class="fas fa-exclamation-triangle"></i> <strong>Per-stratum CV skipped</strong> — ${st.error}</div>`;
+    }
+    const rows = ensureArray(st.strata)
+      .map(r => ({ ...r, estimable: r.estimable !== false }))
+      .sort((a, b) => (b.estimable - a.estimable) ||
+        ((Number(b.sample_accuracy) || 0) - (Number(a.sample_accuracy) || 0)));
+    if (!rows.length) return html + '<p style="font-size:12px;color:#94a3b8;">No strata.</p>';
+    html += `<table class="stats-table" style="font-size:12px;"><thead><tr>
+      <th>Stratum</th><th>Cells</th><th>Samples per class</th><th>Correct (k / n)</th><th>Exact 95% CI</th>
+      <th title="mean per-class recall on held-out cells">Balanced acc. (held-out cells)</th>
+      <th title="standardized LDA weight (fit on all stratum cells; descriptive)">Top features (LDA weight, descriptive)</th><th>Status</th>
+    </tr></thead><tbody>`;
+    rows.forEach(r => {
+      const stratum = Array.isArray(r.stratum) ? r.stratum[0] : String(r.stratum);
+      if (!r.estimable) {
+        html += `<tr style="color:#94a3b8;"><td><strong>${stratum}</strong></td><td>${Number(r.n_cells).toLocaleString()}</td>
+          <td>${spcOf(r.samples_per_class)}</td><td>—</td><td>—</td><td>—</td><td>—</td>
+          <td style="font-size:11px;color:#b45309;">not estimable: ${r.reason || ''}</td></tr>`;
+        return;
+      }
+      const ci = ensureArray(r.sample_accuracy_ci).map(Number);
+      html += `<tr><td><strong>${stratum}</strong></td><td>${Number(r.n_cells).toLocaleString()}</td>
+        <td>${spcOf(r.samples_per_class)}</td>
+        <td style="font-weight:700;">${Number(r.n_samples_correct)} / ${Number(r.n_samples_tested)}</td>
+        <td>${ci.length === 2 ? `[${pct(ci[0])}, ${pct(ci[1])}]` : '—'}</td>
+        <td>${pct(r.balanced_accuracy)}</td>
+        <td style="font-size:11px;">${r.top_features || '—'}</td>
+        <td style="font-size:11px;color:#15803d;">replicate-level ✓</td></tr>`;
+    });
+    html += '</tbody></table>';
+    html += `<p style="font-size:10px;color:#94a3b8;margin:4px 0 0;">${st.note || ''}</p>`;
+    return html;
   },
 
   // R3: PERMANOVA on per-replicate mean profiles (Anderson 2001). R² is the

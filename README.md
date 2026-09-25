@@ -36,7 +36,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 ### Machine Learning
 - **Random Forest & Gradient Boosted Models** — classification with train/test split, feature importance ranking, ROC/AUC, and confusion matrices
 - **Epigenetic signatures** — group-specific H3-PTM signature extraction with z-score heatmaps
-- **Diagnostic assessment** — MANOVA multivariate profile testing, Linear Discriminant Analysis (LDA), LMM consistency matrices, stratified signatures, and k-means cluster validation
+- **Diagnostic assessment** — grouped leave-one-sample-out CV (optionally per stratum, with a not-estimable guard), exact PERMANOVA on per-replicate profiles, LDA (exploratory), LMM consistency matrices, stratified signatures, and k-means cluster validation
 
 ### Export & Reporting
 - **Publication-quality figures** — SVG and high-resolution PNG (2×) export from every chart

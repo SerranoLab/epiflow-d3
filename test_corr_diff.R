@@ -161,7 +161,9 @@ check(!any(grepl("corr-use-cell-n", idx, fixed = TRUE)) && !any(grepl("corr-use-
 check(any(grepl("Aarts", idx)) && any(grepl("interval is on the Fisher-z scale", idx)), "help text: Aarts caveat and z-scale interval sentence")
 check(sum(grepl("Welch t", app)) >= 2 && !any(grepl("No replicate-level significance test", app)), "app.js Methods (HTML and plain text) describe the Welch t; old sentence gone")
 check(any(grepl("renderReplicateDots", cp)), "correlationPlot.js defines renderReplicateDots")
-check(any(grepl("correlationPlot.js?v=1.2.3", idx, fixed = TRUE)) && any(grepl("app.js?v=1.3.10", idx, fixed = TRUE)), "index.html cache-busting bumps present")
+# Versions only ever move up: assert at-least, so later bumps don't break this test.
+ver_of <- function(file) { m <- regmatches(idx, regexpr(paste0(file, "\\?v=[0-9.]+"), idx)); if (!length(m)) return(NA); numeric_version(sub(".*v=", "", m[1])) }
+check(ver_of("correlationPlot.js") >= "1.2.3" && ver_of("js/app.js") >= "1.3.10", "index.html cache-busting bumps present (correlationPlot >= 1.2.3, app >= 1.3.10)")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
