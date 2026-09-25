@@ -142,5 +142,11 @@ check(lacks("test_serializer_precision.R", "ks_p_value"), "serializer test no lo
 check(ver_of("markerHeatmap.js") >= "1.2.5", "markerHeatmap.js cache-busting bump (>= 1.2.5)")
 check(ver_of("js/app.js") >= "1.3.19", "app.js cache-busting bump (>= 1.3.19)")
 
+# ---- R9: Cliff's delta subsample is seeded ----
+cat("\n--- R9 Cliff's delta seed ---\n")
+p2 <- lines_of("api/R/phase2.R")
+i_s1 <- grep("s1 <- if (n1 > 3000) sample(g1, 3000) else g1", p2, fixed = TRUE)
+check(length(i_s1) == 1 && any(grepl("set.seed(42)", p2[max(1, i_s1 - 3):i_s1], fixed = TRUE)), "set.seed(42) within 3 lines before the Cliff's delta sample()")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

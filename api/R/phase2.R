@@ -382,6 +382,7 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
     # Effect size: Cliff's delta
     n1 <- length(g1); n2 <- length(g2)
     cliffs_delta <- tryCatch({
+      set.seed(42)   # R9: the 3,000-cell subsample was unseeded, so delta drifted run to run
       s1 <- if (n1 > 3000) sample(g1, 3000) else g1
       s2 <- if (n2 > 3000) sample(g2, 3000) else g2
       dom <- sum(outer(s1, s2, ">")) - sum(outer(s1, s2, "<"))

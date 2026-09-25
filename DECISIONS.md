@@ -249,6 +249,16 @@ label and keeps its KS p there.
 
 ---
 
+## R9 — Cliff's delta subsample was unseeded
+Status: done (2026-09-25), branch audit/labels
+
+`compute_marker_detail` (`phase2.R`) subsamples each group to 3,000 cells
+before the O(n²) dominance count; the `sample()` calls had no seed, so the
+reported delta changed from run to run above 3,000 cells per group.
+`set.seed(42)` now precedes them (CLAUDE.md: seed every stochastic step).
+
+---
+
 ## R7 — A caution note described a Cohen's d confidence interval that was never computed
 Status: done (2026-09-25)
 
