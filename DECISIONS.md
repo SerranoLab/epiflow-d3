@@ -794,6 +794,16 @@ grouped and the simple payloads, and the subtitle is built from that field
 ("Welch t (replicate means) per group, BH across groups: * p<0.05 …"), so
 the label can no longer drift from the test.
 
+### L3 — Simple violin showed no test although the payload carries one
+Status: done (2026-09-25)
+
+For two groups `compute_violin_data` returns a Welch t on replicate means
+(`significance[[1]]`), which `renderSimple` never read. The simple violin
+now prints it as a subtitle ("Welch t (replicate means): p = 0.023 (3 vs 3
+replicates)") or "replicate-level test not estimable (fewer than 2
+replicates per group)" when two groups have no test. USER_GUIDE says which
+test each violin shows.
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

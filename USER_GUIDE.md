@@ -110,7 +110,7 @@ Ideal for comparing distribution shapes — bimodality, shifts, or spread differ
 
 ### Violin Plots
 
-Grouped violin plots with embedded box plots and median lines. When LMM results are available, violin plots display p-values and d (β / cell-level pooled SD) directly on the plot.
+Violin plots of the arcsinh intensity with embedded box plots and median lines. A two-group violin shows a Welch t-test on replicate means in its subtitle (or "not estimable" below 2 replicates per group); a grouped violin shows the same test per group with BH correction across groups. When LMM results are available, violin plots also display p-values and d (β / cell-level pooled SD) directly on the plot.
 
 ### Heatmap
 

@@ -69,6 +69,23 @@ const ViolinPlot = {
     const groups = orderRefFirst([...new Set(data.violins.map(v => v.group))], data.ref_level);
     const xScale = d3.scaleBand().domain(groups).range([0, width]).padding(0.2);
 
+    // L3: the payload carries a replicate-level test for two groups (Welch t on
+    // replicate means); show it, or say why it is not estimable.
+    const simpleSig = ensureArray(data.significance || []);
+    let sigText = '';
+    if (simpleSig.length) {
+      const s = simpleSig[0];
+      sigText = `${s.test_type || 'replicate-level test'}: p = ${fmtP(s.p_value)} (${s.n_replicates || '—'} replicates)`;
+    } else if (groups.length === 2) {
+      sigText = 'replicate-level test not estimable (fewer than 2 replicates per group)';
+    }
+    if (sigText) {
+      svg.append('text')
+        .attr('x', (width + margin.left + margin.right) / 2).attr('y', 34)
+        .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b')
+        .text(sigText);
+    }
+
     const allVals = data.violins.flatMap(v => [Number(v.min), Number(v.max)]).filter(x => !isNaN(x));
     const yPad = (d3.max(allVals) - d3.min(allVals)) * 0.05;
     const yScale = d3.scaleLinear()

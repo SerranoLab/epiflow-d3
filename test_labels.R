@@ -28,5 +28,12 @@ check(has("api/R/helpers.R", 'test_type = "Welch t (replicate means)"', 2) && la
       "helpers.R test_type reads 'Welch t (replicate means)' in both violin payloads")
 check(ver_of("violinPlot.js") >= "1.2.4", "violinPlot.js cache-busting bump (>= 1.2.4)")
 
+# ---- L3: simple violin shows the replicate-level test or says it is not estimable ----
+cat("\n--- L3 simple violin test subtitle ---\n")
+check(has(f, "replicate-level test not estimable (fewer than 2 replicates per group)"), "simple violin has the not-estimable line")
+check(has(f, "const simpleSig = ensureArray(data.significance || []);"), "renderSimple reads data.significance")
+check(has("USER_GUIDE.md", "Welch t-test on replicate means"), "USER_GUIDE names the violin test")
+check(ver_of("violinPlot.js") >= "1.2.5", "violinPlot.js cache-busting bump (>= 1.2.5)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
