@@ -771,6 +771,19 @@ the not-estimable rows visible (greyed), not drop them.
 
 ## Label findings (L-series) — fix in the label pass
 
+Label pass on branch audit/labels (2026-09-25): one commit per ID, each
+adding its static checks to `test_labels.R` (corrected string present, wrong
+string absent; runs without the API). Decisions: the volcano plots BH
+p_adj; every default palette is Okabe-Ito.
+
+### L1 — Violin y-axis said "(z-score)" for H3 marks; the plot shows the arcsinh value
+Status: done (2026-09-25)
+
+`compute_violin_data` (`helpers.R`) never standardizes; the violins draw the
+imported arcsinh intensity for H3 marks and phenotypic markers alike (the
+medians on the axis read ~4.9, not 0). Both y-axis labels in
+`violinPlot.js` now read "marker (arcsinh intensity)".
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

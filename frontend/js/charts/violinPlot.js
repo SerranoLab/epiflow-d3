@@ -87,7 +87,7 @@ const ViolinPlot = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -55)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text(data.marker + (data.is_h3 ? ' (z-score)' : ''));
+      .text(data.marker + ' (arcsinh intensity)');   // L1: imported arcsinh value, unscaled
 
     g.append('g').attr('class', 'grid')
       .call(d3.axisLeft(yScale).ticks(8).tickSize(-width).tickFormat(''));
@@ -178,7 +178,7 @@ const ViolinPlot = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -55)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text(data.marker + (data.is_h3 ? ' (z-score)' : ''));
+      .text(data.marker + ' (arcsinh intensity)');   // L1: imported arcsinh value, unscaled
 
     g.append('g').attr('class', 'grid')
       .call(d3.axisLeft(yScale).ticks(8).tickSize(-width).tickFormat(''));
