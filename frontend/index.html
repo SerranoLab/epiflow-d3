@@ -589,7 +589,6 @@
             <div class="panel-controls">
               <select id="corr-method" class="select-input"><option value="pearson">Pearson</option><option value="spearman">Spearman</option></select>
               <label class="checkbox-inline"><input type="checkbox" id="corr-include-pheno"> Include phenotypic</label>
-              <label class="checkbox-inline" title="Check this if your experiment lacks biological replicates. Default uses replicate-level N for proper inference."><input type="checkbox" id="corr-use-cell-n"> Use cells as replicates</label>
               <button class="btn btn-primary btn-sm" id="run-correlation-btn"><i class="fas fa-play"></i> Global</button>
               <button class="btn btn-primary btn-sm" id="run-corr-diff-btn" style="background:#7c3aed;border-color:#7c3aed;"><i class="fas fa-exchange-alt"></i> Per-Group + Differential</button>
               <button class="btn btn-sm" id="correlation-export-svg"><i class="fas fa-download"></i> SVG</button>
@@ -598,9 +597,10 @@
           </div>
           <div class="help-panel"><i class="fas fa-info-circle"></i>
             <strong>Global</strong> computes one correlation matrix across all cells.
-            <strong>Per-Group + Differential</strong> computes separate matrices per genotype, then applies Fisher z-transform to test whether marker-marker correlations differ significantly between groups.
-            By default, the Fisher z uses <strong>replicate-level N</strong> for proper inference. Check <em>"Use cells as replicates"</em> only if your experiment lacks biological replicates.
-            Disrupted co-regulation (Δr with p<0.05) indicates chromatin regulator loss affects the coordinated deposition of marks.
+            <strong>Per-Group + Differential</strong> computes one matrix per group on pooled cells (descriptive), then tests each marker pair at the <strong>replicate level</strong>:
+            r within each biological replicate, Fisher z = atanh(r), Welch t on Δz across replicates for every group pair, BH across all pairs.
+            The interval is on the Fisher-z scale; Δr is descriptive. Fewer than 2 replicates in a group → not estimable.
+            Correlations across a mixed population can be composition artifacts (Aarts et al. 2014, <em>Nat Neurosci</em>): read them within a stratum (filter by identity / cell cycle in the sidebar first).
           </div>
           <div class="chart-container" id="correlation-chart"></div>
           <div id="corr-diff-results" style="display:none;">
@@ -611,9 +611,13 @@
             <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:24px 0 12px;">Differential Correlation (Δr)
               <button class="btn btn-sm" id="corr-diff-export-svg" style="margin-left:8px;font-size:10px;"><i class="fas fa-download"></i> SVG</button>
             </h3>
-            <p style="font-size:12px;color:#64748b;margin-bottom:8px;">Color: blue = stronger in group 1, red = stronger in group 2. Asterisks = BH-adjusted p<0.05. Fisher z-transform on r values.</p>
+            <p style="font-size:12px;color:#64748b;margin-bottom:8px;">Color: Δr (descriptive; tanh of the mean per-replicate z per group), blue = stronger in group 1, red = stronger in group 2. Asterisks = BH-adjusted p<0.05 from the replicate-level Welch t on Fisher z. Grey = not estimable.</p>
             <div id="corr-diff-chart" class="chart-container"></div>
-            <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:24px 0 8px;">Significant Differential Correlations</h3>
+            <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:24px 0 12px;">Per-Replicate Correlation
+              <button class="btn btn-sm" id="corr-rep-export-svg" style="margin-left:8px;font-size:10px;"><i class="fas fa-download"></i> SVG</button>
+            </h3>
+            <div id="corr-rep-chart" class="chart-container"></div>
+            <h3 style="font-size:14px;font-weight:600;color:#1a202c;margin:24px 0 8px;">Differential Correlations (per-replicate test)</h3>
             <div id="corr-diff-table" style="overflow-x:auto;"></div>
           </div>
         </div>
@@ -1110,11 +1114,11 @@
   <script src="js/charts/positivityPlot.js?v=1.2.2"></script>
   <script src="js/charts/gatingPlot.js?v=1.3.5"></script>
   <script src="js/charts/cellCyclePlot.js?v=1.2.2"></script>
-  <script src="js/charts/correlationPlot.js?v=1.2.2"></script>
+  <script src="js/charts/correlationPlot.js?v=1.2.3"></script>
   <script src="js/charts/overviewCharts.js?v=1.2.2"></script>
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.2"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.9"></script>
+  <script src="js/app.js?v=1.3.10"></script>
 </body>
 </html>

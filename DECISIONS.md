@@ -131,32 +131,57 @@ pseudo-F match `vegan::adonis2(dist(means) ~ genotype)` to 1e-8.
 ---
 
 ## R4 — Differential correlation: descriptor or replicate-level test
-Status: open (2026-09-24), decision needed
+Status: done (2026-09-25), option (b), branch audit/contrasts
 
-What changes. Either (a) remove the p column from the differential-correlation
-table and report delta-r as a descriptor, matching the Methods paragraph the
-report already prints; or (b) compute r per replicate, Fisher-z transform,
-and compare between groups with a t-test on replicates (n = replicates),
-then update the Methods paragraph to say so.
+Decision. Option (b): the replicate is the unit. For every marker pair and
+group, r is computed within each (group, replicate) on that replicate's own
+cells (Pearson or Spearman, as before) and z = atanh(r). Groups are compared
+by a Welch t on z across replicates for **every group pair**, with one BH
+family per run across all group pairs × marker pairs. The tested effect is
+Δz (g2 − g1) with its Welch 95% CI, shown as "Δz [95% CI]"; Δr =
+tanh(mean z₂) − tanh(mean z₁) is reported as the descriptive difference with
+no interval (the interval lives on the Fisher-z scale, where the test is).
+The per-group matrices stay as pooled-cell descriptive heatmaps; the
+per-replicate r's are drawn as points (one row per marker pair, one point
+per replicate, bar at tanh(mean z)) so the reader sees what is compared.
 
-Benefit. (a) is honest and one line of work. (b) gives an inferential test
-that reviewers can accept.
+Guards. A group with fewer than 2 replicates carrying a defined r (≥ 10
+cells and |r| < 1) makes every contrast involving it "not estimable" with
+the reason in the row; two constant groups (no replicate-to-replicate
+variation in z) likewise. Rows are never dropped: the table lists them last
+with their reason, the heatmap greys them. `use_cell_n` and the "Use cells as
+replicates" checkbox are gone — there is no cells-as-N version of this test.
 
-Cost. (a) leaves the tab descriptive. (b) has near-zero power at 3 vs 3
-replicates, so most delta-r values will be "not significant" even when
-large; the table must then lead with the effect size and show the p as
-secondary. Both options drop the current hybrid (cell-derived r with
-replicate N in the SE), which is not a coherent sampling model.
+Removed. The hybrid at the old phase2.R:635-693 (pooled-cell r, replicate N
+in `sqrt(1/(n1−3) + 1/(n2−3))`, normal p) and the top-level
+`differential/diff_matrix/p_matrix` payload; the payload now carries
+`contrasts[]` (one per group pair, each with its rows and matrices) and
+`replicate_r`. The old code also compared only the first two groups and
+silently ignored a third.
 
-Rejected alternative. Keeping the hybrid Fisher-z with the "replicates" label.
-Rejected because the Methods text and the table contradict each other.
+Composition caveat. Correlations across a mixed population can be
+composition artifacts (Aarts et al. 2014, Nat Neurosci): two identities
+with different marker levels correlate even when no cell co-regulates the
+marks. The help text and both Methods texts now say so and tell the reader to
+read correlations within a stratum (sidebar filters). Power at 3 vs 3 is low,
+so the table leads with the effect size and p is secondary.
+
+Rejected alternatives. Δr = tanh(Δz) as the reported effect — rejected
+2026-09-25 because tanh of a z-difference is not a difference of
+correlations; the interval stays on the z scale. An explicit two-group
+limit — rejected because the identity-stratified use the caveat points to
+has three levels; all pairs matches the R5 all-pairwise LMM.
 
 Backing. Zimmerman et al. 2021 (unit of inference); Murphy and Skene 2022
-(pseudobulk performance).
+(pseudobulk); Aarts et al. 2014 (nested data and composition).
 
-Verification. Whichever option: the generated report's Methods paragraph and
-the table header state the same test; `test_corr_diff.R` asserts the payload
-has no p-values when (a), or that `n_used` equals replicate counts when (b).
+Verification. `test_corr_diff.R`: Δz, its CI, df and p equal an in-process
+`t.test(z2, z1)` on per-replicate z to 1e-8 (Pearson and Spearman); Δr equals
+tanh(mean z₂) − tanh(mean z₁) and carries no bounds; per-replicate r count
+equals the replicate count; BH equals `p.adjust` over the whole family; three
+identities give three contrasts; a one-replicate group returns not estimable;
+static checks that the hybrid formula, `use_cell_n` and the "no
+replicate-level test" sentence are gone.
 
 ---
 

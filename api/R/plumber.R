@@ -983,11 +983,12 @@ function(session_id, req) {
     compute_per_group_correlation(
       store$filtered_data,
       h3_markers = store$metadata$h3_markers,
-      group_by = params$group_by %||% geno_col,
+      # R4: the frontend sends the active comparison variable as group_by;
+      # the test is replicate-level, so there is no cells-as-N option here.
+      group_by = params$group_by %||% params$comparison_var %||% geno_col,
       method = params$method %||% "pearson",
       include_phenotypic = isTRUE(params$include_phenotypic),
-      phenotypic_markers = store$metadata$phenotypic_markers,
-      use_cell_n = isTRUE(params$use_cell_n)
+      phenotypic_markers = store$metadata$phenotypic_markers
     ),
     error = function(e) list(error = paste("Differential correlation failed:", e$message))
   )

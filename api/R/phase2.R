@@ -564,6 +564,14 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
 # ============================================================================
 
 #' Compute per-group correlation matrices and differential correlation
+#'
+#' Per-group matrices are pooled-cell correlations and are descriptive only.
+#' The differential test is replicate-level (R4): r within each (group,
+#' replicate), z = atanh(r), Welch t on z across replicates for every group
+#' pair, BH across all group pairs x marker pairs in one family. The tested
+#' effect is delta z with its Welch 95% CI; delta r = tanh(mean z2) -
+#' tanh(mean z1) is reported descriptively, without an interval. A group with
+#' fewer than 2 replicates carrying a defined r is not estimable.
 #' @param data Long-format dataset
 #' @param h3_markers H3-PTM marker names
 #' @param group_by Variable to stratify by (e.g. "genotype", "identity")
@@ -571,8 +579,7 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
 compute_per_group_correlation <- function(data, h3_markers, group_by = "genotype",
                                           method = "pearson",
                                           include_phenotypic = FALSE,
-                                          phenotypic_markers = NULL,
-                                          use_cell_n = FALSE) {
+                                          phenotypic_markers = NULL) {
   groups <- sort(unique(data[[group_by]]))
   if (length(groups) < 2) return(list(error = "Need at least 2 groups"))
 
@@ -632,87 +639,118 @@ compute_per_group_correlation <- function(data, h3_markers, group_by = "genotype
                 per_group = per_group))
   }
 
-  # ---- Differential correlation (Fisher z-transform) ----
-  markers <- per_group[[1]]$markers
-  n1_cells <- per_group[[1]]$n_cells
-  n2_cells <- per_group[[2]]$n_cells
-  # FIX: Default to replicate N (proper inference); user can override with use_cell_n
-  n1_reps <- per_group[[1]]$n_replicates
-  n2_reps <- per_group[[2]]$n_replicates
-  has_reps <- !is.null(n1_reps) && n1_reps >= 3 && !is.null(n2_reps) && n2_reps >= 3
-
-  if (isTRUE(use_cell_n) || !has_reps) {
-    n1 <- n1_cells
-    n2 <- n2_cells
-    use_replicate_n <- FALSE
-  } else {
-    n1 <- n1_reps
-    n2 <- n2_reps
-    use_replicate_n <- TRUE
+  # ---- Per-replicate correlation (R4) ----
+  # The biological replicate is the unit of inference: r is computed within
+  # each (group, replicate) on that replicate's own cells and z = atanh(r).
+  # The pooled per-group matrices above are descriptive heatmaps only.
+  if (!"replicate" %in% names(data)) {
+    return(list(error = "Differential correlation needs a replicate column (replicate-level test)"))
   }
+  markers   <- as.character(per_group[[1]]$markers)
+  grp_names <- vapply(per_group, function(p) as.character(p$group), character(1))
+  pair_idx  <- utils::combn(length(markers), 2)   # 2 x P marker-pair index
 
-  # Parse correlation values
-  mat1 <- per_group[[1]]$matrix
-  mat2 <- per_group[[2]]$matrix
-
-  diff_results <- list()
-  for (i in 1:(length(markers) - 1)) {
-    for (j in (i + 1):length(markers)) {
-      m1 <- markers[i]; m2 <- markers[j]
-      r1 <- as.numeric(mat1[mat1$marker == m1, m2])
-      r2 <- as.numeric(mat2[mat2$marker == m1, m2])
-
-      if (is.na(r1) || is.na(r2)) next
-
-      # Fisher z-transform
-      z1 <- 0.5 * log((1 + r1) / (1 - r1 + 1e-10))
-      z2 <- 0.5 * log((1 + r2) / (1 - r2 + 1e-10))
-      se <- sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
-      z_diff <- (z1 - z2) / se
-      p_val <- 2 * pnorm(-abs(z_diff))
-
-      diff_results <- c(diff_results, list(list(
-        marker1 = m1, marker2 = m2,
-        r_group1 = r1, r_group2 = r2,
-        delta_r = r2 - r1,
-        z_statistic = z_diff,
-        p_value = p_val,
-        n_used = c(n1, n2),
-        test_note = if (use_replicate_n) "Fisher z using replicate-level N (proper inference)" else if (isTRUE(use_cell_n)) "Fisher z using cell-level N (user selected)" else "Fisher z using cell-level N (no replicates available)"
-      )))
+  rep_rows <- list()
+  for (gr in grp_names) {
+    sub_g <- data %>% dplyr::filter(.data[[group_by]] == gr)
+    for (rp in sort(unique(sub_g$replicate))) {
+      wide <- build_wide(sub_g %>% dplyr::filter(replicate == rp))
+      if (nrow(wide) < 10) next
+      cm <- cor(wide, use = "pairwise.complete.obs", method = method)
+      for (k in seq_len(ncol(pair_idx))) {
+        m1 <- markers[pair_idx[1, k]]; m2 <- markers[pair_idx[2, k]]
+        r <- if (m1 %in% rownames(cm) && m2 %in% colnames(cm)) unname(cm[m1, m2]) else NA_real_
+        if (!is.finite(r) || abs(r) >= 1) next   # z undefined: this replicate carries no r for the pair
+        rep_rows[[length(rep_rows) + 1]] <- list(
+          group = gr, replicate = as.character(rp), marker1 = m1, marker2 = m2,
+          r = r, z = atanh(r), n_cells = nrow(wide))
+      }
     }
   }
+  rep_df <- if (length(rep_rows) > 0) dplyr::bind_rows(rep_rows) else
+    tibble::tibble(group = character(), replicate = character(), marker1 = character(),
+                   marker2 = character(), r = numeric(), z = numeric(), n_cells = integer())
 
-  # BH adjustment
-  if (length(diff_results) > 1) {
-    pvals <- sapply(diff_results, function(d) d$p_value)
-    padj <- p.adjust(pvals, method = "BH")
-    for (i in seq_along(diff_results)) diff_results[[i]]$p_adjusted <- padj[i]
-  } else if (length(diff_results) == 1) {
-    diff_results[[1]]$p_adjusted <- diff_results[[1]]$p_value
+  # Every group pair: Welch t on z across replicates. delta z (g2 - g1) with
+  # its 95% CI is the tested effect; delta r is descriptive, no interval.
+  not_estimable <- function(base, reason) c(base, list(
+    estimable = FALSE, reason = reason,
+    r_group1 = NA_real_, r_group2 = NA_real_,
+    delta_z = NA_real_, delta_z_lo = NA_real_, delta_z_hi = NA_real_, delta_r = NA_real_,
+    t_statistic = NA_real_, df = NA_real_, p_value = NA_real_, p_adjusted = NA_real_))
+
+  contrasts <- lapply(utils::combn(grp_names, 2, simplify = FALSE), function(gp) {
+    g1 <- gp[1]; g2 <- gp[2]
+    rows <- lapply(seq_len(ncol(pair_idx)), function(k) {
+      m1 <- markers[pair_idx[1, k]]; m2 <- markers[pair_idx[2, k]]
+      d1 <- rep_df[rep_df$group == g1 & rep_df$marker1 == m1 & rep_df$marker2 == m2, , drop = FALSE]
+      d2 <- rep_df[rep_df$group == g2 & rep_df$marker1 == m1 & rep_df$marker2 == m2, , drop = FALSE]
+      base <- list(
+        marker1 = m1, marker2 = m2, group1 = g1, group2 = g2,
+        replicates_group1 = safe_I(d1$replicate), replicates_group2 = safe_I(d2$replicate),
+        r_reps_group1 = safe_I(d1$r), r_reps_group2 = safe_I(d2$r),
+        n_reps = c(nrow(d1), nrow(d2)),
+        test = "Welch t on per-replicate Fisher z")
+      short <- c(g1, g2)[c(nrow(d1) < 2, nrow(d2) < 2)]
+      if (length(short) > 0) {
+        return(not_estimable(base, paste0("fewer than 2 replicates with a defined r in ",
+                                          paste(short, collapse = " and "))))
+      }
+      z1 <- d1$z; z2 <- d2$z
+      if (stats::var(z1) == 0 && stats::var(z2) == 0) {
+        return(not_estimable(base, "no replicate-to-replicate variation in z"))
+      }
+      tt <- stats::t.test(z2, z1)   # Welch (unequal variances), delta = z2 - z1
+      c(base, list(
+        estimable = TRUE, reason = NA_character_,
+        r_group1 = tanh(mean(z1)), r_group2 = tanh(mean(z2)),
+        delta_z = unname(tt$estimate[1] - tt$estimate[2]),
+        delta_z_lo = tt$conf.int[1], delta_z_hi = tt$conf.int[2],
+        delta_r = tanh(mean(z2)) - tanh(mean(z1)),
+        t_statistic = unname(tt$statistic), df = unname(tt$parameter),
+        p_value = tt$p.value, p_adjusted = NA_real_))
+    })
+    list(group1 = g1, group2 = g2, differential = rows)
+  })
+
+  # BH across the whole family: every estimable row over all group pairs and marker pairs.
+  where <- list(); pvals <- numeric(0)
+  for (ci in seq_along(contrasts)) for (ri in seq_along(contrasts[[ci]]$differential)) {
+    row <- contrasts[[ci]]$differential[[ri]]
+    if (isTRUE(row$estimable)) { where[[length(where) + 1]] <- c(ci, ri); pvals <- c(pvals, row$p_value) }
+  }
+  if (length(pvals) > 0) {
+    padj <- stats::p.adjust(pvals, method = "BH")
+    for (i in seq_along(where)) contrasts[[where[[i]][1]]]$differential[[where[[i]][2]]]$p_adjusted <- padj[i]
   }
 
-  # Build diff matrix for heatmap
-  diff_matrix <- matrix(0, nrow = length(markers), ncol = length(markers),
-                        dimnames = list(markers, markers))
-  p_matrix <- matrix(1, nrow = length(markers), ncol = length(markers),
-                     dimnames = list(markers, markers))
-  for (d in diff_results) {
-    diff_matrix[d$marker1, d$marker2] <- d$delta_r
-    diff_matrix[d$marker2, d$marker1] <- d$delta_r
-    p_matrix[d$marker1, d$marker2] <- d$p_adjusted
-    p_matrix[d$marker2, d$marker1] <- d$p_adjusted
-  }
+  # Heatmap matrices per contrast: delta r (descriptive) and BH p; 0 / 1 where not estimable.
+  contrasts <- lapply(contrasts, function(ct) {
+    dm <- matrix(0, length(markers), length(markers), dimnames = list(markers, markers))
+    pm <- matrix(1, length(markers), length(markers), dimnames = list(markers, markers))
+    for (row in ct$differential) {
+      if (!isTRUE(row$estimable)) next
+      dm[row$marker1, row$marker2] <- dm[row$marker2, row$marker1] <- row$delta_r
+      pm[row$marker1, row$marker2] <- pm[row$marker2, row$marker1] <- row$p_adjusted
+    }
+    ct$diff_matrix <- as.data.frame(dm) %>% tibble::rownames_to_column("marker")
+    ct$p_matrix    <- as.data.frame(pm) %>% tibble::rownames_to_column("marker")
+    ct$n_estimable <- sum(vapply(ct$differential, function(r) isTRUE(r$estimable), logical(1)))
+    ct$n_total     <- length(ct$differential)
+    ct$differential <- safe_I(ct$differential)
+    ct
+  })
 
   list(
     per_group = safe_I(per_group),
-    differential = safe_I(diff_results),
-    diff_matrix = as.data.frame(diff_matrix) %>% tibble::rownames_to_column("marker"),
-    p_matrix = as.data.frame(p_matrix) %>% tibble::rownames_to_column("marker"),
-    markers = safe_I(as.character(markers)),
-    groups = safe_I(as.character(groups)),
+    contrasts = safe_I(contrasts),
+    replicate_r = safe_I(rep_rows),
+    markers = safe_I(markers),
+    groups = safe_I(grp_names),
     group_by = group_by,
-    method = method
+    method = method,
+    test = "Welch t on per-replicate Fisher z (interval on the z scale; delta r descriptive); BH across all group pairs x marker pairs",
+    note = "Correlations across a mixed population can be composition artifacts (Aarts et al. 2014); read them within strata."
   )
 }
 

@@ -164,9 +164,11 @@ Phase-specific comparisons:
 
 ### Correlation Analysis
 
-Marker-marker Pearson correlations per group, with **differential correlation testing** — identifies rewired epigenetic relationships between conditions.
+Marker-marker Pearson/Spearman correlations per group (pooled cells, descriptive), with **differential correlation tested at the replicate level**: r is computed within each biological replicate, Fisher z-transformed (z = atanh r), and groups are compared by a Welch t-test on z across replicates for every group pair (BH across all pairs). The table leads with Δz and its 95% CI (the tested effect); Δr is descriptive and carries no interval. A group with fewer than two replicates is reported as *not estimable*. Per-replicate r values are drawn as points so you can see what the test is comparing.
 
 > **When to use:** Correlation rewiring is often more informative than mean differences. Two groups may have similar mean H3K27ac but completely different H3K27ac–H3K4me1 correlations, indicating altered co-regulation.
+
+> **Caution:** correlations across a mixed population can be composition artifacts (Aarts et al. 2014, *Nat Neurosci*) — two cell types with different marker levels produce a correlation even when no cell co-regulates the marks. Read correlations within a stratum: filter to one identity or cell-cycle phase in the sidebar before running. With 3 vs 3 replicates the test has little power, so lead with the effect size.
 
 ### Positivity Analysis
 

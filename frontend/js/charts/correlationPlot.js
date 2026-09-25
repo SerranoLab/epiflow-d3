@@ -143,5 +143,111 @@ const CorrelationPlot = {
       .attr('font-size', '9px').attr('fill', '#64748b').text('0.0');
     legendG.append('text').attr('x', legendWidth + 4).attr('y', legendHeight)
       .attr('font-size', '9px').attr('fill', '#64748b').text('-1.0');
+  },
+
+  // R4: per-replicate r as points — the unit of the differential test. One
+  // row per marker pair, x = r in [-1, 1], one point per (group, replicate)
+  // from data.replicate_r; a short bar marks each group's tanh(mean z).
+  renderReplicateDots(containerId, data, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    const reps = ensureArray(data.replicate_r);
+    const contrasts = ensureArray(data.contrasts);
+    const groups = ensureArray(data.groups).map(String);
+    if (!reps.length) {
+      container.innerHTML = '<p style="padding:20px;color:#94a3b8;font-size:12px;">No per-replicate correlations (every replicate had fewer than 10 cells or an undefined r).</p>';
+      return;
+    }
+
+    // Rank marker pairs by the largest |Δz| over all group pairs; show at most MAX_ROWS.
+    const MAX_ROWS = options.maxRows || 20;
+    const keyOf = (a, b) => `${a} × ${b}`;
+    const rank = new Map();
+    const meanR = new Map();   // key -> { group: tanh(mean z) }
+    contrasts.forEach(c => ensureArray(c.differential).forEach(d => {
+      const k = keyOf(d.marker1, d.marker2);
+      if (d.estimable !== false && Number.isFinite(Number(d.delta_z))) {
+        rank.set(k, Math.max(rank.get(k) || 0, Math.abs(Number(d.delta_z))));
+        const m = meanR.get(k) || {};
+        m[String(d.group1)] = Number(d.r_group1); m[String(d.group2)] = Number(d.r_group2);
+        meanR.set(k, m);
+      } else if (!rank.has(k)) rank.set(k, -1);
+    }));
+    const allKeys = Array.from(new Set(reps.map(r => keyOf(r.marker1, r.marker2))));
+    allKeys.forEach(k => { if (!rank.has(k)) rank.set(k, -1); });
+    const keys = allKeys.sort((a, b) => rank.get(b) - rank.get(a)).slice(0, MAX_ROWS);
+    const truncated = allKeys.length > keys.length;
+
+    const rowH = 22;
+    const margin = { top: 52, right: 130, bottom: 36, left: 170 };
+    const width = 420;
+    const height = keys.length * rowH;
+    const totalW = width + margin.left + margin.right;
+
+    const svg = d3.select(`#${containerId}`).append('svg')
+      .attr('width', totalW).attr('height', height + margin.top + margin.bottom);
+
+    svg.append('text').attr('class', 'chart-title')
+      .attr('x', totalW / 2).attr('y', 18).attr('text-anchor', 'middle')
+      .text(`Per-replicate ${data.method || 'pearson'} correlation by ${data.group_by || 'group'}`);
+    svg.append('text')
+      .attr('x', totalW / 2).attr('y', 34).attr('text-anchor', 'middle')
+      .attr('font-size', '10px').attr('fill', '#64748b')
+      .text(`each point = one biological replicate · bar = tanh(mean z) per group${truncated ? ` · top ${keys.length} of ${allKeys.length} pairs by |Δz| (all pairs in the table)` : ''}`);
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xScale = d3.scaleLinear().domain([-1, 1]).range([0, width]);
+    const yScale = d3.scaleBand().domain(keys).range([0, height]).padding(0.2);
+    const colorScale = getColorScale(data.group_by || 'genotype', groups, DataManager.serverPalette);
+    const groupOffset = d3.scalePoint().domain(groups).range([-rowH * 0.22, rowH * 0.22]);
+
+    g.append('g').attr('class', 'axis').attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(xScale).ticks(5));
+    g.append('text').attr('x', width / 2).attr('y', height + 30).attr('text-anchor', 'middle')
+      .attr('font-size', '11px').attr('fill', '#475569').text('r within replicate');
+    g.append('line').attr('x1', xScale(0)).attr('x2', xScale(0)).attr('y1', 0).attr('y2', height)
+      .attr('stroke', '#cbd5e1').attr('stroke-dasharray', '3,3');
+    g.append('g').attr('class', 'axis').call(d3.axisLeft(yScale))
+      .selectAll('text').attr('font-size', '10px');
+
+    const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])
+      .join('div').attr('class', 'd3-tooltip').style('opacity', 0);
+
+    // Group mean bars (tanh of the mean z), drawn under the points
+    keys.forEach(k => {
+      const m = meanR.get(k) || {};
+      groups.forEach(gr => {
+        const v = m[gr];
+        if (!Number.isFinite(v)) return;
+        const cy = yScale(k) + yScale.bandwidth() / 2 + (groups.length > 1 ? groupOffset(gr) : 0);
+        g.append('line').attr('x1', xScale(v)).attr('x2', xScale(v)).attr('y1', cy - 6).attr('y2', cy + 6)
+          .attr('stroke', colorScale(gr)).attr('stroke-width', 2.5).attr('opacity', 0.9);
+      });
+    });
+
+    const shown = reps.filter(r => keys.includes(keyOf(r.marker1, r.marker2)));
+    g.selectAll('.rep-dot').data(shown).join('circle')
+      .attr('class', 'rep-dot')
+      .attr('cx', d => xScale(Number(d.r)))
+      .attr('cy', d => yScale(keyOf(d.marker1, d.marker2)) + yScale.bandwidth() / 2 + (groups.length > 1 ? groupOffset(String(d.group)) : 0))
+      .attr('r', 4).attr('fill', d => colorScale(String(d.group))).attr('fill-opacity', 0.8)
+      .attr('stroke', '#fff').attr('stroke-width', 0.8)
+      .on('mouseover', (event, d) => {
+        tooltip.transition().duration(100).style('opacity', 1);
+        tooltip.html(`<strong>${d.marker1} × ${d.marker2}</strong><br>${d.group} · ${d.replicate}<br>r = ${Number(d.r).toFixed(3)} · n = ${Number(d.n_cells).toLocaleString()} cells`);
+      })
+      .on('mousemove', (event) => {
+        tooltip.style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 20) + 'px');
+      })
+      .on('mouseout', () => tooltip.style('opacity', 0));
+
+    // Legend
+    const legend = svg.append('g').attr('transform', `translate(${margin.left + width + 14},${margin.top})`);
+    groups.forEach((gr, i) => {
+      legend.append('circle').attr('cx', 6).attr('cy', i * 16 + 6).attr('r', 4).attr('fill', colorScale(gr));
+      legend.append('text').attr('x', 15).attr('y', i * 16 + 10).attr('font-size', '10px').attr('fill', '#334155').text(gr);
+    });
   }
 };

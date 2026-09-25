@@ -3471,12 +3471,12 @@ const App = {
     try {
       const method = document.getElementById('corr-method').value;
       const inclPheno = document.getElementById('corr-include-pheno').checked;
-      const useCellN = document.getElementById('corr-use-cell-n')?.checked || false;
 
+      // R4: replicate-level test; grouped by the active comparison variable.
       const data = await EpiFlowAPI.runCorrelationDiff({
         method,
         include_phenotypic: inclPheno,
-        use_cell_n: useCellN
+        group_by: DataManager.getComparisonVar()
       });
       if (data.error) throw new Error(data.error);
 
@@ -3507,10 +3507,21 @@ const App = {
         });
       });
 
-      // Differential correlation heatmap
-      this.renderDiffCorrelationHeatmap('corr-diff-chart', data);
+      // One Δr heatmap per group pair (all pairs, one BH family per run)
+      const diffContainer = document.getElementById('corr-diff-chart');
+      diffContainer.innerHTML = '';
+      const contrasts = ensureArray(data.contrasts);
+      contrasts.forEach(c => {
+        const div = document.createElement('div');
+        div.id = `corr-diff-${String(c.group1).replace(/\W/g, '_')}-${String(c.group2).replace(/\W/g, '_')}`;
+        diffContainer.appendChild(div);
+        this.renderDiffCorrelationHeatmap(div.id, { ...c, markers, groups: [c.group1, c.group2] });
+      });
 
-      // Significant pairs table
+      // Per-replicate r as points (the unit of the test)
+      CorrelationPlot.renderReplicateDots('corr-rep-chart', data);
+
+      // All pairs, effect size first, p secondary
       this.renderDiffCorrelationTable('corr-diff-table', data);
 
     } catch (err) {
@@ -3528,6 +3539,10 @@ const App = {
     const diffMatrix = ensureArray(data.diff_matrix);
     const pMatrix = ensureArray(data.p_matrix);
     const groups = ensureArray(data.groups);
+    // R4: per-pair rows carry the replicate-level test; the heatmap reads them for tooltips.
+    const rows = ensureArray(data.differential);
+    const rowFor = (a, b) => rows.find(r => (r.marker1 === a && r.marker2 === b) || (r.marker1 === b && r.marker2 === a));
+    const fmtReps = v => ensureArray(v).map(x => Number(x).toFixed(3)).join(', ');
 
     const n = markers.length;
     const cellSize = Math.min(55, Math.max(30, 450 / n));
@@ -3542,11 +3557,11 @@ const App = {
     svg.append('text').attr('class', 'chart-title')
       .attr('x', (size + margin.left + margin.right) / 2).attr('y', 18)
       .attr('text-anchor', 'middle')
-      .text(`Differential Correlation (Δr: ${groups[1] || 'g2'} − ${groups[0] || 'g1'})`);
+      .text(`Differential Correlation (Δr: ${groups[1] || 'g2'} − ${groups[0] || 'g1'}, descriptive)`);
     svg.append('text')
       .attr('x', (size + margin.left + margin.right) / 2).attr('y', 34)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b')
-      .text('Δr = correlation shift (exploratory) · no valid replicate-level significance test');
+      .text(`Welch t on per-replicate Fisher z · * BH p < 0.05 · ${data.n_estimable ?? rows.length} of ${data.n_total ?? rows.length} pairs estimable`);
 
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
@@ -3580,18 +3595,30 @@ const App = {
         // Get p-value
         const pRow = pMatrix.find(r => r.marker === rowMk);
         const pVal = pRow ? Number(pRow[colMk]) : 1;
+        const pair = rowFor(rowMk, colMk);
+        const estimable = !pair || pair.estimable !== false;
 
         g.append('rect')
           .attr('x', xScale(colMk)).attr('y', yScale(rowMk))
           .attr('width', xScale.bandwidth()).attr('height', yScale.bandwidth())
-          .attr('fill', colorScale(delta))
+          .attr('fill', estimable ? colorScale(delta) : '#e2e8f0')
           .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
           .attr('rx', 2)
           .on('mouseover', (event) => {
             tooltip.transition().duration(100).style('opacity', 1);
-            tooltip.html(`<strong>${rowMk}</strong> × <strong>${colMk}</strong><br>
-              Δr = ${delta.toFixed(3)} (exploratory)`);
+            if (!pair) {
+              tooltip.html(`<strong>${rowMk}</strong> × <strong>${colMk}</strong><br>Δr = ${delta.toFixed(3)}`);
+            } else if (!estimable) {
+              tooltip.html(`<strong>${rowMk}</strong> × <strong>${colMk}</strong><br>not estimable: ${pair.reason || ''}`);
+            } else {
+              tooltip.html(`<strong>${rowMk}</strong> × <strong>${colMk}</strong><br>
+                Δz = ${Number(pair.delta_z).toFixed(3)} [${Number(pair.delta_z_lo).toFixed(3)}, ${Number(pair.delta_z_hi).toFixed(3)}] (Welch t, df ${Number(pair.df).toFixed(2)})<br>
+                Δr = ${delta.toFixed(3)} (descriptive)<br>
+                p = ${fmtP(pair.p_value)} · BH p = ${fmtP(pair.p_adjusted)}<br>
+                r per replicate — ${pair.group1}: ${fmtReps(pair.r_reps_group1)}<br>
+                r per replicate — ${pair.group2}: ${fmtReps(pair.r_reps_group2)}`);
+            }
           })
           .on('mousemove', (event) => {
             tooltip.style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 20) + 'px');
@@ -3599,7 +3626,7 @@ const App = {
           .on('mouseout', () => tooltip.style('opacity', 0));
 
         // Asterisk for significant
-        if (pVal < 0.05 && cellSize >= 25) {
+        if (estimable && pVal < 0.05 && cellSize >= 25) {
           g.append('text')
             .attr('x', xScale(colMk) + xScale.bandwidth() / 2)
             .attr('y', yScale(rowMk) + yScale.bandwidth() / 2 + 4)
@@ -3642,47 +3669,65 @@ const App = {
       .text(`-${maxDelta.toFixed(2)}`);
   },
 
+  // R4: every pair from every group contrast; the tested effect (Δz with its
+  // Welch 95% CI) leads, Δr is descriptive, p is secondary. Rows that could
+  // not be estimated are listed last with their reason, never dropped.
   renderDiffCorrelationTable(containerId, data) {
     const container = document.getElementById(containerId);
-    const diffs = ensureArray(data.differential);
-    const groups = ensureArray(data.groups);
+    const contrasts = ensureArray(data.contrasts);
+    const rows = contrasts.flatMap(c => ensureArray(c.differential))
+      .map(d => ({ ...d, estimable: d.estimable !== false, delta_z: Number(d.delta_z), p_adjusted: Number(d.p_adjusted) }))
+      .sort((a, b) => (b.estimable - a.estimable) || (Math.abs(b.delta_z) - Math.abs(a.delta_z)));
 
-    // Filter to significant and sort by |delta_r|
-    const sigDiffs = diffs
-      .map(d => ({...d, p_adjusted: Number(d.p_adjusted), delta_r: Number(d.delta_r)}))
-      .filter(d => d.p_adjusted < 0.05)
-      .sort((a, b) => Math.abs(b.delta_r) - Math.abs(a.delta_r));
-
-    if (sigDiffs.length === 0) {
-      container.innerHTML = '<p style="font-size:12px;color:#94a3b8;padding:8px;">No significant differential correlations found (BH-adjusted p < 0.05).</p>';
+    if (rows.length === 0) {
+      container.innerHTML = '<p style="font-size:12px;color:#94a3b8;padding:8px;">No marker pairs to compare.</p>';
       return;
     }
+    const fmtReps = v => ensureArray(v).map(x => Number(x).toFixed(3)).join(', ');
+    const sigMark = v => isSig(v)
+      ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#94a3b8">ns</span>';
 
-    let html = `<table class="stats-table" style="font-size:12px;max-width:800px;">
-      <thead><tr><th>Marker 1</th><th>Marker 2</th>
-        <th>r (${groups[0] || 'g1'})</th><th>r (${groups[1] || 'g2'})</th>
-        <th>Δr</th><th>z-stat</th><th>p (adj)</th><th>N basis</th><th>Interpretation</th>
+    let html = `<table class="stats-table" style="font-size:12px;">
+      <thead><tr><th>Marker 1</th><th>Marker 2</th><th>Groups (g1 → g2)</th>
+        <th title="tanh of the mean per-replicate Fisher z">r g1</th><th title="tanh of the mean per-replicate Fisher z">r g2</th>
+        <th title="Tested effect: difference of mean Fisher z (g2 − g1), Welch 95% CI across replicates">Δz [95% CI]</th>
+        <th title="Descriptive: tanh(mean z g2) − tanh(mean z g1); no interval">Δr</th>
+        <th>t</th><th title="Welch–Satterthwaite df">df</th><th>p</th><th>p.adj (BH)</th><th>sig</th><th>n reps</th><th>Status</th>
       </tr></thead><tbody>`;
 
-    sigDiffs.forEach(d => {
-      const r1 = Number(d.r_group1), r2 = Number(d.r_group2);
-      const delta = d.delta_r;
-      const interp = Math.abs(delta) > 0.3
-        ? (delta > 0 ? `Co-regulation <strong>gained</strong> in ${groups[1]}` : `Co-regulation <strong>lost</strong> in ${groups[1]}`)
-        : (delta > 0 ? 'Modest increase' : 'Modest decrease');
-
+    rows.forEach(d => {
+      const nReps = ensureArray(d.n_reps);
+      const grp = `${d.group1} → ${d.group2}`;
+      if (!d.estimable) {
+        html += `<tr style="color:#94a3b8;">
+          <td>${d.marker1}</td><td>${d.marker2}</td><td>${grp}</td>
+          <td title="${fmtReps(d.r_reps_group1)}">—</td><td title="${fmtReps(d.r_reps_group2)}">—</td>
+          <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+          <td>${nReps.join(' vs ')}</td>
+          <td style="font-size:11px;color:#b45309;">not estimable: ${d.reason || ''}</td>
+        </tr>`;
+        return;
+      }
+      const dr = Number(d.delta_r);
       html += `<tr>
-        <td>${d.marker1}</td><td>${d.marker2}</td>
-        <td>${r1.toFixed(3)}</td><td>${r2.toFixed(3)}</td>
-        <td style="font-weight:600;color:${delta > 0 ? '#b2182b' : '#2166ac'}">${delta > 0 ? '+' : ''}${delta.toFixed(3)}</td>
-        <td>${Number(d.z_statistic).toFixed(2)}</td>
+        <td>${d.marker1}</td><td>${d.marker2}</td><td>${grp}</td>
+        <td title="per replicate: ${fmtReps(d.r_reps_group1)}">${Number(d.r_group1).toFixed(3)}</td>
+        <td title="per replicate: ${fmtReps(d.r_reps_group2)}">${Number(d.r_group2).toFixed(3)}</td>
+        <td style="font-weight:600;">${d.delta_z > 0 ? '+' : ''}${d.delta_z.toFixed(3)} [${Number(d.delta_z_lo).toFixed(3)}, ${Number(d.delta_z_hi).toFixed(3)}]</td>
+        <td style="color:${dr > 0 ? '#b2182b' : '#2166ac'}">${dr > 0 ? '+' : ''}${dr.toFixed(3)}</td>
+        <td>${Number(d.t_statistic).toFixed(2)}</td>
+        <td>${Number(d.df).toFixed(2)}</td>
+        <td>${fmtP(d.p_value)}</td>
         <td>${fmtP(d.p_adjusted)}</td>
-        <td style="font-size:10px;color:#64748b;">${d.test_note ? (d.test_note.includes('replicate') ? '<span style="color:#15803d;">replicates</span>' : '<span style="color:#f59e0b;">cells</span>') : '—'}</td>
-        <td style="font-size:11px;">${interp}</td>
+        <td>${sigMark(d.p_adjusted)}</td>
+        <td>${nReps.join(' vs ')}</td>
+        <td style="font-size:11px;color:#15803d;">replicate-level ✓</td>
       </tr>`;
     });
     html += '</tbody></table>';
-    html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">${sigDiffs.length} significant pairs out of ${diffs.length} tested.</p>`;
+    const nEst = rows.filter(r => r.estimable).length;
+    const nSig = rows.filter(r => r.estimable && isSig(r.p_adjusted)).length;
+    html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">${nSig} of ${nEst} estimable pairs at BH p &lt; 0.05 (${rows.length} rows over ${contrasts.length} group pair${contrasts.length === 1 ? '' : 's'}, one BH family) · Welch t on per-replicate Fisher z · interval on the z scale; Δr descriptive.</p>`;
     container.innerHTML = html;
     this.addCSVExportButton(containerId, 'epiflow-differential-correlation.csv');
   },
@@ -3948,10 +3993,27 @@ const App = {
         });
       });
     }
+    // R4: one Δr heatmap per group pair lives in corr-diff-chart; export each.
     const corrDiffBtn = document.getElementById('corr-diff-export-svg');
     if (corrDiffBtn) {
       corrDiffBtn.addEventListener('click', () => {
-        ExportUtils.downloadSVG('corr-diff-chart', 'epiflow-differential-correlation');
+        const container = document.getElementById('corr-diff-chart');
+        if (!container) return;
+        container.querySelectorAll('svg').forEach((svg, i) => {
+          const cloned = svg.cloneNode(true);
+          cloned.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+          const blob = new Blob([new XMLSerializer().serializeToString(cloned)], { type: 'image/svg+xml' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.download = `epiflow-differential-correlation-${i + 1}.svg`;
+          a.href = url; a.click(); URL.revokeObjectURL(url);
+        });
+      });
+    }
+    const corrRepBtn = document.getElementById('corr-rep-export-svg');
+    if (corrRepBtn) {
+      corrRepBtn.addEventListener('click', () => {
+        ExportUtils.downloadSVG('corr-rep-chart', 'epiflow-correlation-per-replicate');
       });
     }
 
@@ -4067,7 +4129,7 @@ const App = {
       { id: 'panel-violin', title: 'Violin Plots', charts: ['violin-chart'], stats: ['violin-stats'] },
       { id: 'panel-statistics', title: 'Statistical Analysis (LMM)', charts: ['forest-chart', 'volcano-chart', 'marker-heatmap-chart'], stats: ['stats-results', 'stats-caution-notes'] },
       { id: 'panel-cellcycle', title: 'Cell Cycle', charts: ['cellcycle-chart'], stats: ['cellcycle-stats'] },
-      { id: 'panel-correlation', title: 'Correlation', charts: ['correlation-chart', 'corr-diff-chart'], stats: ['corr-diff-table'] },
+      { id: 'panel-correlation', title: 'Correlation', charts: ['correlation-chart', 'corr-diff-chart', 'corr-rep-chart'], stats: ['corr-diff-table'] },
       { id: 'panel-positivity', title: 'Positivity Analysis', charts: ['positivity-chart'], stats: ['positivity-stats'] },
       { id: 'panel-gating', title: 'Quadrant Gating', charts: ['gating-chart'], stats: ['gating-stats'] },
       { id: 'panel-pca', title: 'PCA', charts: ['pca-chart-main'] },
@@ -4082,11 +4144,12 @@ const App = {
     let panelCount = 0;
     panels.forEach(panel => {
       const chartSvgs = [];
+      // A container may hold several charts (one differential-correlation
+      // heatmap per group pair); every SVG goes into the report.
       (panel.charts || []).forEach(chartId => {
         const el = document.getElementById(chartId);
         if (!el) return;
-        const svg = el.querySelector('svg');
-        if (!svg) return;
+        el.querySelectorAll('svg').forEach(svg => {
         // Clone and inline styles
         const clone = ExportUtils._inlineStyles(svg);
         // Report hygiene: interaction hints (class ui-hint) mean nothing on
@@ -4103,6 +4166,7 @@ const App = {
         clone.removeAttribute('height');
         clone.setAttribute('preserveAspectRatio', 'xMidYMin meet');
         chartSvgs.push(new XMLSerializer().serializeToString(clone));
+        });
       });
 
       const statsHtml = [];
@@ -4141,7 +4205,7 @@ const App = {
         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
         <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each reported with a 95% t interval on its own df. Rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged: there the replicate variance is small relative to cell variance (low ICC), so the model draws precision from cells and the row should be interpreted with caution. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units) alongside p-values; no confidence interval is given for d — the interval shown on the forest plot is on β. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
-        <p><strong>Differential correlation:</strong> Per-group Pearson/Spearman correlations are compared as an exploratory descriptor (Δr). No replicate-level significance test is reported: correlations are computed across cells, so putting replicate N into a cell-derived Fisher-z SE is not a coherent sampling model. Δr shows where co-regulation shifts and should be confirmed with per-replicate correlation or a hierarchical bootstrap.</p>
+        <p><strong>Differential correlation:</strong> Within each biological replicate, marker-pair correlations (Pearson or Spearman) were computed across cells and Fisher z-transformed (z = atanh r); groups were compared by a Welch t-test on z across replicates for every group pair. Δz with its 95% CI is the tested effect; Δr = tanh(mean z) difference is reported descriptively without an interval; p-values were BH-corrected across all group and marker pairs in one family. Groups with fewer than two replicates are not estimable. Correlations across a mixed population can reflect composition rather than co-regulation (Aarts et al. 2014) and were read within strata.</p>
         <p><strong>Machine learning and diagnostic assessment:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Diagnostic accuracy was estimated by leave-one-sample-out cross-validation of an LDA classifier on held-out biological samples (majority vote per sample; exact binomial 95% confidence interval on the number of samples). Multivariate differences between per-replicate mean H3-PTM profiles were tested by exact PERMANOVA (Anderson 2001, Austral Ecology 26:32-46) with R² as the effect size; the smallest attainable p is 1 over the number of distinct label arrangements (0.10 for 3 vs 3 replicates). Cell-level classification accuracy and any cell-level multivariate test are exploratory: cells from one sample fall in both training and test folds, so they do not measure generalization to a new sample.</p>
         <p style="font-size:10px;color:#94a3b8;">EpiFlow D3 v1.3.4 · © 2025–2026 Serrano Lab, CReM, Boston University · AGPL-3.0 · Generated ${timestamp}</p>
       </div>
@@ -4245,7 +4309,7 @@ ${sections.join('\n')}
     const year = new Date().getFullYear();
     const date = new Date().toISOString().slice(0, 10);
     const citation = `EpiFlow D3: A spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification profiling. Serrano Lab, Center for Regenerative Medicine (CReM), Boston University. https://serranolab.github.io/online/. Accessed ${date}.`;
-    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.3.4 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each with a 95% t interval on its own df; rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units), without a confidence interval. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
+    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 v1.3.4 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each with a 95% t interval on its own df; rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units), without a confidence interval. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). Differential correlation was tested at the replicate level: marker-pair correlations were computed within each replicate, Fisher z-transformed, and compared between groups by a Welch t-test on z (Δz with 95% CI; Δr reported descriptively); correlations were read within strata because mixed populations can produce composition artifacts (Aarts et al. 2014). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:10000;display:flex;align-items:center;justify-content:center;';

@@ -26,7 +26,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 - **Cell cycle–resolved analysis** — per-phase marker comparisons (G1, S, G2/M) with summary heatmaps
 
 ### Advanced Analysis
-- **Correlation analysis** — marker-marker Pearson correlations with differential correlation testing between groups
+- **Correlation analysis** — marker-marker Pearson/Spearman correlations per group, with differential correlation tested at the replicate level (Welch t on per-replicate Fisher z; Δz with 95% CI, Δr descriptive)
 - **Positivity analysis** — Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests
 - **Quadrant gating** — biaxial gating with customizable population labels, exportable assignments, and sidebar filtering
 - **PCA** — 2D and interactive 3D principal component analysis with explained variance
