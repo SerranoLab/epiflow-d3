@@ -226,7 +226,7 @@ Group-specific H3-PTM z-score profiles. Identifies the marker signature defining
 
 ### Diagnostic Assessment
 
-The headline is the **grouped leave-one-sample-out CV**: an LDA trained with whole biological samples held out, scored as samples called correctly with an exact binomial 95% CI. **Stratify** runs the same CV inside each identity, cell-cycle phase, gate population or cluster; at 3 vs 3 replicates a per-stratum row means *which cell states carry the signal*, not a diagnostic accuracy, and a stratum with fewer than 2 samples per class reads *not estimable*. Top features per stratum are standardized LDA weights fit on all stratum cells (descriptive, not cross-validated). Also: exact PERMANOVA on per-replicate mean profiles (R² first), a cell-split LDA (exploratory), LMM consistency matrices, stratified signatures and k-means validation.
+The headline is the **grouped CV** — leave-one-sample-out up to 10 samples, grouped 5-fold above; the card title states which — an LDA trained with whole biological samples held out, scored as samples called correctly with an exact binomial 95% CI. **Stratify** runs the same CV inside each identity, cell-cycle phase, gate population or cluster; at 3 vs 3 replicates a per-stratum row means *which cell states carry the signal*, not a diagnostic accuracy, and a stratum with fewer than 2 samples per class reads *not estimable*. Top features per stratum are standardized LDA weights fit on all stratum cells (descriptive, not cross-validated). Also: exact PERMANOVA on per-replicate mean profiles (R² first), a cell-split LDA (exploratory), LMM consistency matrices, stratified signatures and k-means validation.
 
 ---
 

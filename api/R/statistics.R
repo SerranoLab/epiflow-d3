@@ -1545,6 +1545,7 @@ run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
         Xf <- impute_fn(sub[, predictor_cols, drop = FALSE])$apply(sub[, predictor_cols, drop = FALSE])
         fw <- if (method == "lda") .epiflow_lda_feature_weights(Xf, sub$.target) else NULL
         c(base, list(estimable = TRUE, reason = NA_character_,
+                     cv_type = r$cv_type,   # L11: a stratum can be leave-one-sample-out while the whole is grouped 5-fold
                      n_samples = r$n_samples, samples_per_class = r$samples_per_class,
                      n_samples_correct = r$n_samples_correct, n_samples_tested = r$n_samples_tested,
                      sample_accuracy = r$sample_accuracy, sample_accuracy_ci = r$sample_accuracy_ci,

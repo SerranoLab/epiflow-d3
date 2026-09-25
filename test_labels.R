@@ -99,5 +99,16 @@ check(has(p, "const DEFAULT_PALETTE = 'Colorblind Safe (Wong)';") && has(p, "let
 check(has("frontend/index.html", '<option value="Colorblind Safe (Wong)" selected>'), "theme menu preselects the Okabe-Ito option")
 check(ver_of("palettes.js") >= "1.3.2" && ver_of("positivityPlot.js") >= "1.2.4" && ver_of("gatingPlot.js") >= "1.3.6" && ver_of("js/app.js") >= "1.3.15", "L10 cache-busting bumps")
 
+# ---- L11: grouped-CV titles and Methods follow cv_type ----
+cat("\n--- L11 grouped-CV split type ---\n")
+a <- "frontend/js/app.js"
+check(has(a, "Diagnostic accuracy — grouped CV, ${cvType} (LDA)") && lacks(a, "grouped leave-one-sample-out CV (LDA)"), "headline title is built from cv_type")
+check(has(a, "leave-one-sample-out up to 10 samples, grouped 5-fold above", 3), "per-stratum heading and both Methods texts state the split rule")
+check(has("api/R/statistics.R", "cv_type = r$cv_type,"), "per-stratum rows carry cv_type")
+check(has(a, "' · ' + r.cv_type"), "per-stratum Status cell shows the row's cv_type")
+check(lacks("frontend/index.html", "grouped CV (leave-one-sample-out)") && has("frontend/index.html", "leave-one-sample-out up to 10 samples, grouped 5-fold above"), "index.html standalone title and help follow the rule")
+check(has("USER_GUIDE.md", "leave-one-sample-out up to 10 samples, grouped 5-fold above") && has("README.md", "leave-one-sample-out up to 10 samples, grouped 5-fold above"), "USER_GUIDE and README state the split rule")
+check(ver_of("js/app.js") >= "1.3.16", "app.js cache-busting bump (>= 1.3.16)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

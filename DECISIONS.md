@@ -885,7 +885,13 @@ default)". Ocean & Earth and Tol stay selectable. Every chart's default
 colours change; nothing numeric does.
 
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
-Status: open (2026-09-25), from the R28 browser check
+Status: done (2026-09-25). The headline title reads "grouped CV,
+${cv_type} (LDA)"; the per-stratum rows carry their own `cv_type` (shown
+in the Status cell) and the heading states the rule (≤ 10 samples →
+leave-one-sample-out, else grouped 5-fold); both Methods texts, the tab
+help, the standalone card title, README and USER_GUIDE say "grouped CV
+holding out whole biological samples (leave-one-sample-out up to 10
+samples, grouped 5-fold above)".
 
 `renderDiagnosticGroupedCv` (`app.js`) hard-codes "grouped
 leave-one-sample-out CV (LDA)" in the card title, and the report Methods
