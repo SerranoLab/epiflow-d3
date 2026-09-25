@@ -8,6 +8,11 @@
 library(plumber)
 library(jsonlite)
 
+# R10: single source of the app version. /api/health returns it, /api/metadata
+# echoes it, and the frontend fills its badge, footers and report from it —
+# no version literal lives in index.html or app.js. Bump here at deploy.
+EPIFLOW_VERSION <- "1.3.4"
+
 # Source helper functions
 # NOTE: plumber::plumb() evaluates this file from its own directory (R/),
 # so paths are relative to R/, not api/
@@ -58,10 +63,11 @@ function(req, res) {
 
 #* API health check
 #* @get /api/health
+#* @serializer json list(auto_unbox = TRUE)
 function() {
   list(
     status = "ok",
-    version = "1.1.0",
+    version = EPIFLOW_VERSION,
     app = "EpiFlow D3.js API",
     r_version = R.version.string,
     timestamp = Sys.time()
@@ -77,7 +83,7 @@ function() {
 #* @parser multi
 #* @parser octet
 #* @serializer json list(auto_unbox = TRUE)
-function(req) {
+function(req, res) {   # R10: res must be a parameter for the 400 below to be reachable
   # Parse multipart form data
   body <- req$body
 
@@ -182,7 +188,7 @@ function(req) {
 function(session_id) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
-  store$metadata
+  c(store$metadata, list(app_version = EPIFLOW_VERSION))   # R10
 }
 
 #* Load a built-in synthetic example dataset for demoing the app.
@@ -1102,69 +1108,8 @@ function(session_id, req) {
   )
 }
 
-#* Run UMAP
-#* @post /api/dimred/umap/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
-function(session_id, req) {
-  store <- get_session(session_id)
-  if (is.null(store)) return(list(error = "Session not found"))
-
-  if (!requireNamespace("uwot", quietly = TRUE)) {
-    return(list(error = "uwot package not installed"))
-  }
-
-  params <- req$body
-  data <- store$filtered_data
-  h3_markers <- store$metadata$h3_markers
-
-  meta_base <- c("cell_id", "genotype", "replicate", "cell_cycle", "identity")
-  meta_extra <- intersect(c("timepoint", "cell_type", "condition"), names(data))
-  meta_all <- c(meta_base, meta_extra)
-
-  wide <- data %>%
-    dplyr::select(dplyr::all_of(c(meta_all, "H3PTM", "value"))) %>%
-    dplyr::group_by(dplyr::across(dplyr::all_of(meta_all)), H3PTM) %>%
-    dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
-    tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
-    tidyr::drop_na()
-
-  h3_cols <- intersect(h3_markers, names(wide))
-
-  # Subsample
-  max_cells <- params$max_cells %||% 80000
-  if (nrow(wide) > max_cells) {
-    set.seed(42)
-    wide <- wide[sample(nrow(wide), max_cells), ]
-  }
-
-  n_neighbors <- params$n_neighbors %||% 15
-
-  umap_result <- uwot::umap(
-    as.matrix(wide[, h3_cols]),
-    n_neighbors = n_neighbors,
-    min_dist = 0.1,
-    n_components = 2,
-    scale = TRUE
-  )
-
-  result_df <- data.frame(
-    UMAP1 = umap_result[, 1],
-    UMAP2 = umap_result[, 2]
-  )
-  result_df <- dplyr::bind_cols(result_df,
-    wide %>% dplyr::select(dplyr::all_of(intersect(meta_all, names(wide)))))
-
-  if (nrow(result_df) > 10000) {
-    set.seed(42)
-    result_df <- result_df[sample(nrow(result_df), 10000), ]
-  }
-
-  list(
-    embedding = result_df,
-    n_cells = nrow(result_df),
-    n_neighbors = n_neighbors
-  )
-}
+# R10: the legacy /api/dimred/umap endpoint (unseeded uwot, no caller in
+# app.js) is removed; /api/phase3/umap below is the seeded one the app uses.
 
 # ===========================================================================
 # PHASE 3: UMAP 3D, ADVANCED CLUSTERING

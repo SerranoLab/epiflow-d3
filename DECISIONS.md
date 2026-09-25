@@ -259,6 +259,26 @@ reported delta changed from run to run above 3,000 cells per group.
 
 ---
 
+## R10 — Small correctness items: unreachable 400, stale version string, unseeded legacy UMAP
+Status: done (2026-09-25), branch audit/labels
+
+(1) The upload endpoint's "no file" branch set `res$status` inside a
+`function(req)`; `res` is now a parameter, so the branch returns 400
+instead of throwing. (2) `EPIFLOW_VERSION` in `plumber.R` is the single
+source of the app version: `/api/health` returns it, `/api/metadata`
+echoes it as `app_version`, and the frontend fills the header badge, the
+About line, the page footer, the report footer and the citation Methods
+from `health.version` at init — there is no version literal in
+`index.html` or `app.js` any more. It is bumped at deploy (1.4.1 planned).
+The health serializer now unboxes, so `version` arrives as a scalar
+string, not a one-element array that only read correctly because
+JavaScript stringifies it.
+(3) The legacy `/api/dimred/umap` endpoint ran uwot unseeded and had no
+caller in `app.js` (the app uses the seeded `/api/phase3/umap`); it and its
+`api.js` wrapper are removed.
+
+---
+
 ## R7 — A caution note described a Cohen's d confidence interval that was never computed
 Status: done (2026-09-25)
 

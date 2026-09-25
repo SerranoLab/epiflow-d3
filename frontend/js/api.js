@@ -105,7 +105,7 @@ const EpiFlowAPI = {
 
   // ---- Dimensionality reduction ----
   async runPCA(params) { return this._post(`/api/dimred/pca/${this.sessionId}`, params); },
-  async runUMAP(params) { return this._post(`/api/dimred/umap/${this.sessionId}`, params); },
+  // R10: the legacy dimred UMAP wrapper and its unseeded endpoint are gone; runUMAPPhase3 is the seeded one.
 
   // ---- Machine learning ----
   async runRandomForest(params) { return this._post(`/api/ml/randomforest/${this.sessionId}`, params); },

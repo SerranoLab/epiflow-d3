@@ -148,5 +148,25 @@ p2 <- lines_of("api/R/phase2.R")
 i_s1 <- grep("s1 <- if (n1 > 3000) sample(g1, 3000) else g1", p2, fixed = TRUE)
 check(length(i_s1) == 1 && any(grepl("set.seed(42)", p2[max(1, i_s1 - 3):i_s1], fixed = TRUE)), "set.seed(42) within 3 lines before the Cliff's delta sample()")
 
+# ---- R10: reachable 400, one version source, no unseeded legacy UMAP ----
+cat("\n--- R10 ---\n")
+pl <- lines_of("api/R/plumber.R")
+i_up <- grep("@post /api/upload", pl, fixed = TRUE)
+check(length(i_up) == 1 && any(startsWith(pl[i_up:(i_up + 4)], "function(req, res)")), "upload endpoint signature is function(req, res)")
+check(has("api/R/plumber.R", 'EPIFLOW_VERSION <- "') && has("api/R/plumber.R", "version = EPIFLOW_VERSION") && lacks("api/R/plumber.R", 'version = "1.1.0"'), "health reports EPIFLOW_VERSION (no literal)")
+check(has("api/R/plumber.R", "app_version = EPIFLOW_VERSION"), "/api/metadata echoes app_version")
+check(lacks("api/R/plumber.R", "@post /api/dimred/umap") && lacks("frontend/js/api.js", "dimred/umap"), "legacy /api/dimred/umap endpoint and wrapper are gone")
+ver_lit <- "[0-9]+\\.[0-9]+\\.[0-9]+"
+check(!any(grepl(paste0("EpiFlow D3 v", ver_lit), lines_of("frontend/index.html"))) && !any(grepl(paste0("D3 v", ver_lit), lines_of("frontend/js/app.js"))) && !any(grepl(paste0("EpiFlow D3 v", ver_lit), lines_of("frontend/js/app.js"))),
+      "no app-version literal in index.html or app.js")
+check(has(a, "async loadVersion()") && has(a, "querySelectorAll('.app-version')") && has("frontend/index.html", 'class="app-version"', 3), "frontend fills badge, About line and footer from health.version")
+# API-side: when the local API is up, its health version equals EPIFLOW_VERSION in plumber.R — never a literal.
+ver_src <- sub('.*EPIFLOW_VERSION <- "([^"]+)".*', "\\1", grep('^EPIFLOW_VERSION <- "', pl, value = TRUE)[1])
+hv <- tryCatch({ con <- url(paste0(Sys.getenv("EPIFLOW_API", "http://127.0.0.1:8000"), "/api/health")); on.exit(close(con)); j <- paste(readLines(con, warn = FALSE), collapse = "")
+  # The health serializer unboxes (R10): version must arrive as a scalar string, not a one-element array.
+  m <- regmatches(j, regexpr('"version":"[0-9.]+"', j)); if (!length(m)) NA_character_ else gsub('[^0-9.]', "", sub('"version":', "", m)) }, error = function(e) NA_character_)
+if (is.na(hv)) cat("  [SKIP] API not reachable; health-version check skipped\n") else check(identical(hv, ver_src), sprintf("/api/health version (%s) equals EPIFLOW_VERSION in plumber.R (%s)", hv, ver_src))
+check(ver_of("js/api.js") >= "1.2.5" && ver_of("js/app.js") >= "1.3.20", "api.js / app.js cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
