@@ -354,6 +354,91 @@ occurrence: re-run and record the message here. Not fixed in this branch.
 
 ---
 
+## R19 — Titration/separation metrics with linear-scale definitions run on arcsinh without saying so
+Status: open (2026-09-25)
+
+What changes. Data enter EpiFlow already arcsinh-transformed (OmiQ export).
+`api/R/separation.R` states this (`:7-8`) and `assert_arcsinh()` (`:63-70`)
+guards against z-scored input, but five metrics whose textbook definitions
+are on linear fluorescence are evaluated on arcsinh values and presented
+under their linear names:
+- `staining_index()` (`:19-24`): (median_A − median_B) / (2 · MAD_B).
+- `sbr()` (`:36-40`): median_A / median_B — a ratio of two arcsinh values
+  is not a signal-to-background ratio; it compresses toward 1 and is
+  undefined or negative near the floor. Also drives the "specificity-loss
+  (SBR ≤ 1)" flag (`:245`).
+- `cv_a` (`:205`): 100 · sd / |mean| on arcsinh, shown as "%CV of the
+  positive" (`titrationHelp.js:96-99`).
+- `saturation_knee()` (`:175-181`): "fractional gain" diff(median)/|median|
+  on the arcsinh axis — a 15 % arcsinh step is not a 15 % signal gain.
+- `assess_negative()` (`:90-120`): (neg − floor)/(pos − floor) as "fraction
+  of the way from floor to positive", in arcsinh space.
+AUROC and %>p95 (`:26-34, 42-45`) are rank-based and transform-invariant, so
+the titer recommendation itself (peak AUROC, `:225, 264`) is sound; the
+secondary metrics and the SBR flag carry the wrong name.
+
+Fix (choose one). (i) Rename at the metric level — `titrationHelp.js`, the
+panel table and the CSV say "arcsinh SI", "Δmedian (arcsinh)", "SD
+(arcsinh)"; the knee uses an absolute arcsinh step; SBR is dropped or
+replaced by Δmedian. (ii) Back-transform with the stamped cofactor (needs
+R21 first). Either way SBR as a ratio of arcsinh medians goes.
+
+Verification. `test_titration.R` extended: every metric label in the
+payload names its scale; no "SBR" field; knee computed from absolute steps.
+
+---
+
+## R20 — Volcano is documented as "log₂ fold-change vs −log₁₀ adjusted p"; it plots LMM β on arcsinh vs unadjusted p
+Status: open (2026-09-25)
+
+What changes. `README.md:25` and `USER_GUIDE.md:152` describe the volcano as
+log₂ fold-change against −log₁₀ adjusted p. Nothing in the codebase
+computes a fold change (zero hits for log2/fold outside CV folds); the x
+axis is the LMM β, a difference in arcsinh units (`volcanoPlot.js:84`
+"Effect size (β)"), and the y axis is −log₁₀ of the unadjusted `p.value`
+(`volcanoPlot.js:27`) with the "p < 0.05" threshold on that raw p. The
+forest plot has the same unlabeled unit (`forestPlot.js:117, 137`).
+
+Fix. Docs say "LMM β (difference in arcsinh units) vs −log₁₀ p"; volcano
+and forest axis labels become "β (arcsinh units)"; decide whether the
+volcano's y and threshold should use `p_adj` (BH), and say which in the
+subtitle. Goes with the L pass.
+
+Verification. A grep test: no "fold-change"/"log₂" in README, USER_GUIDE or
+the in-app Methods for the volcano; axis label text asserted in
+`test_labels.R`.
+
+---
+
+## R21 — Data contract: the arcsinh transform and its cofactor are assumed, never stamped or checked
+Status: open (2026-09-25)
+
+What changes. `load_epiflow_data()` (`helpers.R:83-170`) never inspects
+`value`: no transform attribute is read, no cofactor is recorded, and the
+only scale guard in the codebase is `assert_arcsinh()`'s z-score heuristic
+in the titration module. The OMIQ→EpiFlow converter that applies the
+transform (`USER_GUIDE.md:35-39`) is not in this repository, so where the
+arcsinh is applied and with which cofactor is undocumented here. The
+schema tables (`USER_GUIDE.md:51`, `README.md:122`) call `value`
+"Fluorescence intensity" without the transform. The Gate Finder design note
+(audit doc) plans an export "back-transformed from arcsinh to instrument
+units (sinh(x) × the cofactor)" — the only back-transform anywhere, and it
+has no cofactor to use.
+
+Fix. The converter stamps `attr(df, "epiflow_transform") = "arcsinh"`,
+`attr(df, "arcsinh_cofactor")` and instrument/panel identifiers (the
+paper-facing data-contract item in the audit); the loader validates and
+echoes them in `/api/metadata`; any back-transform (Gate Finder export, R19
+option ii) reads the stamped cofactor or refuses. Until then the Gate
+Finder exports arcsinh thresholds only, and the schema docs say
+"arcsinh-transformed fluorescence intensity".
+
+Verification. `test_data_contract.R`: an `.rds` without the attributes
+loads with a warning that is surfaced in the upload response; one with
+them echoes transform and cofactor in `/api/metadata`.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
