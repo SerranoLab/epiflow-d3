@@ -392,6 +392,12 @@ every stats table; deferred out of R14 so the serializer change ships alone.
 With `fmtP` the exported p-values are at least parseable scientific notation
 at 2–3 significant digits.
 
+Addendum (2026-09-25, R28). The grouped-CV CSV (`diag-groupedcv`) must
+include the per-stratum rows — stratum, n_cells, samples per class, k, n,
+CI bounds, balanced accuracy, top features, status/reason — not only the
+headline per-sample table. Today the button scrapes the first table in the
+container.
+
 ---
 
 ## R17 — LMM endpoints hid the fit error behind "Model could not be fit"
@@ -727,6 +733,25 @@ the same stratum; the headline equals the unstratified call; a stratum whose
 KO cells come from one replicate reads not estimable with the observed
 counts; stratify_by == genotype returns the same-variable error; no
 `stratified` key without stratify_by; feature weights sum to 1.
+
+---
+
+## R30 — Grouped LOSO CV under strong class imbalance predicts the majority class
+Status: open (2026-09-25)
+
+What changes. With a strongly imbalanced target the leave-one-sample-out CV
+calls every held-out sample as the majority class: on the 416k file with
+identity as target, 5 / 16 samples correct and every G2 and Mitotic sample
+called G0/G1. `MASS::lda` uses the class proportions as priors, so at ~80%+
+G0/G1 the posterior for a minority class rarely wins a cell, and the
+majority vote per sample then never flips. Fix: fit the CV's LDA with equal
+priors (`prior = rep(1/k, k)`); report balanced sample accuracy (mean
+per-class share of samples called correctly) beside k / n; add an
+imbalance note when the largest class exceeds ~80% of cells, stating that
+k / n is dominated by the majority class. Applies to the headline and to
+the R28 per-stratum rows. Verification: on the 416k identity target the
+G2 / Mitotic samples are no longer all called G0/G1; the example (balanced)
+gives the same k / n as today.
 
 ---
 
