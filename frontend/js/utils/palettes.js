@@ -5,7 +5,7 @@
 // ============================================================================
 
 const EpiFlowPalettes = {
-  // Default: Ocean & Earth (Nature-style)
+  // Ocean & Earth (Nature-style) — selectable; the default is Okabe-Ito (L10)
   'Ocean & Earth': {
     genotype: ['#0084b8', '#bd5e00', '#7a923d', '#694657', '#5dae9d', '#3a6a99', '#d4853d', '#9db86b'],
     cell_cycle: { 'G0/G1': '#0084b8', 'G2': '#bd5e00', 'G2/M': '#d4853d', 'M': '#694657' },
@@ -40,8 +40,10 @@ const CLUSTER_PALETTE_20 = [...OKABE_ITO, ...TOL_EXTENSION];
 const CLUSTER_PALETTE_NOTE = 'clusters 9+ use the Tol extension of Okabe-Ito';
 const EXTENDED_CATEGORICAL_20 = CLUSTER_PALETTE_20;
 
-// Active palette (mutable)
-let activePalette = 'Ocean & Earth';
+// Active palette (mutable). L10: the default theme is Okabe-Ito (Wong);
+// Ocean & Earth stays available in the menu.
+const DEFAULT_PALETTE = 'Colorblind Safe (Wong)';
+let activePalette = DEFAULT_PALETTE;
 
 /**
  * Get color for a group value based on the type
@@ -53,11 +55,11 @@ let activePalette = 'Ocean & Earth';
 function getColor(type, value, index = 0, serverPalette = null) {
   const palette = EpiFlowPalettes[activePalette];
 
-  // --- FIX A: Server palette only applies when using "Ocean & Earth" (default) ---
-  // When user selects a colorblind palette, the local palette takes priority.
+  // --- FIX A: Server palette only applies under the default theme ---
+  // When the user picks another theme, the local palette takes priority.
   // Server palette represents custom user-picked colors, which only make sense
-  // with the default theme.
-  const useServerPalette = serverPalette && activePalette === 'Ocean & Earth';
+  // with the default theme (L10: Okabe-Ito).
+  const useServerPalette = serverPalette && activePalette === DEFAULT_PALETTE;
   // Generic custom-color override for ANY comparison variable (genotype, condition,
   // timepoint, cell_type, ...). Custom colors are keyed by variable name in serverPalette.
   if (useServerPalette && serverPalette[type] &&
@@ -86,7 +88,7 @@ function getColor(type, value, index = 0, serverPalette = null) {
 
   // Identity — try named mapping first, then fall back to extended palette
   if (type === 'identity') {
-    // Check server palette for identity colors (Ocean & Earth only)
+    // Check server palette for identity colors (default theme only)
     if (useServerPalette && serverPalette.identity) {
       const srvId = serverPalette.identity;
       if (typeof srvId === 'object' && !Array.isArray(srvId) && srvId[value]) {

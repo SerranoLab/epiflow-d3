@@ -870,6 +870,20 @@ more than 8 levels uses it too. Both cluster scatters (`clusterPlot.js`,
 `app.js`) draw from it, and whenever more than 8 clusters are shown the
 legend says "clusters 9+ use the Tol extension of Okabe-Ito".
 
+### L10 — Default two-group palette was coolwarm; the frontend default theme was Ocean & Earth
+Status: done (2026-09-25). Decision: every default is Okabe-Ito.
+
+CLAUDE.md names Okabe-Ito (Wong) as the default categorical palette, but
+the loader (`helpers.R`) sent #3B4CC0 / #B40426 for two genotypes, five
+frontend `defaultColors` arrays repeated it, and `palettes.js` started on
+"Ocean & Earth" so the Okabe-Ito theme had to be chosen by hand. Now:
+`geno_pal` is Okabe-Ito (viridis only past eight levels); the five arrays
+are the shared `OKABE_ITO` export; `DEFAULT_PALETTE = 'Colorblind Safe
+(Wong)'` is the initial theme and the one under which server-side custom
+colours apply; the theme menu lists it first as "Okabe-Ito (Wong,
+default)". Ocean & Earth and Tol stay selectable. Every chart's default
+colours change; nothing numeric does.
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

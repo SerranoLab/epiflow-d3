@@ -89,5 +89,15 @@ check(has("frontend/js/charts/clusterPlot.js", "const clusterColors = CLUSTER_PA
 check(has("frontend/js/charts/clusterPlot.js", ".text(CLUSTER_PALETTE_NOTE)") && has("frontend/js/app.js", ".text(CLUSTER_PALETTE_NOTE)"), "both legends print the Tol-extension note when more than 8 clusters are drawn")
 check(ver_of("palettes.js") >= "1.3.1" && ver_of("clusterPlot.js") >= "1.2.4" && ver_of("js/app.js") >= "1.3.14", "palettes / clusterPlot / app cache-busting bumps")
 
+# ---- L10: every default palette is Okabe-Ito ----
+cat("\n--- L10 Okabe-Ito defaults ---\n")
+for (cf in c("api/R/helpers.R", "frontend/js/app.js", "frontend/js/charts/positivityPlot.js", "frontend/js/charts/gatingPlot.js"))
+  check(lacks(cf, "#3B4CC0") && lacks(cf, "#B40426"), sprintf("%s has no coolwarm default", cf))
+check(has("api/R/helpers.R", 'okabe_ito <- c("#0072B2", "#D55E00"'), "helpers.R genotype palette starts with Okabe-Ito blue / vermilion")
+check(has("frontend/js/app.js", "const defaultColors = OKABE_ITO;", 3) && has("frontend/js/charts/positivityPlot.js", "const defaultColors = OKABE_ITO;") && has("frontend/js/charts/gatingPlot.js", "const defaultColors = OKABE_ITO;"), "all five defaultColors arrays use the shared OKABE_ITO export")
+check(has(p, "const DEFAULT_PALETTE = 'Colorblind Safe (Wong)';") && has(p, "let activePalette = DEFAULT_PALETTE;") && has(p, "activePalette === DEFAULT_PALETTE"), "palettes.js default theme is Wong and the server-palette guard follows it")
+check(has("frontend/index.html", '<option value="Colorblind Safe (Wong)" selected>'), "theme menu preselects the Okabe-Ito option")
+check(ver_of("palettes.js") >= "1.3.2" && ver_of("positivityPlot.js") >= "1.2.4" && ver_of("gatingPlot.js") >= "1.3.6" && ver_of("js/app.js") >= "1.3.15", "L10 cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

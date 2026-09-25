@@ -508,7 +508,7 @@ const App = {
     if (!levels.length) { if (group) group.style.display = 'none'; return; }
 
     const pal = (DataManager.serverPalette && DataManager.serverPalette[varName]) || {};
-    const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD', '#8C564B', '#E377C2', '#7F7F7F', '#BCBD22'];
+    const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
 
     container.dataset.var = varName;
     container.innerHTML = levels.map((lv, i) => {
@@ -2080,7 +2080,7 @@ const App = {
     const cellH = hasViolins ? 220 : 180;
 
     const palette = DataManager.serverPalette?.genotype || {};
-    const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD', '#8C564B'];
+    const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const colorScale = d3.scaleOrdinal()
       .domain(groups)
       .range(groups.map((gr, i) => palette[gr] || defaultColors[i % defaultColors.length]));
@@ -3868,7 +3868,7 @@ const App = {
 
       const groups = ensureArray(data.groups);
       const palette = DataManager.serverPalette?.genotype || {};
-      const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD'];
+      const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
       const colorScale = d3.scaleOrdinal()
         .domain(groups)
         .range(groups.map((gr, i) => palette[gr] || defaultColors[i % defaultColors.length]));
@@ -4453,7 +4453,7 @@ ${sections.join('\n')}
 
       // Options
       options: {
-        palette: document.getElementById('palette-select')?.value || 'Ocean & Earth',
+        palette: document.getElementById('palette-select')?.value || DEFAULT_PALETTE,
         refLevel: document.getElementById('filter-ref-level')?.value || '',
         cellsAsReplicates: document.getElementById('cells-as-replicates')?.checked || false,
       },

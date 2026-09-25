@@ -203,11 +203,14 @@ load_epiflow_data <- function(path) {
     meta_levels[[paste0(col, "_levels")]] <- safe_I(sort(unique(as.character(data[[col]]))))
   }
 
-  # Build palette for this dataset's genotypes
+  # Build palette for this dataset's genotypes. L10: Okabe-Ito (Wong 2011) is
+  # the default for every categorical variable (CLAUDE.md); viridis only
+  # beyond its eight colours.
+  okabe_ito <- c("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#F0E442", "#56B4E9", "#E69F00", "#999999")
   geno_levels <- sort(unique(data$genotype))
   n_geno <- length(geno_levels)
-  if (n_geno == 2) {
-    geno_pal <- setNames(c("#3B4CC0", "#B40426"), geno_levels)
+  if (n_geno <= length(okabe_ito)) {
+    geno_pal <- setNames(okabe_ito[seq_len(n_geno)], geno_levels)
   } else {
     geno_pal <- setNames(viridisLite::viridis(n_geno), geno_levels)
   }

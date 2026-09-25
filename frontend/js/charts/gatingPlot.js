@@ -106,7 +106,7 @@ const GatingPlot = {
     // Color by group
     const groups = ensureArray(data.groups);
     const palette = DataManager.serverPalette?.genotype || {};
-    const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD'];
+    const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const colorScale = d3.scaleOrdinal()
       .domain(groups)
       .range(groups.map((gr, i) => palette[gr] || defaultColors[i % defaultColors.length]));

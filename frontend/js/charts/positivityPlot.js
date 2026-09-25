@@ -74,7 +74,7 @@ const PositivityPlot = {
 
     // Per-group densities
     const palette = DataManager.serverPalette?.genotype || {};
-    const defaultColors = ['#3B4CC0', '#B40426', '#2CA02C', '#9467BD'];
+    const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const groups = orderRefFirst(ensureArray(data.groups), data.ref_level);
     const colorScale = d3.scaleOrdinal()
       .domain(groups)
