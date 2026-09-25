@@ -3,6 +3,23 @@
 Earlier release notes: `CHANGELOG_v1.2.0.md`. Finding IDs (R1 …, L1 …) refer to
 the September 2026 publication audit; each has an entry in `DECISIONS.md`.
 
+## EpiFlow D3 v1.4.2 — 2026-09-25
+
+Two ridge-plot label findings from the v1.4.1 browser check (branch
+`fix/ridge-labels`).
+
+- **L14** — The ridge scale toggle, its axis label and the tab help read
+  "arcsinh intensity (as imported)" and "standardized per marker (median /
+  MAD; MAD = median absolute deviation)" (were "raw (arcsinh)" and
+  "per-marker (median/MAD)").
+- **L15** — The ridge "n" counts distinct cells per group and is labelled
+  "n = … cells"; it counted long-format rows (cells × markers: 693,570 shown
+  for 138,714 HBVP cells).
+- Logged open: **R31** — `run_all_markers_lmm` fits markers sequentially on
+  one core; parallelize across markers (`parallel::mclapply`, cores from
+  `EPIFLOW_CORES`, default `detectCores() − 1`) keeping order and seeds
+  identical. To be planned with the F1/F2 session.
+
 ## EpiFlow D3 v1.4.1 — 2026-09-25
 
 The publication-audit release. No `v1.4.0` tag exists in this repository; the

@@ -813,6 +813,25 @@ gives the same k / n as today.
 
 ---
 
+## R31 — run_all_markers_lmm fits markers sequentially on one core
+Status: open (2026-09-25); plan with the F1/F2 session
+
+`run_all_markers_lmm` (`statistics.R`) is a `purrr::map` over markers, each
+calling `fit_stratified_lmm` (lmer + emmeans + distribution metrics); on the
+416k-cell file that is a serial chain of independent fits. Fix: run the map
+with `parallel::mclapply` across markers, worker count from an env var
+(`EPIFLOW_CORES`, default `parallel::detectCores() - 1`, 1 = current
+behaviour and the Windows fallback), keeping the output order identical to
+`markers` (mclapply preserves order) and every seeded step inside a fit
+seeded per worker exactly as today, so the per-marker results are
+bit-identical to the serial run. The BH step stays after the bind, over
+the same rows in the same order. Verification: the all-markers payload with
+`EPIFLOW_CORES=1` and `EPIFLOW_CORES=4` compared field by field to 1e-12;
+wall time recorded in the entry; memory per worker checked on the droplet
+(each fork holds a copy of `filtered_data`).
+
+---
+
 ## R29 — Strata × features heatmap of the per-stratum LDA weights
 Status: open (2026-09-25)
 

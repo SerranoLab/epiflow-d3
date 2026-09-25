@@ -11,7 +11,7 @@ library(jsonlite)
 # R10: single source of the app version. /api/health returns it, /api/metadata
 # echoes it, and the frontend fills its badge, footers and report from it —
 # no version literal lives in index.html or app.js. Bump here at deploy.
-EPIFLOW_VERSION <- "1.4.1"
+EPIFLOW_VERSION <- "1.4.2"
 
 # Source helper functions
 # NOTE: plumber::plumb() evaluates this file from its own directory (R/),
