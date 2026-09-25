@@ -321,7 +321,10 @@ Not fixed here (2): forwarding the tab filters to the detail endpoint — R11.
 ---
 
 ## R15 — Standalone grouped-CV card duplicates the diagnostic computation
-Status: open (2026-09-24)
+Status: open (2026-09-24); priority raised 2026-09-25 — see L12: the two
+cards now show different numbers on the same tab (100% / 88% vs 11/12 /
+54.7%) because the standalone card uses the ticked features and its own
+model dropdown, so a reader cannot tell which is "the" grouped CV.
 
 What changes. After R3 the Diagnostic panel runs the grouped
 leave-one-sample-out CV (LDA) as its headline, while the separate
@@ -763,6 +766,34 @@ markers, cell = standardized LDA weight, row annotation = k / n with CI) so
 the "which cell states carry the signal" reading is visual. Deferred: the
 table came first; the weights are descriptive and the annotation must keep
 the not-estimable rows visible (greyed), not drop them.
+
+---
+
+## Label findings (L-series) — fix in the label pass
+
+### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
+Status: open (2026-09-25), from the R28 browser check
+
+`renderDiagnosticGroupedCv` (`app.js`) hard-codes "grouped
+leave-one-sample-out CV (LDA)" in the card title, and the report Methods
+paragraph says leave-one-sample-out, but `.epiflow_grouped_cv` switches to
+grouped 5-fold above 10 samples (`cv_type = "grouped 5-fold"`, which the
+footer already prints). Title, the R28 per-stratum heading and both Methods
+texts must follow `cv_type` (per stratum too: a stratum can have ≤ 10
+samples while the whole has more). Rule: every label names the test
+actually computed.
+
+### L12 — Grouped-CV headline footer must state the feature set used
+Status: open (2026-09-25), from the R28 browser check
+
+The headline runs on all H3-PTM markers (`cvFeatures`, `runDiagnostic`)
+while the standalone "Diagnostic test — grouped CV" card on the same tab
+runs on the ticked features with its own model dropdown, and the two report
+different numbers (100% / 88% vs 11/12 / 54.7%) with no label saying why.
+The headline footer (and the per-stratum note) must state the feature set:
+"5 H3-PTM features: H3K27ac, …" — and the standalone card must state its
+own. Raises R15's priority: the standalone card should become a shortcut
+into the Diagnostic panel, not a second computation.
 
 ---
 
