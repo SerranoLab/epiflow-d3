@@ -359,6 +359,7 @@ const App = {
         this.populateRefLevel(this._getLevelsForVar(compSelect.value));
         this.populateCustomColors(compSelect.value);
         this.syncStratifyOptions();   // R18
+        this.markStatsStale();        // results were computed with the old comparison variable
       });
     }
     // Clear quadrant gate filter
@@ -975,6 +976,10 @@ const App = {
     });
     document.getElementById('run-lmm-btn').addEventListener('click', () => this.runLMM());
     document.getElementById('run-all-markers-btn').addEventListener('click', () => this.runAllMarkers());
+    // Any setting the Statistics results depend on greys them until Run is pressed.
+    ['stats-stratify', 'filter-ref-level', 'cells-as-replicates'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', () => this.markStatsStale());
+    });
     document.getElementById('marker-detail-btn').addEventListener('click', () => this.loadMarkerDetail());
 
     // Marker heatmap metric toggle (EMD/IQR ↔ KS D-stat)
@@ -1727,6 +1732,7 @@ const App = {
   renderMarkerDetail(data) {
     const el = document.getElementById('stats-detail');
     if (!el) return;
+    this.clearStatsStale('stats-detail');   // fresh drill-down, current settings (R27)
     // fmtP is the shared p-value formatter in api.js (R14)
     const sigMark = v => isSig(v)
       ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#94a3b8">ns</span>';
@@ -3117,7 +3123,7 @@ const App = {
     return parts.join(' · ');
   },
   lmmDfCell(r) {
-    const df = r.df != null && Number.isFinite(Number(r.df)) ? Number(r.df).toFixed(1) : '—';
+    const df = r.df != null && Number.isFinite(Number(r.df)) ? Number(r.df).toFixed(2) : '—';
     return `<td title="${this.lmmDfTitle(r)}">${df}</td>`;
   },
   lmmStatusCell(r) {
@@ -3135,10 +3141,48 @@ const App = {
       <strong>⚠ ${flagged.length} row${flagged.length > 1 ? 's' : ''}:</strong> ${flagged[0].df_note || ''}</div>`;
   },
 
+  // Settings the Statistics tab results were computed with. Shown as a header
+  // line on the table, and used to grey the table the moment any of them
+  // changes, until Run is pressed again.
+  statsRunSettings() {
+    const stratify = document.getElementById('stats-stratify')?.value || 'None';
+    const ref = this.getRefLevel();
+    return {
+      comparison: DataManager.getComparisonVar(),
+      reference: ref || 'auto (first level)',
+      stratification: stratify === 'None' ? 'none' : stratify,
+      cellsAsReplicates: this.getCellsAsReplicates() ? 'yes (exploratory)' : 'no'
+    };
+  },
+  statsRunHeader() {
+    const s = this.statsRunSettings();
+    return `<div class="stats-run-header" style="font-size:11px;color:#475569;margin:0 0 6px;padding:6px 10px;background:#f8fafc;border-radius:6px;">
+      Run with: comparison = <strong>${s.comparison}</strong> (reference <strong>${s.reference}</strong>) ·
+      stratification = <strong>${s.stratification}</strong> · cells as replicates = <strong>${s.cellsAsReplicates}</strong>
+      · ${new Date().toLocaleTimeString()}</div>`;
+  },
+  markStatsStale() {
+    ['stats-results', 'stats-detail'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el || !el.innerHTML.trim() || el.querySelector('.stats-stale-badge')) return;
+      el.style.opacity = '0.45';
+      el.insertAdjacentHTML('afterbegin',
+        `<div class="stats-stale-badge" style="opacity:1;margin:0 0 6px;padding:6px 10px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:11px;color:#92400e;">
+          Settings changed — these results were computed with the settings in their header. Press Run LMM / All Markers to refresh.</div>`);
+    });
+  },
+  clearStatsStale(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.opacity = '';
+    el.querySelectorAll('.stats-stale-badge').forEach(b => b.remove());
+  },
+
   renderStatsTable(results) {
     const arr = ensureArray(results);
     if (!arr.length) return;
     const container = document.getElementById('stats-results');
+    this.clearStatsStale('stats-results');
     const rows = arr.map(r => ({
       ...r,
       estimate: Number(r.estimate),
@@ -3160,7 +3204,7 @@ const App = {
       direction: Array.isArray(r.direction) ? r.direction[0] : (r.direction || ''),
     }));
 
-    container.innerHTML = `
+    container.innerHTML = `${this.statsRunHeader()}
       <table class="stats-table">
         <thead><tr>
           <th>Marker</th><th>Subset</th><th>Contrast</th>
@@ -4045,6 +4089,19 @@ const App = {
         if (!svg) return;
         // Clone and inline styles
         const clone = ExportUtils._inlineStyles(svg);
+        // Report hygiene: interaction hints (class ui-hint) mean nothing on
+        // paper; drop them. Give the clone a viewBox from its drawn size and
+        // let it fill the page width, so a chart drawn in a narrow panel
+        // scales up instead of cramming its ticks.
+        clone.querySelectorAll('.ui-hint').forEach(n => n.remove());
+        if (!clone.getAttribute('viewBox')) {
+          const w = parseFloat(clone.getAttribute('width')) || svg.getBoundingClientRect().width;
+          const h = parseFloat(clone.getAttribute('height')) || svg.getBoundingClientRect().height;
+          if (w > 0 && h > 0) clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        }
+        clone.setAttribute('width', '100%');
+        clone.removeAttribute('height');
+        clone.setAttribute('preserveAspectRatio', 'xMidYMin meet');
         chartSvgs.push(new XMLSerializer().serializeToString(clone));
       });
 
@@ -4052,6 +4109,10 @@ const App = {
       (panel.stats || []).forEach(statId => {
         const el = document.getElementById(statId);
         if (!el || !el.innerHTML.trim()) return;
+        // A container that only holds its "Click … to run" placeholder was
+        // never run: it contributes nothing, and a section with nothing else
+        // is omitted entirely below.
+        if (el.querySelector('.ml-placeholder') && !el.querySelector('table')) return;
         statsHtml.push(el.innerHTML);
       });
 

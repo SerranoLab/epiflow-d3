@@ -63,7 +63,14 @@ const RidgePlot = {
       .attr('x', (width + margin.left + margin.right) / 2)
       .attr('y', 30)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text('Kernel density estimation · dashed line = median · hover for stats');
+      .text('Kernel density estimation · dashed line = median');
+    // Interaction hint in its own element (class ui-hint) so the report strips it.
+    svg.append('text')
+      .attr('class', 'ui-hint')
+      .attr('x', (width + margin.left + margin.right) / 2)
+      .attr('y', 42)
+      .attr('text-anchor', 'middle').attr('font-size', '9px').attr('fill', '#cbd5e1')
+      .text('hover a curve for stats');
 
     // Ensure numeric arrays (jsonlite may box values)
     data.densities = ensureArray(data.densities);

@@ -57,8 +57,11 @@ suppressPackageStartupMessages({
        singular = singular, re_var = re_var, resid_var = resid_var, icc = icc)
 }
 
-.lmm_df_flag <- function(df, diag) {
-  flag <- is.finite(df) & is.finite(diag$df_design) & df > diag$df_design
+# Boundary tolerance: Satterthwaite df land a few hundredths above the
+# design df on perfectly balanced fits (9.03 on a design of 9); only an
+# excess of more than 0.5 df is a real drift toward the cell level.
+.lmm_df_flag <- function(df, diag, tol = 0.5) {
+  flag <- is.finite(df) & is.finite(diag$df_design) & (df - diag$df_design) > tol
   note <- ifelse(flag, paste0(
     "Satterthwaite df exceed the replicate-level design df (ICC = ",
     formatC(diag$icc, digits = 3, format = "g"),

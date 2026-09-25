@@ -571,8 +571,11 @@ Fix. Every LMM row (vs-reference and all-pairwise, both paths) now carries
 `df`, `df_design = n_samples − n_groups` (the df a replicate-means t-test
 would have), `n_samples`, `singular` (`lme4::isSingular`), `re_var`,
 `resid_var`, `icc = re_var / (re_var + resid_var)`, `df_beyond_design` and
-`df_note`. A row is flagged whenever its Satterthwaite df exceed df_design,
-regardless of singularity — the motivating rows were not singular: on the
+`df_note`. A row is flagged whenever its Satterthwaite df exceed df_design
+by more than 0.5 (follow-up 2026-09-25: balanced fits land a few hundredths
+above design, e.g. 9.03 on 9, which is not drift; df are shown to two
+decimals so the reader can see that), regardless of singularity — the
+motivating rows were not singular: on the
 416k file the three Mitotic contrasts (867 cells) sit at df 15.7–16.9
 against a design df of 12 with ICC = 0.0076, while the three contrasts
 between the large phases sit at 9.4–10.3. The note reads "Satterthwaite df
@@ -632,6 +635,28 @@ reference titration already states it ("G1 and G2/M differ in DNA
 content and chromatin compaction as well as in mark level",
 `plumber.R` cell-cycle mode). Until then the phase / identity contrasts
 carry no such note.
+
+---
+
+## R27 — Statistics results must state their settings; the HTML report must not print UI hints or unrun sections
+Status: done (2026-09-25), from the browser check of audit/contrasts
+
+What changes. (1) The Statistics results table carries a header line with
+the comparison variable, reference level, stratification, the
+cells-as-replicates toggle and the run time; changing any of those greys
+the table (and the pairwise drill-down) behind a "settings changed — press
+Run" badge until Run is pressed, so a table can never be read against
+settings it was not computed with. (2) In the HTML report every chart
+clone gets a viewBox from its drawn size and fills the page width, so a
+volcano drawn in a narrow panel scales up instead of cramming its ticks;
+the volcano's x-axis tick count now follows its drawn width. (3)
+Interaction hints ("scroll = zoom · drag = pan", "hover for stats", "drag
+the blue lines") live in their own SVG text elements with class
+`ui-hint`, which the report strips; a stats container that only holds its
+"Click … to run" placeholder contributes nothing, so a section whose
+analysis was never run is omitted instead of printing the placeholder.
+Also in this follow-up: the R25 flag tolerates 0.5 df above design, and df
+are shown to two decimals.
 
 ---
 

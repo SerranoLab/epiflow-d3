@@ -61,6 +61,7 @@ const GatingPlot = {
       .attr('font-size', '11px').attr('fill', '#64748b')
       .text(`n = ${Number(data.n_cells).toLocaleString()} analyzed${shownStr} · filters: identity = ${fa.identity ?? 'All'}, cycle = ${fa.cell_cycle ?? 'All'}`);
     svg.append('text')
+      .attr('class', 'ui-hint')   // interaction hint; stripped from the HTML report
       .attr('x', totalW / 2).attr('y', 47).attr('text-anchor', 'middle')
       .attr('font-size', '10px').attr('fill', '#94a3b8')
       .text('Drag blue lines to adjust thresholds — statistics recompute on all cells when released');

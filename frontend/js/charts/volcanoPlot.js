@@ -57,7 +57,16 @@ const VolcanoPlot = {
       .attr('y', 32)
       .attr('text-anchor', 'middle')
       .attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text(`${contrast0 ? contrast0 + ' · ' : ''}Significant: p<0.05 & |β|>0.1 · scroll=zoom, drag=pan, right-click=toggle labels`);
+      .text(`${contrast0 ? contrast0 + ' · ' : ''}Significant: p<0.05 & |β|>0.1`);
+    // Interaction hint lives in its own element (class ui-hint) so the HTML
+    // report can strip it; it means nothing on paper.
+    svg.append('text')
+      .attr('class', 'ui-hint')
+      .attr('x', (width + margin.left + margin.right) / 2)
+      .attr('y', 44)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', '9px').attr('fill', '#cbd5e1')
+      .text('scroll = zoom · drag = pan · right-click = toggle labels');
 
     svg.append('defs').append('clipPath').attr('id', 'volcano-clip')
       .append('rect').attr('width', width).attr('height', height);
@@ -74,9 +83,13 @@ const VolcanoPlot = {
     const yScale = d3.scaleLinear()
       .domain([0, yMax]).range([height, 0]).nice();
 
+    // Tick count follows the drawn width: a chart rendered in a narrow panel
+    // (or a hidden tab) must not carry overlapping tick labels into the
+    // HTML report, which scales the SVG to full page width via its viewBox.
+    const xTicks = Math.max(4, Math.min(8, Math.floor(width / 80)));
     const xAxisG = g.append('g').attr('class', 'axis')
       .attr('transform', `translate(0,${height})`)
-      .call(d3.axisBottom(xScale).ticks(8));
+      .call(d3.axisBottom(xScale).ticks(xTicks));
 
     g.append('text')
       .attr('x', width / 2).attr('y', height + 40)
@@ -219,7 +232,7 @@ const VolcanoPlot = {
     // Note if labels were limited
     if (sigData.length > MAX_LABELS) {
       plotG.append('text')
-        .attr('class', 'label-note')
+        .attr('class', 'label-note ui-hint')
         .attr('x', width - 5).attr('y', height - 5)
         .attr('text-anchor', 'end').attr('font-size', '9px').attr('fill', '#94a3b8')
         .text(`Showing top ${MAX_LABELS} of ${sigData.length} significant — hover for all`);

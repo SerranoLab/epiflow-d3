@@ -222,7 +222,7 @@ const ForestPlot = {
             SE = ${d['std.error'].toFixed(4)}<br>
             95% CI: [${d.ci_lo.toFixed(3)}, ${d.ci_hi.toFixed(3)}]<br>
             p = ${fmtP(pVal)}<br>
-            ${Number.isFinite(Number(d.df)) ? `df = ${Number(d.df).toFixed(1)}${d.df_design != null ? ' (design ' + d.df_design + ')' : ''}${Number.isFinite(Number(d.icc)) ? ' · ICC = ' + Number(d.icc).toPrecision(3) : ''}<br>` : ''}
+            ${Number.isFinite(Number(d.df)) ? `df = ${Number(d.df).toFixed(2)}${d.df_design != null ? ' (design ' + d.df_design + ')' : ''}${Number.isFinite(Number(d.icc)) ? ' · ICC = ' + Number(d.icc).toPrecision(3) : ''}<br>` : ''}
             ${d.df_beyond_design === true ? `<span style="color:#fbbf24;">⚠ ${d.df_note || 'Satterthwaite df exceed the replicate-level design df'}</span><br>` : ''}
             ${d.cohens_d != null ? "d (β / pooled SD) = " + d.cohens_d.toFixed(3) : ''}
             ${d.n_cells ? '<br>n = ' + d.n_cells.toLocaleString() : ''}

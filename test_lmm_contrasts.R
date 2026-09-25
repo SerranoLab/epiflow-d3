@@ -134,11 +134,15 @@ flag_ok <- function(tbl, label) {
   need <- c("df", "df_design", "n_samples", "singular", "re_var", "resid_var", "icc", "df_beyond_design", "df_note")
   check(all(need %in% names(tbl)), sprintf("%s: rows carry %s", label, paste(need, collapse = ", ")))
   fl <- as.logical(tbl$df_beyond_design)
-  check(all(fl == (tbl$df > tbl$df_design)), sprintf("%s: flagged exactly when df > df_design (%d of %d rows)", label, sum(fl), nrow(tbl)))
+  check(all(fl == ((tbl$df - tbl$df_design) > 0.5)), sprintf("%s: flagged exactly when df - df_design > 0.5 (%d of %d rows)", label, sum(fl), nrow(tbl)))
   check(all(is.finite(tbl$df)), sprintf("%s: every df finite", label))
   check(all(!fl | (!is.na(tbl$df_note) & grepl("ICC = ", tbl$df_note))), sprintf("%s: every flagged row carries the note with its ICC", label))
   check(all(fl | is.na(tbl$df_note)), sprintf("%s: no unflagged row carries a note", label))
 }
+# Boundary tolerance: a balanced fit can land a few hundredths above design.
+diag9 <- list(df_design = 9, icc = 0.1)
+check(!.lmm_df_flag(9.03, diag9)$flag && !.lmm_df_flag(9.5, diag9)$flag && .lmm_df_flag(9.51, diag9)$flag && .lmm_df_flag(15.7, list(df_design = 12, icc = 0.0076))$flag,
+      "flag tolerance: df 9.03 / 9.5 on design 9 not flagged; 9.51 flagged; Mitotic-like 15.7 on 12 flagged")
 flag_ok(pw, "example identity-within-WT pairwise")
 flag_ok(vs, "example genotype vs-reference")
 check(isTRUE(all.equal(vs$df_design[1], 6 - 2)) && isTRUE(all.equal(pw$df_design[1], 9 - 3)),
