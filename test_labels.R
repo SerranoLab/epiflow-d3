@@ -48,5 +48,14 @@ check(has("README.md", "−log₁₀ BH-adjusted p") && has("USER_GUIDE.md", "�
 check(has("frontend/js/app.js", "The volcano plot shows β (arcsinh units) against −log₁₀ of the BH-adjusted p") && has("frontend/js/app.js", "the volcano against −log₁₀ of the BH-adjusted p"), "both Methods texts carry the volcano sentence")
 check(ver_of("volcanoPlot.js") >= "1.2.6" && ver_of("forestPlot.js") >= "1.2.8", "volcanoPlot / forestPlot cache-busting bumps")
 
+# ---- L5: overview summaries are labelled mean ± SD, not box-and-whisker ----
+cat("\n--- L5 overview mean ± SD labels ---\n")
+o <- "frontend/js/charts/overviewCharts.js"
+check(has(o, "arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range)", 2), "both overview y axes name mean ± SD on the arcsinh scale")
+check(lacks(o, "'Intensity (box = mean ± SD)'") && lacks(o, "'Intensity'"), "old 'Intensity' labels are gone")
+check(has("frontend/index.html", "not quartiles"), "overview heading says not quartiles")
+check(lacks("README.md", "box-and-whisker") && lacks("USER_GUIDE.md", "Box-and-whisker"), "README / USER_GUIDE no longer say box-and-whisker")
+check(ver_of("overviewCharts.js") >= "1.2.3", "overviewCharts.js cache-busting bump (>= 1.2.3)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

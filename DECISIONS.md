@@ -818,6 +818,16 @@ Nothing computes a fold change; x is the LMM β in arcsinh units and, until
 this pass, y was the unadjusted p. Docs now say "LMM β (arcsinh units) vs
 −log₁₀ BH-adjusted p" and the code plots p_adj.
 
+### L5 — Overview "box-and-whisker" summaries are mean ± SD, not quartiles
+Status: done (2026-09-25)
+
+`overviewCharts.js` draws box = mean ± 1 SD and whiskers = mean ± 2 SD
+clipped to the range; the payload (`plumber.R` marker_stats) carries no
+quantiles. Axis labels, the section heading, README and USER_GUIDE now say
+"mean ± SD … not quartiles" and name the arcsinh scale. A real quartile box
+(and splitting the overview by condition) stays the audit's feature request
+F1, not a label fix.
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

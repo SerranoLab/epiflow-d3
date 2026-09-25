@@ -96,7 +96,7 @@ Click **Apply Filters** after adjusting. The filtered cell count updates in the 
 Bird's-eye view of your dataset:
 - Cell counts by genotype, identity, replicate
 - Cell cycle distribution per genotype
-- Box-and-whisker marker summaries for each H3-PTM and phenotypic marker
+- Mean ± SD marker summaries for each H3-PTM and phenotypic marker (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to the range, dashed line = median; these are not quartile boxes, so a bimodal mark is not described by them)
 
 Check here first for data quality: unbalanced replicates, unexpected cell cycle distributions, or outlier markers.
 

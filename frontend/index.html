@@ -420,11 +420,11 @@
 
           <!-- Marker distribution overview -->
           <div class="overview-section" style="margin-top:16px;">
-            <h3>Marker Distribution Overview <span style="font-size:11px;color:#94a3b8;font-weight:400;">(median = dashed line, box = mean ± SD)</span> <button class="btn btn-sm" id="ov-markerdist-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+            <h3>Marker Distribution Overview <span style="font-size:11px;color:#94a3b8;font-weight:400;">(arcsinh intensity · median = dashed line · box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range — not quartiles)</span> <button class="btn btn-sm" id="ov-markerdist-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
             <div class="chart-container" id="overview-marker-dist" style="min-height:300px;"></div>
           </div>
           <div class="overview-section" style="margin-top:16px;">
-            <h3>Marker Distribution by Condition <span style="font-size:11px;color:#94a3b8;font-weight:400;">(median = dashed line, box = mean ± SD)</span> <button class="btn btn-sm" id="ov-markercond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+            <h3>Marker Distribution by Condition <span style="font-size:11px;color:#94a3b8;font-weight:400;">(arcsinh intensity · median = dashed line · box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range — not quartiles)</span> <button class="btn btn-sm" id="ov-markercond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
             <div class="chart-container" id="overview-marker-dist-cond" style="min-height:320px;"></div>
           </div>
 
@@ -1116,7 +1116,7 @@
   <script src="js/charts/gatingPlot.js?v=1.3.5"></script>
   <script src="js/charts/cellCyclePlot.js?v=1.2.2"></script>
   <script src="js/charts/correlationPlot.js?v=1.2.3"></script>
-  <script src="js/charts/overviewCharts.js?v=1.2.2"></script>
+  <script src="js/charts/overviewCharts.js?v=1.2.3"></script>
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.2"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>

@@ -14,7 +14,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 ## Features
 
 ### Data Exploration
-- **Overview dashboard** — cell counts by genotype, identity, replicate, and cell cycle with interactive bar charts and box-and-whisker marker summaries
+- **Overview dashboard** — cell counts by genotype, identity, replicate, and cell cycle with interactive bar charts and mean ± SD marker summaries (box = ± 1 SD, whiskers = ± 2 SD; not quartile boxes)
 - **Ridge plots** — kernel density distributions per marker across groups
 - **Violin plots** — grouped violins with embedded box plots, median lines, and inline statistics (LMM p-values, d = β / cell-level pooled SD)
 - **Heatmap** — clustered mean-expression heatmap across all H3-PTMs and groups

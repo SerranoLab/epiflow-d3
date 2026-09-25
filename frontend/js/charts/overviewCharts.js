@@ -134,7 +134,7 @@ const OverviewCharts = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -45)
       .attr('text-anchor', 'middle').attr('font-size', '11px').attr('fill', '#64748b')
-      .text('Intensity (box = mean ± SD)');
+      .text('arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range)');   // L5: not quartiles
 
     // Box-whisker for each marker
     allStats.forEach(d => {
@@ -500,7 +500,7 @@ const OverviewCharts = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -45)
       .attr('text-anchor', 'middle').attr('font-size', '11px').attr('fill', '#64748b')
-      .text('Intensity');
+      .text('arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range)');   // L5: not quartiles
 
     // Draw per-condition box-whiskers
     allStats.forEach(d => {
