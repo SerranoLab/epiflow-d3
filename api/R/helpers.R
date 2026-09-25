@@ -420,10 +420,11 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
         (value - .center) / .scale, value)) %>%
       dplyr::select(-.center, -.scale)
   }
+  # L14: same wording as the scale toggle and the help text in index.html.
   x_label <- if (identical(scale_mode, "robust")) {
-    "Standardized intensity (per-marker, median/MAD)"
+    "standardized per marker (median / MAD; MAD = median absolute deviation)"
   } else {
-    "arcsinh intensity"
+    "arcsinh intensity (as imported)"
   }
 
   dens <- function(v) {

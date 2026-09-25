@@ -168,5 +168,12 @@ hv <- tryCatch({ con <- url(paste0(Sys.getenv("EPIFLOW_API", "http://127.0.0.1:8
 if (is.na(hv)) cat("  [SKIP] API not reachable; health-version check skipped\n") else check(identical(hv, ver_src), sprintf("/api/health version (%s) equals EPIFLOW_VERSION in plumber.R (%s)", hv, ver_src))
 check(ver_of("js/api.js") >= "1.2.5" && ver_of("js/app.js") >= "1.3.20", "api.js / app.js cache-busting bumps")
 
+# ---- L14: ridge scale toggle, axis label and help text use one wording ----
+cat("\n--- L14 ridge scale wording ---\n")
+s_std <- "standardized per marker (median / MAD; MAD = median absolute deviation)"; s_raw <- "arcsinh intensity (as imported)"
+check(has("frontend/index.html", s_std, 2) && has("frontend/index.html", s_raw, 2), "toggle options and help text carry both scale labels")
+check(has("api/R/helpers.R", paste0('"', s_std, '"')) && has("api/R/helpers.R", paste0('"', s_raw, '"')), "helpers.R x_label strings match the toggle")
+check(lacks("frontend/index.html", "raw (arcsinh)") && lacks("frontend/index.html", "per-marker (median/MAD)") && lacks("api/R/helpers.R", "Standardized intensity (per-marker, median/MAD)"), "old 'raw (arcsinh)' / 'per-marker (median/MAD)' labels are gone")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
