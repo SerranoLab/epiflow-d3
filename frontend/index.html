@@ -466,14 +466,14 @@
               <option value="raw">Scale: raw (arcsinh)</option>
             </select>
           </div>
-          <div class="help-panel"><i class="fas fa-info-circle"></i> Ridge plots show full H3-PTM intensity distributions. <strong>Tip:</strong> Group by Identity, color by Genotype to reveal population-specific epigenetic shifts — overlapping curves show direct WT vs mutant comparisons within each cell population.</div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Ridge plots show full H3-PTM arcsinh-intensity distributions (values are arcsinh-transformed at import). <strong>Tip:</strong> Group by Identity, color by Genotype to reveal population-specific epigenetic shifts — overlapping curves show direct WT vs mutant comparisons within each cell population.</div>
           <div class="chart-container" id="ridge-chart"></div>
         </div>
 
         <!-- Violin -->
         <div class="tab-panel" id="panel-violin">
           <div class="panel-header">
-            <h2>Marker Expression</h2>
+            <h2>Marker Distributions (arcsinh intensity)</h2>
             <div class="panel-controls">
               <select id="violin-marker" class="select-input"></select>
               <select id="violin-groupby" class="select-input">
@@ -742,7 +742,7 @@
                 <option value="replicate">Color: Replicate</option>
                 <option value="identity">Color: Identity</option>
                 <option value="cell_cycle">Color: Cell Cycle</option>
-                <optgroup label="── Marker Intensity ──" id="umap-marker-options"></optgroup>
+                <optgroup label="── Marker (arcsinh intensity) ──" id="umap-marker-options"></optgroup>
               </select>
               <select id="umap-dot-size" class="select-input" style="width:auto;">
                 <option value="1">Dots: Tiny</option>
@@ -767,7 +767,7 @@
           </div>
           <div class="help-panel"><i class="fas fa-info-circle"></i>
             UMAP preserves local neighborhoods to reveal cell population structure.
-            Select a <strong>marker</strong> from the color dropdown to see fluorescence intensity (FeaturePlot).
+            Select a <strong>marker</strong> from the color dropdown to see its arcsinh intensity (FeaturePlot).
             Toggle <strong>Split</strong> to compare genotypes side-by-side on the same embedding.
             <em>Re-coloring uses cached data — no need to re-run.</em>
           </div>
@@ -1106,7 +1106,7 @@
   <script src="js/utils/titrationHelp.js?v=1.2.2"></script>
   <script src="js/api.js?v=1.2.4"></script>
   <script src="js/dataManager.js?v=1.2.2"></script>
-  <script src="js/charts/ridgePlot.js?v=1.2.3"></script>
+  <script src="js/charts/ridgePlot.js?v=1.2.4"></script>
   <script src="js/charts/violinPlot.js?v=1.2.5"></script>
   <script src="js/charts/pcaPlot.js?v=1.2.2"></script>
   <script src="js/charts/heatmap.js?v=1.2.3"></script>
@@ -1121,6 +1121,6 @@
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.4"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.17"></script>
+  <script src="js/app.js?v=1.3.18"></script>
 </body>
 </html>

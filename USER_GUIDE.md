@@ -48,7 +48,7 @@ The converter handles column detection, metadata extraction from OMIQ filenames,
 | `identity` | Cell population / gate | G0G1, G2 Phase |
 | `cell_cycle` | Cell cycle phase | G0/G1, S, G2/M, M |
 | `H3PTM` | Histone modification name | H3K27ac, H3K4me1 |
-| `value` | Fluorescence intensity | 5.83, 6.12 |
+| `value` | arcsinh-transformed fluorescence intensity (transformed before export; every statistic runs on this scale) | 5.83, 6.12 |
 
 **Optional columns:** `FxCycle`, `phH3`, `timepoint`, `condition`, `cell_type`, and any numeric phenotypic markers (PAX6, Ki67, NeuN, etc.). These appear as additional grouping/stratification variables throughout the platform.
 

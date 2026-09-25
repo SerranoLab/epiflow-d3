@@ -153,7 +153,7 @@ const RidgePlot = {
       .attr('text-anchor', 'middle')
       .attr('fill', '#64748b')
       .attr('font-size', '12px')
-      .text(data.x_label || (data.marker + ' intensity'));
+      .text(data.x_label || (data.marker + ' (arcsinh intensity)'));   // L13: the payload's x_label names the scale; so does the fallback
 
     // Tooltip
     const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])

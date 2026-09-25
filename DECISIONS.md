@@ -911,6 +911,19 @@ the R28 per-stratum note names the set; the standalone card's help text
 says why the two numbers can differ. R15 (make the card a shortcut into
 the panel) stays open.
 
+### L13 — Axis labels, headings and schema docs said "intensity" / "expression" for arcsinh-transformed values
+Status: done (2026-09-25), from the arcsinh scale audit (see R21 for the data contract)
+
+Data enter EpiFlow already arcsinh-transformed; the ridge payload's
+`x_label` said so but its frontend fallback, both overview axes, the
+"Marker Expression" heading, the UMAP colour menu and help, the README
+heatmap line and the schema tables did not. All now say "arcsinh
+intensity" (schema: "arcsinh-transformed fluorescence intensity"), the
+README describes the heatmap as z-scored group means, both Methods texts
+open with the scale sentence, and the cell-cycle reference comment in
+`plumber.R` no longer calls the values "raw". Stamping the transform and
+cofactor on the file stays R21.
+
 The headline runs on all H3-PTM markers (`cvFeatures`, `runDiagnostic`)
 while the standalone "Diagnostic test — grouped CV" card on the same tab
 runs on the ticked features with its own model dropdown, and the two report

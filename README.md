@@ -17,7 +17,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 - **Overview dashboard** — cell counts by genotype, identity, replicate, and cell cycle with interactive bar charts and mean ± SD marker summaries (box = ± 1 SD, whiskers = ± 2 SD; not quartile boxes)
 - **Ridge plots** — kernel density distributions per marker across groups
 - **Violin plots** — grouped violins with embedded box plots, median lines, and inline statistics (LMM p-values, d = β / cell-level pooled SD)
-- **Heatmap** — clustered mean-expression heatmap across all H3-PTMs and groups
+- **Heatmap** — clustered heatmap of group means per marker, z-scored across the groups shown, for all H3-PTMs
 
 ### Statistical Analysis
 - **Linear mixed models (LMM)** — `value ~ group + (1|replicate)` with Benjamini-Hochberg correction, accounting for cell-level nesting within biological replicates
@@ -119,7 +119,7 @@ EpiFlow expects an `.rds` file containing a data frame in long format with colum
 | `replicate` | Biological replicate identifier |
 | `cell_cycle` | Cell cycle phase (G1, S, G2M) |
 | `H3PTM` | Histone modification name |
-| `value` | Fluorescence intensity |
+| `value` | arcsinh-transformed fluorescence intensity (transformed before export; every statistic runs on this scale) |
 
 Additional phenotypic marker columns (wide format) are automatically detected and included in analyses.
 

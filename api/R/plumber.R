@@ -1541,7 +1541,7 @@ function(session_id, req) {
     ph_lo <- p$cc_low;  if (is.null(ph_lo)) ph_lo <- c("G0/G1")
     lab_hi <- paste(ph_hi, collapse = "/"); lab_lo <- paste(ph_lo, collapse = "/")
     matched_dna <- setequal(ph_hi, "M") && setequal(ph_lo, "G2")   # both ~4N, copy number cancels
-    # Raw phase-resolved intensity (no normalization): cell-cycle changes, including
+    # Un-standardized arcsinh intensity per phase (no per-marker rescaling): cell-cycle changes, including
     # DNA amount and chromatin compaction, are biology the user should see (per the paper).
     results <- lapply(markers, function(m) {
       sw <- titration_sweep(d, m, pos_ids = ph_hi, neg_ids = ph_lo, ref_col = "cell_cycle",

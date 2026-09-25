@@ -119,5 +119,16 @@ check(has(a, "' selected features</strong>"), "standalone card prints its own fe
 check(has("frontend/index.html", "each result states its feature set"), "standalone help says why the two numbers can differ")
 check(ver_of("js/app.js") >= "1.3.17", "app.js cache-busting bump (>= 1.3.17)")
 
+# ---- L13: intensity labels name the arcsinh scale ----
+cat("\n--- L13 arcsinh intensity labels ---\n")
+check(has("frontend/js/charts/ridgePlot.js", "data.marker + ' (arcsinh intensity)'") && lacks("frontend/js/charts/ridgePlot.js", "data.marker + ' intensity'"), "ridge x-axis fallback names the arcsinh scale")
+check(has("frontend/index.html", "<h2>Marker Distributions (arcsinh intensity)</h2>") && lacks("frontend/index.html", "<h2>Marker Expression</h2>"), "violin heading names the arcsinh intensity")
+check(has("frontend/index.html", "── Marker (arcsinh intensity) ──") && lacks("frontend/index.html", "fluorescence intensity (FeaturePlot)"), "UMAP colour menu and help name the arcsinh intensity")
+check(has("README.md", "arcsinh-transformed fluorescence intensity") && has("USER_GUIDE.md", "arcsinh-transformed fluorescence intensity") && lacks("README.md", "| Fluorescence intensity |") && lacks("USER_GUIDE.md", "| Fluorescence intensity |"), "schema tables say arcsinh-transformed fluorescence intensity")
+check(lacks("README.md", "mean-expression heatmap"), "README heatmap line no longer says mean-expression")
+check(has(a, "All marker intensities enter EpiFlow arcsinh-transformed") && has(a, "intensities were arcsinh-transformed before import"), "both Methods texts open with the scale sentence")
+check(lacks("api/R/plumber.R", "Raw phase-resolved intensity"), "plumber.R comment no longer calls arcsinh values raw")
+check(ver_of("ridgePlot.js") >= "1.2.4" && ver_of("js/app.js") >= "1.3.18", "ridgePlot / app cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
