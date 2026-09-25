@@ -114,7 +114,7 @@ Violin plots of the arcsinh intensity with embedded box plots and median lines. 
 
 ### Heatmap
 
-Clustered mean-expression heatmap across all H3-PTMs. Shows all markers simultaneously — easy to spot coordinate epigenetic landscape changes.
+Clustered heatmap of group means of per-cell mark intensity, z-scored per marker across the groups shown (with two groups every cell is ±0.71 — read the sign, not the size). Shows all markers at once, so marks that move together between groups stand out.
 
 ---
 
@@ -220,9 +220,9 @@ Classification with train/test split (70/30), feature importance, ROC/AUC, and c
 
 XGBoost-based classification — same interface, often higher accuracy on complex signatures. Also auto-subsampled at 50K.
 
-### Epigenetic Signatures
+### H3-PTM Intensity Signatures
 
-Group-specific H3-PTM z-score profiles. Identifies the marker signature defining each group — useful for biomarker discovery.
+Group-specific profiles of mean per-cell mark intensity, z-scored per marker (group mean − global cell mean, over the global cell SD). Shows which marks are higher or lower in each group — a per-cell intensity profile, useful as a starting point for biomarker candidates.
 
 ### Diagnostic Assessment
 

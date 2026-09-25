@@ -201,5 +201,16 @@ if (is.null(live)) cat("  [SKIP] API not reachable; live ridge-n check skipped\n
   check(length(sg_n) == 2 && all(sg_n == n_total / n_groups), sprintf("single-marker ridge: n per genotype = %s", paste(sg_n, collapse = ", ")))
 }
 
+# ---- L16: per-cell mark intensity, not "epigenetic shifts / signatures"; no "WT vs mutant" in generic text ----
+cat("\n--- L16 per-cell mark intensity wording ---\n")
+for (d in c("frontend/index.html", "README.md", "USER_GUIDE.md")) {
+  dl <- tolower(lines_of(d))
+  check(!any(grepl("epigenetic shift", dl, fixed = TRUE)) && !any(grepl("epigenetic signature", dl, fixed = TRUE)) && !any(grepl("wt vs mutant", dl, fixed = TRUE)) && !any(grepl("mutant", dl, fixed = TRUE)),
+        sprintf("%s: no 'epigenetic shift/signature', 'WT vs mutant' or 'mutant'", d))
+}
+check(has("frontend/index.html", "overlapping curves show the between-group difference in per-cell mark intensity for that population"), "ridge tip names per-cell mark intensity")
+check(has("README.md", "mean per-cell mark intensity") && has("USER_GUIDE.md", "mean per-cell mark intensity"), "README and USER_GUIDE signatures lines say mean per-cell mark intensity")
+check(lacks("USER_GUIDE.md", "epigenetic landscape") && lacks("USER_GUIDE.md", "mean-expression heatmap"), "USER_GUIDE heatmap line no longer says mean-expression / epigenetic landscape")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

@@ -466,7 +466,7 @@
               <option value="raw">Scale: arcsinh intensity (as imported)</option>
             </select>
           </div>
-          <div class="help-panel"><i class="fas fa-info-circle"></i> Ridge plots show full H3-PTM distributions on one of two scales: <strong>arcsinh intensity (as imported)</strong>, or <strong>standardized per marker (median / MAD; MAD = median absolute deviation)</strong> — each marker centred on its pooled median and scaled by its pooled MAD, so curves of different marks share one axis while between-condition shifts are preserved. <strong>Tip:</strong> Group by Identity, color by Genotype to reveal population-specific epigenetic shifts — overlapping curves show direct WT vs mutant comparisons within each cell population.</div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> Ridge plots show H3-PTM distributions as <strong>arcsinh intensity (as imported)</strong> or <strong>standardized per marker (median / MAD; MAD = median absolute deviation)</strong> — the standardized scale centres each marker on its pooled median so different marks share one axis. <strong>Tip:</strong> group by Identity and colour by your comparison variable to compare H3-PTM levels within each cell population; overlapping curves show the between-group difference in per-cell mark intensity for that population.</div>
           <div class="chart-container" id="ridge-chart"></div>
         </div>
 

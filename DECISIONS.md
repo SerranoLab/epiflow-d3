@@ -1010,6 +1010,21 @@ and "MAD" was unexpanded. The toggle, the backend `x_label` (`helpers.R`
 "arcsinh intensity (as imported)" and "standardized per marker (median /
 MAD; MAD = median absolute deviation)". Static checks in `test_labels.R`.
 
+### L16 — Help text and docs said "epigenetic shifts / signatures" and "WT vs mutant"; the app measures per-cell mark intensity
+Status: done (2026-09-25), on main after v1.4.2, from the ridge browser check
+
+Rule: the app measures per-cell H3-PTM mark intensity, and the text says
+so — no claim of an "epigenetic" state, and no dataset-specific
+vocabulary ("WT vs mutant") in generic help. Hits and fixes: ridge help
+(`index.html`) shortened to one scale sentence plus the tip "group by
+Identity and colour by your comparison variable to compare H3-PTM levels
+within each cell population; overlapping curves show the between-group
+difference in per-cell mark intensity for that population"; README feature
+line "Epigenetic signatures" → "H3-PTM intensity signatures — group-specific
+profiles of mean per-cell mark intensity, z-scored per marker"; USER_GUIDE
+section "Epigenetic Signatures" retitled and reworded the same way. Static
+checks in `test_labels.R`.
+
 ### L15 — Ridge subtitle "n" counts long-format rows (cells × markers), not cells
 Status: done (2026-09-25), branch fix/ridge-labels, from the v1.4.1 browser check
 

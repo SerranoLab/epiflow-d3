@@ -35,7 +35,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 
 ### Machine Learning
 - **Random Forest & Gradient Boosted Models** — classification with train/test split, feature importance ranking, ROC/AUC, and confusion matrices
-- **Epigenetic signatures** — group-specific H3-PTM signature extraction with z-score heatmaps
+- **H3-PTM intensity signatures** — group-specific profiles of mean per-cell mark intensity, z-scored per marker, as heatmaps
 - **Diagnostic assessment** — grouped sample-level CV (leave-one-sample-out up to 10 samples, grouped 5-fold above; optionally per stratum, with a not-estimable guard), exact PERMANOVA on per-replicate profiles, LDA (exploratory), LMM consistency matrices, stratified signatures, and k-means cluster validation
 
 ### Export & Reporting
