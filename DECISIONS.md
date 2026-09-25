@@ -860,6 +860,16 @@ now carries `resolution`; both scatter titles (`app.js`, `clusterPlot.js`)
 read "Louvain clustering — 7 clusters found (resolution 1.0)" for
 Louvain/Leiden and keep "k = 7" for k-means and hierarchical.
 
+### L9 — Cluster colors were twenty Tailwind hues with red next to green
+Status: done (2026-09-25)
+
+`palettes.js` now defines `CLUSTER_PALETTE_20` = Okabe-Ito (Wong 2011, 8)
+followed by Paul Tol's muted 9 and three of Tol's light set;
+`EXTENDED_CATEGORICAL_20` is an alias, so every categorical fallback with
+more than 8 levels uses it too. Both cluster scatters (`clusterPlot.js`,
+`app.js`) draw from it, and whenever more than 8 clusters are shown the
+legend says "clusters 9+ use the Tol extension of Okabe-Ito".
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

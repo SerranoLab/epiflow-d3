@@ -1444,10 +1444,7 @@ const App = {
       if (!isNaN(na) && !isNaN(nb)) return na - nb;
       return a.localeCompare(b);
     });
-    const clusterColors = ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6',
-      '#ec4899','#14b8a6','#f97316','#6366f1','#84cc16',
-      '#06b6d4','#a855f7','#64748b','#d946ef','#0ea5e9',
-      '#22d3ee','#fb923c','#a3e635','#c084fc','#fbbf24'];
+    const clusterColors = CLUSTER_PALETTE_20;   // L9: Okabe-Ito 8 + Tol extension (palettes.js)
     var colorScale2 = colorBy === 'cluster'
       ? d3.scaleOrdinal().domain(groups).range(clusterColors)
       : (function() { try { return getColorScale(colorBy, groups, DataManager.serverPalette); }
@@ -1471,6 +1468,10 @@ const App = {
       lg.append('text').attr('x', 14).attr('y', 4).attr('font-size', '10px').attr('fill', '#475569')
         .text(String(gr).length > 16 ? String(gr).slice(0, 14) + '\u2026' : String(gr));
     });
+    if (colorBy === 'cluster' && groups.length > OKABE_ITO.length) {
+      legendG2.append('text').attr('x', 0).attr('y', 14 + Math.min(groups.length, 20) * 14 + 4)
+        .attr('font-size', '9px').attr('fill', '#94a3b8').text(CLUSTER_PALETTE_NOTE);
+    }
   },
 
   _showIdentityHelper(clusters) {

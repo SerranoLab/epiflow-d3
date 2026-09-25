@@ -26,14 +26,19 @@ const EpiFlowPalettes = {
   }
 };
 
-// FIX C: Extended 20-color palette for identity/large categorical variables
-// Combines maximally-distinct hues so 11+ categories never repeat
-const EXTENDED_CATEGORICAL_20 = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
-  '#06b6d4', '#a855f7', '#64748b', '#d946ef', '#0ea5e9',
-  '#22d3ee', '#fb923c', '#a3e635', '#c084fc', '#fbbf24'
+// L9: colorblind-safe 20-color categorical palette — Okabe-Ito (Wong 2011)
+// for the first 8 categories, then Paul Tol's "muted" 9 and three of Tol's
+// "light" set. Replaces the Tailwind hues (red next to green). Used for
+// clusters and any categorical variable with more than 8 levels; a legend
+// that goes past 8 says so.
+const OKABE_ITO = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442', '#56B4E9', '#E69F00', '#999999'];
+const TOL_EXTENSION = [
+  '#332288', '#88CCEE', '#44AA99', '#117733', '#999933', '#DDCC77', '#CC6677', '#882255', '#AA4499',   // Tol muted
+  '#77AADD', '#EE8866', '#EEDD88'                                                                          // Tol light
 ];
+const CLUSTER_PALETTE_20 = [...OKABE_ITO, ...TOL_EXTENSION];
+const CLUSTER_PALETTE_NOTE = 'clusters 9+ use the Tol extension of Okabe-Ito';
+const EXTENDED_CATEGORICAL_20 = CLUSTER_PALETTE_20;
 
 // Active palette (mutable)
 let activePalette = 'Ocean & Earth';

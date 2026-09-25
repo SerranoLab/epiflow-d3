@@ -69,9 +69,7 @@ const ClusterPlot = {
     const yScale = d3.scaleLinear().domain([yExtent[0] - yPad, yExtent[1] + yPad]).range([height, 0]);
 
     const groups = [...new Set(viz.map(d => String(d[colorBy] || '')))].sort();
-    const clusterColors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-                           '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
-                           '#06b6d4', '#a855f7', '#64748b', '#d946ef', '#0ea5e9'];
+    const clusterColors = CLUSTER_PALETTE_20;   // L9: Okabe-Ito 8 + Tol extension (palettes.js)
     const colorScale = colorBy === 'cluster'
       ? d3.scaleOrdinal().domain(groups).range(clusterColors)
       : (() => { try { return getColorScale(colorBy, groups, DataManager.serverPalette); }
@@ -98,6 +96,10 @@ const ClusterPlot = {
       lg.append('text').attr('x', 14).attr('y', 4).attr('font-size', '10px').attr('fill', '#475569')
         .text(String(gr).length > 16 ? String(gr).slice(0, 14) + '…' : String(gr));
     });
+    if (colorBy === 'cluster' && groups.length > OKABE_ITO.length) {
+      legendG.append('text').attr('x', 0).attr('y', 14 + Math.min(groups.length, 15) * 16 + 4)
+        .attr('font-size', '9px').attr('fill', '#94a3b8').text(CLUSTER_PALETTE_NOTE);
+    }
   },
 
   // =========================================================================

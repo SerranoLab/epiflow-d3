@@ -80,5 +80,14 @@ check(has("frontend/js/charts/clusterPlot.js", "clusters found (resolution") && 
 check(has("frontend/js/app.js", "clusters found (resolution") && lacks("frontend/js/app.js", "' Clustering (k=' + data.n_clusters"), "app.js scatter title: clusters found (resolution …) for graph methods")
 check(ver_of("clusterPlot.js") >= "1.2.3" && ver_of("js/app.js") >= "1.3.13", "clusterPlot.js / app.js cache-busting bumps")
 
+# ---- L9: cluster colors are colorblind-safe and the legend says when the Tol extension is used ----
+cat("\n--- L9 cluster palette ---\n")
+p <- "frontend/js/utils/palettes.js"
+check(has(p, "const CLUSTER_PALETTE_20 = [...OKABE_ITO, ...TOL_EXTENSION];") && has(p, "const EXTENDED_CATEGORICAL_20 = CLUSTER_PALETTE_20;"), "palettes.js defines CLUSTER_PALETTE_20 (Okabe-Ito + Tol) and aliases the extended fallback to it")
+check(lacks(p, "'#ef4444'") && lacks("frontend/js/charts/clusterPlot.js", "'#ef4444'") && lacks("frontend/js/app.js", "'#ef4444'"), "no Tailwind red (#ef4444) cluster color remains")
+check(has("frontend/js/charts/clusterPlot.js", "const clusterColors = CLUSTER_PALETTE_20;") && has("frontend/js/app.js", "const clusterColors = CLUSTER_PALETTE_20;"), "both cluster scatters use CLUSTER_PALETTE_20")
+check(has("frontend/js/charts/clusterPlot.js", ".text(CLUSTER_PALETTE_NOTE)") && has("frontend/js/app.js", ".text(CLUSTER_PALETTE_NOTE)"), "both legends print the Tol-extension note when more than 8 clusters are drawn")
+check(ver_of("palettes.js") >= "1.3.1" && ver_of("clusterPlot.js") >= "1.2.4" && ver_of("js/app.js") >= "1.3.14", "palettes / clusterPlot / app cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
