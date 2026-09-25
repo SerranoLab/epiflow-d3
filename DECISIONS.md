@@ -851,6 +851,15 @@ and a footnote states that a dashed component is drawn taller than fitted.
 The threshold and the fractions positive are unaffected (they use the fit,
 not the drawn curve).
 
+### L8 — Cluster scatter title said "k = n" for Louvain and Leiden
+Status: done (2026-09-25)
+
+For the graph methods the cluster count is an outcome of the resolution
+(`phase3.R` `cluster_louvain(resolution = …)`), not an input. The payload
+now carries `resolution`; both scatter titles (`app.js`, `clusterPlot.js`)
+read "Louvain clustering — 7 clusters found (resolution 1.0)" for
+Louvain/Leiden and keep "k = 7" for k-means and hierarchical.
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

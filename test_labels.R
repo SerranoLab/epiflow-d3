@@ -72,5 +72,13 @@ check(has("frontend/js/charts/positivityPlot.js", "for visibility)") && lacks("f
 check(has("frontend/js/charts/positivityPlot.js", "drawn taller than fitted"), "legend footnote says the component is drawn taller than fitted")
 check(ver_of("positivityPlot.js") >= "1.2.3", "positivityPlot.js cache-busting bump (>= 1.2.3)")
 
+# ---- L8: graph-clustering titles report clusters found at a resolution, not k ----
+cat("\n--- L8 cluster titles ---\n")
+check(has("api/R/phase3.R", "resolution = resolution,"), "phase3.R clustering payload carries resolution")
+# The k-means diagnostic card legitimately says "K-Means Clustering (k=…)"; only the scatter titles are checked.
+check(has("frontend/js/charts/clusterPlot.js", "clusters found (resolution") && lacks("frontend/js/charts/clusterPlot.js", "Clustering (k=${data.n_clusters})"), "clusterPlot.js scatter title: clusters found (resolution …) for graph methods")
+check(has("frontend/js/app.js", "clusters found (resolution") && lacks("frontend/js/app.js", "' Clustering (k=' + data.n_clusters"), "app.js scatter title: clusters found (resolution …) for graph methods")
+check(ver_of("clusterPlot.js") >= "1.2.3" && ver_of("js/app.js") >= "1.3.13", "clusterPlot.js / app.js cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

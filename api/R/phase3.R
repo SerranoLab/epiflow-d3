@@ -518,6 +518,7 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     cross_identity = cross_identity,
     n_clusters = n_clusters,
     method = method,
+    resolution = resolution,   # L8: for Louvain/Leiden the cluster count is an outcome of this, not an input
     method_note = method_note,
     silhouette = sil_val,
     subsampled = subsampled,

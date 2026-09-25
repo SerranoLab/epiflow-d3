@@ -1415,10 +1415,15 @@ const App = {
     const xLabel = hasUMAP ? 'UMAP1' : 'PC1';
     const yLabel = hasUMAP ? 'UMAP2' : 'PC2';
     const colorLabel = colorBy === 'cluster_identity' ? 'named identity' : colorBy;
+    // L8: Louvain/Leiden find their cluster count from the resolution; k is an input only for k-means/hierarchical.
+    const isGraphMethod = /louvain|leiden/i.test(String(data.method));
+    const kText = isGraphMethod
+      ? data.n_clusters + ' clusters found (resolution ' + (data.resolution != null ? Number(data.resolution) : '?') + ')'
+      : 'k = ' + data.n_clusters;
     svg.append('text').attr('class', 'chart-title')
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 18)
       .attr('text-anchor', 'middle').attr('font-size', '13px').attr('font-weight', '600')
-      .text(data.method + ' Clustering (k=' + data.n_clusters + ') \u2014 ' + colorLabel);
+      .text(data.method + ' clustering \u2014 ' + kText + ' \u2014 ' + colorLabel);
     const clAnalyzed = data.n_cells || 0;
     const clShown = data.n_displayed || clAnalyzed;
     const clCount = (clShown < clAnalyzed)

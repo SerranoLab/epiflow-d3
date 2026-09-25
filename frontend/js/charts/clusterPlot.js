@@ -50,10 +50,16 @@ const ClusterPlot = {
       .style('display', 'block').style('margin', '0 auto');
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
+    // L8: for Louvain/Leiden the number of clusters is an outcome of the
+    // resolution, not an input k; only k-means/hierarchical take k.
+    const isGraphMethod = /louvain|leiden/i.test(String(data.method));
+    const kText = isGraphMethod
+      ? `${data.n_clusters} clusters found (resolution ${data.resolution != null ? Number(data.resolution) : '?'})`
+      : `k = ${data.n_clusters}`;
     svg.append('text').attr('class', 'chart-title')
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 18)
       .attr('text-anchor', 'middle').attr('font-size', '13px').attr('font-weight', '600')
-      .text(`${data.method} Clustering (k=${data.n_clusters}) — colored by ${colorBy}`);
+      .text(`${data.method} clustering — ${kText} — colored by ${colorBy}`);
     svg.append('text')
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 32)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#94a3b8')
