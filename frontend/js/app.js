@@ -2369,7 +2369,10 @@ const App = {
       box.innerHTML =
         '<div style="margin-bottom:6px;padding:6px 10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:11px;color:#065f46;">' +
         '<strong>' + String(data.method || '').toUpperCase() + '</strong> \u00b7 ' + data.cv_type + ' \u00b7 ' +
-        data.n_samples + ' biological samples (' + spc + ') \u00b7 splits by sample, not cell</div>' +
+        data.n_samples + ' biological samples (' + spc + ') \u00b7 splits by sample, not cell<br>' +
+        // L12: this card runs on the ticked features; the Diagnostic headline runs on all H3-PTM markers.
+        'Feature set: <strong>' + (ensureArray(data.features_used).length || '?') + ' selected features</strong> \u2014 ' +
+        (ensureArray(data.features_used).join(', ') || '\u2014') + ' (the Diagnostic headline above uses all H3-PTM markers with LDA, so the two can differ)</div>' +
         '<table class="stats-table">' +
         '<tr><th>Metric</th><th>Value</th></tr>' +
         '<tr><td>Sample-level accuracy (majority vote)</td><td><strong>' + pct(data.sample_accuracy) + '</strong></td></tr>' +
@@ -2825,6 +2828,7 @@ const App = {
       held-out cell accuracy ${pct(cv.test_accuracy)} · balanced accuracy ${pct(cv.balanced_accuracy)} ·
       macro F1 ${Number.isFinite(Number(cv.macro_f1)) ? Number(cv.macro_f1).toFixed(3) : '—'} · per-class recall ${recalls}
     </p>
+    <p style="font-size:11px;color:#64748b;margin:4px 0 0;">Feature set: <strong>${ensureArray(cv.features_used).length || '?'} features</strong> — ${ensureArray(cv.features_used).join(', ') || '—'} (the standalone grouped-CV card below runs on the ticked features and its own model, so its number can differ).</p>
     <p style="font-size:10px;color:#94a3b8;margin:4px 0 0;">With this few samples the interval is the finding: a feasibility estimate, not validation.</p>`;
     html += this.renderStratifiedGroupedCv(cv.stratified);
     el.innerHTML = html;

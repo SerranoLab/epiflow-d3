@@ -974,6 +974,7 @@
             <h3 class="ml-panel-title"><i class="fas fa-vials"></i> Diagnostic test — grouped CV (sample-level; split type shown in the result)</h3>
             <div class="help-panel" style="margin-bottom:12px;"><i class="fas fa-info-circle"></i>
               The rigorous predictive test: holds out <strong>whole biological samples</strong> (not cells), so accuracy reflects generalization to a <strong>new sample</strong>. Needs at least 2 samples per class or it declines. <strong>Sample-level accuracy</strong> (majority vote per held-out sample) is the diagnostic-relevant number.
+              This card runs on the <strong>features ticked above</strong> and the model chosen here; the Diagnostic headline runs on all H3-PTM markers with LDA, so the two numbers can differ — each result states its feature set.
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
               <label style="font-size:12px;">Model:
@@ -1120,6 +1121,6 @@
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.4"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.16"></script>
+  <script src="js/app.js?v=1.3.17"></script>
 </body>
 </html>

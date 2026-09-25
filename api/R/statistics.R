@@ -1557,7 +1557,8 @@ run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
       stratified <- list(
         stratify_by = stratify_by, strata = rows,
         n_estimable = sum(vapply(rows, function(r) isTRUE(r$estimable), logical(1))),
-        note = paste0("Same leave-one-sample-out CV inside each ", stratify_by, " level. At this ",
+        note = paste0("Same grouped CV inside each ", stratify_by, " level, on the same ",
+                      length(predictor_cols), " features (", paste(predictor_cols, collapse = ", "), "). At this ",
                       "few replicates a per-stratum row says which cell states carry the signal, ",
                       "not a diagnostic accuracy; each CI is on that stratum's own n samples. ",
                       "Top features are ", .epiflow_lda_weight_label, "."))
@@ -1566,7 +1567,10 @@ run_diagnostic_cv <- function(data, target_var = "genotype", method = "rf",
 
   c(list(method = method, target_var = target_var,
          classes = levels(wide$.target), n_classes = nlevels(wide$.target),
-         importance = importance, importance_type = importance_type, n_cells_used = nrow(wide)),
+         importance = importance, importance_type = importance_type, n_cells_used = nrow(wide),
+         # L12: the feature set the CV ran on, so a card can say it (the headline
+         # and the standalone card can run on different sets and differ).
+         features_used = safe_I(predictor_cols), n_features = length(predictor_cols)),
     cv[setdiff(names(cv), "feasible")],
     if (is.null(stratified)) NULL else list(stratified = stratified))
 }

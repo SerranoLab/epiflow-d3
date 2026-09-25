@@ -903,7 +903,13 @@ samples while the whole has more). Rule: every label names the test
 actually computed.
 
 ### L12 — Grouped-CV headline footer must state the feature set used
-Status: open (2026-09-25), from the R28 browser check
+Status: done (2026-09-25). `run_diagnostic_cv` returns `features_used` /
+`n_features`; the headline footer prints "Feature set: 5 features — …"
+and says the standalone card runs on the ticked features; the standalone
+card prints its own set and says the headline uses all H3-PTM markers;
+the R28 per-stratum note names the set; the standalone card's help text
+says why the two numbers can differ. R15 (make the card a shortcut into
+the panel) stays open.
 
 The headline runs on all H3-PTM markers (`cvFeatures`, `runDiagnostic`)
 while the standalone "Diagnostic test — grouped CV" card on the same tab

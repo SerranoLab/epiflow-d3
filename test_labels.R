@@ -110,5 +110,14 @@ check(lacks("frontend/index.html", "grouped CV (leave-one-sample-out)") && has("
 check(has("USER_GUIDE.md", "leave-one-sample-out up to 10 samples, grouped 5-fold above") && has("README.md", "leave-one-sample-out up to 10 samples, grouped 5-fold above"), "USER_GUIDE and README state the split rule")
 check(ver_of("js/app.js") >= "1.3.16", "app.js cache-busting bump (>= 1.3.16)")
 
+# ---- L12: both grouped-CV cards state their feature set ----
+cat("\n--- L12 grouped-CV feature set ---\n")
+check(has("api/R/statistics.R", "features_used = safe_I(predictor_cols), n_features = length(predictor_cols)"), "run_diagnostic_cv returns features_used / n_features")
+check(has("api/R/statistics.R", "level, on the same \","), "per-stratum note names the feature set")
+check(has(a, "Feature set: <strong>${ensureArray(cv.features_used).length || '?'} features</strong>"), "headline footer prints the feature set")
+check(has(a, "' selected features</strong>"), "standalone card prints its own feature set")
+check(has("frontend/index.html", "each result states its feature set"), "standalone help says why the two numbers can differ")
+check(ver_of("js/app.js") >= "1.3.17", "app.js cache-busting bump (>= 1.3.17)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
