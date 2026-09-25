@@ -1,125 +1,81 @@
-# EpiFlow D3 — handoff (2026-09-24, end of the audit/diagnostic pass)
+# EpiFlow D3 — handoff (2026-09-25, v1.4.1 tagged; droplet deploy pending)
 
-## Branches
+## State
 
-- `main` @ `ca60930` — contains the whole audit/gating pass (R1, R2, R13, docs).
-- `audit/diagnostic` @ `efd1cc1` — pushed, tracks `origin/audit/diagnostic`,
-  **4 commits ahead of `main`, not merged** (runbook step 4:
-  `git checkout main && git merge audit/diagnostic && git push origin main`,
-  then step 5 on the droplet — R files changed, so `docker compose up -d --build`).
+- `main` @ `3723c07` = tag **`v1.4.1`**, pushed. Every audit branch is merged:
+  `audit/gating`, `audit/diagnostic`, `audit/contrasts`, `audit/stratified-cv`,
+  `audit/labels`. Tree clean. Local servers stopped.
+- **Not yet deployed.** The droplet still runs the 1.3.4 build. Runbook step 5
+  (R files changed and emmeans is new in the image, so the rebuild is required):
+  ```bash
+  ssh root@104.131.113.225
+  cd /opt/epiflow-d3 && git pull origin main
+  docker compose up -d --build
+  docker compose logs -f api          # Ctrl+C to stop watching
+  exit
+  ```
+  Then https://epiflow.serranolab.org in a private window: header badge must read
+  `D3 v1.4.1` (filled from `/api/health`); load the example; repeat the browser
+  checks below. The runbook's `v1.5.0` tag line is stale — v1.4.1 is already tagged.
+- `CHANGELOG.md` (new) lists every finding closed since the 1.3.4 build; there is
+  no `v1.4.0` tag in this repo (only `v1.1.0` before this one).
 
+## What v1.4.1 contains (since the last handoff, 2026-09-24)
+
+- **audit/contrasts** — R5 (all pairwise LMM contrasts on Satterthwaite t via
+  emmeans, `lmerTest.limit` raised, 95% t intervals; emmeans added to
+  `Dockerfile.api`), R25 (df / design df / singular / ICC on every row; flag when
+  df − df_design > 0.5), R7 (phantom Cohen's d CI note gone; d = β / cell-level
+  pooled SD), R27 (results table states its settings and greys on change; report
+  hygiene), R4 (differential correlation = Welch t on per-replicate Fisher z, all
+  group pairs, one BH family; Δz [CI] tested, Δr descriptive; per-replicate points;
+  Aarts 2014 caveat).
+- **audit/stratified-cv** — R28 (grouped CV per stratum, cap per stratum,
+  not-estimable guard, standardized LDA weights labelled descriptive).
+- **audit/labels** — L1–L13, R6, R9, R10 (see the label table in DECISIONS.md;
+  volcano now plots BH p_adj; every default palette is Okabe-Ito;
+  `EPIFLOW_VERSION` is the single version source), then `release prep 1.4.1`
+  (version 1.4.1; CORS default = production origin; `deploy/` reconciled).
+
+## Local dev change you must know
+
+Since 1.4.1 the API's CORS allowlist defaults to `https://epiflow.serranolab.org`.
+The :8080 frontend against the :8000 API is cross-origin, so start the API with
+the variable set explicitly (LOCAL_DEV.md is updated):
+```bash
+cd api/R
+EPIFLOW_CORS_ORIGIN='*' Rscript -e "pr <- plumber::plumb('plumber.R'); pr\$run(host='127.0.0.1', port=8000)"
 ```
-efd1cc1 R17+R18: LMM endpoints report the fit reason; stratify-by can't be the comparison variable; unconditional scientific p -> fmtP
-3798ad7 R14: statistics endpoints serialize at full precision; shared fmtP for p-values
-5e6d61a R3: in-process vegan cross-check of PERMANOVA; record verified values
-f4021a3 R3: grouped leave-one-sample-out CV is the diagnostic headline; LDA and MANOVA exploratory
-```
 
-What each did:
-- **R3** — Diagnostic panel headlines the grouped leave-one-sample-out CV (LDA on
-  the same H3 features as the exploratory card): k / n held-out samples correct
-  with an exact binomial 95% CI and a per-sample table. Cell-level MANOVA replaced
-  by a dependency-free exact PERMANOVA on per-replicate mean profiles (R² headline,
-  p secondary, floor stated: 0.10 at 3 vs 3). Cell-split LDA is grey and labeled
-  exploratory; `caution_note` is finally produced. `Promise.allSettled` so one
-  failed call never blanks the other cards.
-- **vegan cross-check** — vegan 2.7.6 installed locally only (not in the image);
-  R² = 0.9152811687, pseudo-F = 43.2150045062, exact p = 0.1000 identical to
-  `adonis2` in-process on the same M. Recorded in the R3 DECISIONS entry.
-- **R14** — 17 statistics endpoints serialize with `digits = NA, na = "null"`
-  (jsonlite's default 4 dp sent (1e-5, 5e-5] as 0 and NA as `"NA"`/dropped key);
-  per-cell/curve payloads stay at 4 dp. One shared `fmtP()`/`isSig()` in api.js
-  replaces three local formatters and ~14 ad-hoc sites; p fields are passed raw,
-  never `Number(field)`.
-- **R17+R18** — `fit_stratified_lmm()` returns a zero-row result with
-  `attr(, "reason")` instead of NULL; endpoints report it. Stratify-by ==
-  comparison variable is a dedicated error, the per-stratum guard reports only
-  the condition that applied, and the Statistics/forest stratify dropdowns disable
-  the current comparison variable. All-markers table + heatmap tooltips no longer
-  use unconditional `toExponential`.
+## Tests (all ALL PASS at `3723c07`, API on 127.0.0.1:8000)
 
-Files touched on the branch: `api/R/statistics.R`, `api/R/plumber.R`,
-`frontend/js/{api,app}.js`, `frontend/js/charts/{forestPlot,volcanoPlot,gatingPlot,markerHeatmap}.js`,
-`frontend/index.html`, `DECISIONS.md`, and new tests `test_diagnostic_cv.R`,
-`test_serializer_precision.R`, `test_lmm_errors.R`.
+`test_labels.R` (static + live health-version check), `test_lmm_contrasts.R`,
+`test_lmm_errors.R`, `test_serializer_precision.R`, `test_corr_diff.R`,
+`test_diagnostic_stratified.R`, `test_diagnostic_cv.R`, `test_gating_subsample.R`.
+Optional 416k-cell block in `test_lmm_contrasts.R` via `EPIFLOW_IPER_RDS`.
 
-## What was verified
+## Browser checks still owed on the deployed build
 
-Tests (all against the local API at `efd1cc1`, all ALL PASS):
-`test_gating_subsample.R` (24), `test_diagnostic_cv.R` (26, incl. vegan),
-`test_serializer_precision.R` (48; engineered p = 2.1336e-05 arrives intact,
-`"cohens_d":null` on the wire), `test_lmm_errors.R` (13), `test_lmm_multigroup.R`.
+- Statistics: volcano y axis "−log₁₀ p_adj (BH)", dashed line "p_adj (BH) = 0.05",
+  forest x axis "LMM β (difference vs reference, arcsinh units)".
+- Violin: y axis "(arcsinh intensity)"; grouped subtitle "Welch t (replicate means)
+  per group, BH across groups"; simple violin shows its test in the subtitle.
+- Overview: "arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD …)".
+- Heatmap subtitle "z of group means per marker … ±0.71 — read sign, not size".
+- Positivity legend "GMM negative (×3.2 for visibility)" where a component is boosted.
+- Clustering: "Louvain clustering — 7 clusters found (resolution 1.0)"; Okabe-Ito
+  colours; theme menu preselects "Okabe-Ito (Wong, default)".
+- Diagnostic: title "grouped CV, leave-one-sample-out (LDA)"; footer names the
+  feature set; standalone card names its own; per-stratum table after Stratify.
+- Correlation: Δz [95% CI] first, Δr descriptive; per-replicate dot plot; grey
+  cells / "not estimable" rows when a group has < 2 replicates.
+- Report: Methods open with the arcsinh sentence; footer and citation carry v1.4.1.
 
-Browser:
-- Example data (3,600 cells, seed 4242): Diagnostic panel shows "6 / 6 held-out
-  samples correct · exact 95% CI [54.1%, 100%]" with the 6-row table first,
-  PERMANOVA R² = 0.915 with the p floor stated, grey exploratory LDA card at
-  49.8% with the amber caution note; standalone grouped-CV card still runs.
-- 416k-cell 3-group dataset (`iPER_June26_epiflow_data_20260614.rds`, 3 × 4
-  replicates): "Run LMM" by genotype failed with "Model could not be fit" —
-  in-process and via a fresh session it fits in 2 s; the R17 message then showed
-  the cause: stratify_by = genotype with comparison_var = genotype (one group per
-  stratum). Fixed as R18. Also on this dataset: 0.365 rendered "3.65e-1" in the
-  all-markers table (fixed, fmtP).
+## Open findings (DECISIONS.md)
 
-## Open findings
-
-- **R11** — Gating tab applies its own identity/cycle dropdowns; `/api/filter`
-  uses the sidebar; gating-detail sees neither. Consume the sidebar filter
-  object and forward it (also closes the tab-filter half of R13).
-- **R12** — "Export gate assignments (CSV)" reads `resp.cells`, a field the
-  payload never had; must export all analyzed cells, not `points`.
-- **R15** — Standalone grouped-CV card recomputes what the Diagnostic panel now
-  shows; make it a shortcut (its model dropdown feeding the same render).
-- **R16** — `_tableToCSV` scrapes `td.textContent`: every CSV export writes
-  formatted strings. Fix = `data-raw` on numeric cells in each stats renderer,
-  `_tableToCSV` prefers it.
-- Without an ID: plumber CORS filter defaults `EPIFLOW_CORS_ORIGIN` to `*`.
-
-## Next up: R5 + R7 (one branch, `audit/contrasts`)
-
-- **R5** — Pairwise LMM contrasts (`.pairwise_wald`, `statistics.R` ~:214-219 in
-  the audit's numbering) test each Wald contrast against the normal, while the
-  vs-reference path uses lmerTest's Satterthwaite t. With 3 replicates per group
-  the denominator df are near 4, so the z-based pairwise p-values are
-  anti-conservative. Fix: `emmeans::emmeans(m, pairwise ~ comparison_group,
-  lmer.df = "satterthwaite")`, or reuse the omnibus denominator df for a t
-  reference. Note: check whether `emmeans` is installed locally and in the image
-  before choosing (vegan was not).
-- **R7** — `plumber.R` (all-markers caution notes) warns that Cohen's d CIs use
-  cell-level N, but `cohens_d_ci()` is never called; the forest-plot CI is
-  estimate ± 1.96 SE from the LMM (replicate-aware), and the d shown is the LMM
-  β over the cell-level pooled SD. Fix: remove the note; label d as
-  "β / cell-level pooled SD" in the table header (and the CSV column name).
-
-Prompt for the next session (paste as the first message, in plan mode):
-
-> Start a new branch audit/contrasts from main (merge audit/diagnostic into main
-> first if that hasn't happened). Enter plan mode. Plan R5 and R7 from
-> DECISIONS.md and the audit doc "EpiFlow D3 Publication Audit" (Claude Doc
-> CCqL64ueDySbH4WFtjsDEP, findings table rows R5 and R7). R5: `.pairwise_wald`
-> in api/R/statistics.R tests pairwise contrasts against the normal while the
-> vs-reference path uses Satterthwaite t; with ~4 denominator df the pairwise p
-> are anti-conservative. R7: the all-markers caution note in api/R/plumber.R
-> describes a Cohen's d CI that cohens_d_ci() never computes; the forest CI is
-> the LMM ± 1.96 SE and d is β over the cell-level pooled SD. Answer first:
-> (1) exactly which test each contrast path runs today, with line refs, and how
-> far the z and Satterthwaite-t p-values differ on the example data at 3 vs 3;
-> (2) whether emmeans is installed locally and listed for the Docker image, and
-> the dependency-free alternative (t on the omnibus denominator df);
-> (3) what the d column and its header should say. Then propose the edits, the
-> test (test_lmm_contrasts.R: pairwise p equals emmeans or the t-reference to
-> 1e-8; no z-based pairwise p remains; header and CSV column say "β / cell-level
-> pooled SD"; the caution note is gone), and the commits (R5 and R7 separately).
-> Don't edit anything yet.
-
-House rules that held all day: plan mode first; full diff shown and explicit
-"go" before every commit; one commit per finding ID; DECISIONS.md entry before
-the commit; a `test_*.R` per pass; bump `?v=` for any changed JS file; dev
-servers bound to 127.0.0.1; by-construction fixes over serializer tweaks.
-
-## Local dev reminders
-
-See `LOCAL_DEV.md`. Both servers are stopped. API restarts drop in-memory
-sessions — re-upload after any `api/R/` change. vegan is in the local R library
-only. The 416k test file lives outside the repo (see the R18 DECISIONS entry).
+R8, R11, R12, R15 (priority raised: standalone grouped-CV card → shortcut into the
+panel), R16 (CSV raw values + per-stratum rows), R19, R21 (data contract:
+arcsinh + cofactor stamped), R22, R23, R24, R26, R29 (strata × features heatmap),
+R30 (equal-prior LDA for imbalanced classes; needs the 416k file to verify).
+Suggested next pass: R30 + R15 + R16 on one branch (`audit/cv-followups`), then
+R21 (data contract) before any back-transform work.
