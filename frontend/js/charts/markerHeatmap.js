@@ -200,7 +200,7 @@ const MarkerHeatmap = {
             `<br>—<br>` +
             `LMM β = ${isFinite(d.cohens_d * d.cohens_d) ? '' : ''}` +
             `${isFinite(d.lmm_p_adj) ? 'LMM p(adj) = ' + fmtP(d.lmm_p_adj) + '<br>' : ''}` +
-            `${isFinite(d.cohens_d) ? "Cohen's d = " + d.cohens_d.toFixed(3) : ''}` +
+            `${isFinite(d.cohens_d) ? "d (β / pooled SD) = " + d.cohens_d.toFixed(3) : ''}` +
             `${d.contrast ? '<br><span style="color:#94a3b8;">' + d.contrast + ' vs ' + d.ref + '</span>' : ''}`
           );
         })

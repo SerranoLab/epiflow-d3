@@ -110,7 +110,7 @@ Ideal for comparing distribution shapes — bimodality, shifts, or spread differ
 
 ### Violin Plots
 
-Grouped violin plots with embedded box plots and median lines. When LMM results are available, violin plots display p-values and Cohen's d directly on the plot.
+Grouped violin plots with embedded box plots and median lines. When LMM results are available, violin plots display p-values and d (β / cell-level pooled SD) directly on the plot.
 
 ### Heatmap
 
@@ -139,7 +139,7 @@ This accounts for cell nesting within biological replicates, avoiding pseudorepl
 - **Estimate** — difference in means between groups
 - **Std. Error** — precision of the estimate
 - **p-value** — significance after FDR correction
-- **Cohen's d** — effect size (< 0.2 small, 0.2–0.5 medium, > 0.8 large)
+- **d (β / cell-level pooled SD, arcsinh units)** — the LMM β standardized by the pooled within-group SD of cells; the conventional bands (< 0.2 small, 0.2–0.5 medium, > 0.8 large) are a guide only. No confidence interval is given for d — the forest plot's interval is on β.
 
 > ⚠️ **Never use a standard t-test on single-cell data.** Cells from the same replicate are not independent. EpiFlow's LMM with replicate as a random effect is the correct approach.
 
@@ -278,7 +278,7 @@ Every statistical result has a **Download CSV** button: LMM results, positivity 
 
 - LMMs need ≥ 2 replicates per group (random effect requires it)
 - All p-values are FDR-corrected — report adjusted p-values
-- Always report Cohen's d alongside p-values
+- Always report d (β / cell-level pooled SD) alongside p-values
 - ML subsampling (50K cap) only affects RF, GBM, and diagnostics — not LMMs or visualizations
 
 ### Performance
@@ -309,7 +309,7 @@ If you use EpiFlow D3 in your research, please cite:
 
 ### Methods Paragraph
 
-> Spectral flow cytometry data were analyzed using EpiFlow D3 v1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University; https://epiflow.serranolab.org). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d. Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.
+> Spectral flow cytometry data were analyzed using EpiFlow D3 v1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University; https://epiflow.serranolab.org). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units), without a confidence interval. Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.
 
 ### Contact
 

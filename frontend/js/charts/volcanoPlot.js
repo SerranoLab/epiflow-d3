@@ -138,7 +138,7 @@ const VolcanoPlot = {
           β = ${d.estimate.toFixed(4)}<br>
           p = ${fmtP(d['p.value'])}<br>
           -log₁₀(p) = ${d.neg_log10_p.toFixed(2)}<br>
-          ${d.cohens_d != null ? "Cohen's d = " + d.cohens_d.toFixed(3) : ''}
+          ${d.cohens_d != null ? "d (β / pooled SD) = " + d.cohens_d.toFixed(3) : ''}
         `);
       })
       .on('mousemove', (event) => {

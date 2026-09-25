@@ -875,13 +875,13 @@ function(session_id, req) {
     if (!is.na(min_reps) && min_reps < 5) {
       caution_notes <- c(caution_notes, list(
         paste0("LMM p-values with < 5 replicates per group (min observed: ", min_reps,
-               ") should be interpreted cautiously. The random effect variance may be unstable. Consider Cohen's d as the primary metric.")
+               ") should be interpreted cautiously. The random effect variance may be unstable. Consider d (\u03b2 / cell-level pooled SD) as the primary metric.")
       ))
     }
   }
-  caution_notes <- c(caution_notes, list(
-    "Cohen's d confidence intervals use cell-level N, making them artificially narrow (~100\u00d7 too narrow). The d point estimate is valid; the CI width underestimates true uncertainty."
-  ))
+  # R7: the former caution note about a narrow cell-level-N interval on d is
+  # gone \u2014 no interval on d is computed anywhere; the only interval shown is
+  # the LMM beta's t interval on the forest plot (replicate-aware).
 
   list(results = result, caution_notes = caution_notes)
 }

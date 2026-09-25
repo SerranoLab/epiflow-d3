@@ -206,6 +206,36 @@ pairs and 6 identity pairs.
 
 ---
 
+## R7 — A caution note described a Cohen's d confidence interval that was never computed
+Status: done (2026-09-25)
+
+What changes. `/api/stats/all-markers` appended the note "Cohen's d
+confidence intervals use cell-level N, making them artificially narrow
+(~100× too narrow)". `cohens_d_ci()` (`statistics.R`) was never called, so
+no interval on d existed anywhere; the only interval on screen is the
+forest plot's, which is on β (and, since R5, a t interval on the row's
+Satterthwaite df). The d that is reported is the LMM β divided by the
+pooled within-group SD of cells, in arcsinh units — a standardized β, not
+a two-sample Cohen's d. The note and the dead function are removed; the
+all-markers header reads "d (β / cell-level pooled SD, arcsinh units)" with
+a tooltip saying it is descriptive and carries no interval (the CSV header
+follows the text); the forest, volcano and marker-heatmap tooltips say
+"d (β / pooled SD)"; README, USER_GUIDE, the in-app statistical-approach
+blurb and both Methods paragraphs say the same and add "no confidence
+interval is given for d — the forest plot's interval is on β". The
+low-replicate note's "Consider Cohen's d as the primary metric" now names
+d (β / pooled SD). `gatingPlot.js` keeps "Cohen's d": that one is a
+genuine Cohen's d on per-replicate quadrant fractions (R2). The plain-text
+`methods` string in the report also picks up the R5 and R25 sentences it
+had missed.
+
+Verification. `test_lmm_contrasts.R`: header text present; `cohens_d_ci`
+absent; the CI note absent from plumber.R and from the API's
+`caution_notes`; "Cohen's d" appears in no frontend or doc file except
+gatingPlot.js.
+
+---
+
 ## R11 — Gating tab should consume the sidebar filter object
 Status: open (2026-09-24)
 
@@ -580,6 +610,28 @@ table, forest plot and report Methods show: "replicate variance estimated
 at (or near) zero; degrees of freedom fall back toward the cell level;
 interpret with caution". `test_lmm_contrasts.R` asserts df < n_samples
 whenever the row is not flagged.
+
+---
+
+## R26 — Cross-phase and cross-identity contrasts compare per-cell signal, not per-histone
+Status: open (2026-09-25)
+
+What changes. Every intensity contrast is on per-cell arcsinh signal. A
+G2/M cell carries twice the histone content of a G1 cell, so any contrast
+whose levels differ in DNA content — cell-cycle phases as the comparison
+variable, or identities that are themselves cycle-enriched (the 416k file's
+Apoptotic / G0/G1 / G2 / Mitotic) — measures histone amount as much as
+modification level, and a "higher in Mitotic" call is expected on
+content alone. Genotype-within-stratum contrasts are unaffected: both
+groups share the stratum's DNA content. Fix (choose one, plan with R22/R24):
+(a) a DNA-content covariate — `value ~ group + FxCycle + (1 | sample_id)`
+(FxCycle is already harmonized from `DNA` in the loader) — reported as
+"per-histone-equivalent"; or (b) an explicit per-cell note on every
+contrast whose levels differ in phase composition, the way the cell-cycle
+reference titration already states it ("G1 and G2/M differ in DNA
+content and chromatin compaction as well as in mark level",
+`plumber.R` cell-cycle mode). Until then the phase / identity contrasts
+carry no such note.
 
 ---
 

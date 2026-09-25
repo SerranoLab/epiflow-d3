@@ -13,28 +13,10 @@ suppressPackageStartupMessages({
   library(purrr)
 })
 
-# ---- Cohen's d with confidence intervals ----
-cohens_d_ci <- function(x, g, ref = levels(g)[1]) {
-  if (length(unique(g)) != 2) return(NULL)
-  g <- droplevels(g)
-  lvl <- levels(g)
-  x1 <- x[g == ref]
-  x2 <- x[g == setdiff(lvl, ref)]
-  n1 <- length(x1); n2 <- length(x2)
-  if (n1 < 2 || n2 < 2) return(NULL)
-
-  m1 <- mean(x1, na.rm = TRUE); m2 <- mean(x2, na.rm = TRUE)
-  s1 <- var(x1, na.rm = TRUE);  s2 <- var(x2, na.rm = TRUE)
-  sp <- sqrt(((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2))
-  d  <- (m2 - m1) / sp
-  se <- sqrt((n1 + n2) / (n1 * n2) + d^2 / (2 * (n1 + n2 - 2)))
-  ci <- c(d - 1.96 * se, d + 1.96 * se)
-
-  tibble::tibble(
-    d = d, d_se = se, d_lo = ci[1], d_hi = ci[2],
-    n1 = n1, n2 = n2, mean_diff = m2 - m1, sp = sp
-  )
-}
+# (R7: cohens_d_ci() removed — it was never called, and the caution note
+# that described its cell-level-N confidence interval was describing a
+# number nobody computed. The d that is reported is the LMM beta over the
+# cell-level pooled SD, without an interval; see run_one_model().)
 
 # ---- Fit LMM with stratification ----
 # Direct extraction from app.R fit_stratified_lmm()

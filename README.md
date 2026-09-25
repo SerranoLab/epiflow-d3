@@ -16,7 +16,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 ### Data Exploration
 - **Overview dashboard** — cell counts by genotype, identity, replicate, and cell cycle with interactive bar charts and box-and-whisker marker summaries
 - **Ridge plots** — kernel density distributions per marker across groups
-- **Violin plots** — grouped violins with embedded box plots, median lines, and inline statistics (LMM p-values, Cohen's d)
+- **Violin plots** — grouped violins with embedded box plots, median lines, and inline statistics (LMM p-values, d = β / cell-level pooled SD)
 - **Heatmap** — clustered mean-expression heatmap across all H3-PTMs and groups
 
 ### Statistical Analysis
@@ -192,7 +192,7 @@ epiflow-d3/
 ## Statistical Methods
 
 ### Linear Mixed Models
-Marker expression is modeled as `value ~ group + (1|replicate)` using `lme4::lmer()` with Satterthwaite degrees of freedom via `lmerTest`. This accounts for the nested structure of cells within biological replicates, avoiding pseudoreplication. Every contrast — vs-reference and all-pairwise alike (`emmeans`) — is a Satterthwaite t on its own degrees of freedom with a matching 95% t interval. P-values are corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d.
+Marker expression is modeled as `value ~ group + (1|replicate)` using `lme4::lmer()` with Satterthwaite degrees of freedom via `lmerTest`. This accounts for the nested structure of cells within biological replicates, avoiding pseudoreplication. Every contrast — vs-reference and all-pairwise alike (`emmeans`) — is a Satterthwaite t on its own degrees of freedom with a matching 95% t interval. P-values are corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units); no confidence interval is given for d — the forest plot's interval is on β.
 
 ### Positivity Analysis
 Marker positivity thresholds are determined by two-component Gaussian Mixture Models (`mclust::Mclust(G=2)`). Fraction-positive values are computed per replicate, and group comparisons use replicate-level t-tests or Wilcoxon tests.
@@ -213,7 +213,7 @@ If you use EpiFlow D3 in your research, please cite:
 
 ### Methods Paragraph
 
-> Spectral flow cytometry data were analyzed using EpiFlow D3 v1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as Cohen's d. Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.
+> Spectral flow cytometry data were analyzed using EpiFlow D3 v1.0 (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell. Statistical comparisons between groups were performed using linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates. P-values were corrected using the Benjamini-Hochberg procedure. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units), without a confidence interval. Marker positivity was determined via Gaussian Mixture Model (GMM) thresholding with replicate-level fraction-positive t-tests for inference.
 
 ---
 

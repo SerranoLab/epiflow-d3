@@ -169,6 +169,20 @@ app_src <- readLines("frontend/js/app.js")
 check(any(grepl("lmmStatusCell(r)", app_src, fixed = TRUE)) && sum(grepl("this.lmmStatusCell(r)", app_src, fixed = TRUE)) >= 2,
       "both LMM tables render a Status cell on every row")
 check(any(grepl("exceed the replicate-level design df", app_src, fixed = TRUE)), "report Methods describe the df flag")
+# R7: d is labeled as beta / cell-level pooled SD; the phantom CI note and the
+# never-called cohens_d_ci() are gone; "Cohen's d" survives only in gatingPlot.js,
+# where it IS a Cohen's d on replicate fractions.
+check(any(grepl("d (β / cell-level pooled SD, arcsinh units)", app_src, fixed = TRUE)),
+      "all-markers header reads 'd (β / cell-level pooled SD, arcsinh units)'")
+check(!any(grepl("cohens_d_ci <- function", stats_src, fixed = TRUE)), "cohens_d_ci() is removed")
+check(!any(grepl("confidence intervals use cell-level N", readLines("api/R/plumber.R"), fixed = TRUE)),
+      "the phantom Cohen's d CI caution note is gone from plumber.R")
+js_files <- c("frontend/js/app.js", list.files("frontend/js/charts", "\\.js$", full.names = TRUE))
+cohen_hits <- unlist(lapply(js_files, function(f) if (any(grepl("Cohen's d", readLines(f), fixed = TRUE))) f else NULL))
+check(identical(cohen_hits, "frontend/js/charts/gatingPlot.js"),
+      paste("'Cohen's d' appears only in gatingPlot.js (replicate-fraction d) ->", paste(cohen_hits, collapse = ", ")))
+for (f in c("README.md", "USER_GUIDE.md", "frontend/index.html"))
+  check(!any(grepl("Cohen's d", readLines(f), fixed = TRUE)), sprintf("%s no longer calls the LMM effect size Cohen's d", f))
 
 # ---- 5. API ----
 cat("\n--- 5. API payloads ---\n")
@@ -180,6 +194,8 @@ check(length(rows) == 3 && all(vapply(rows, function(r) all(c("df", "test", "ci_
 am <- post(paste0("/api/stats/all-markers/", sid), list())
 check(all(vapply(am$results, function(r) all(c("ci_lo", "ci_hi", "df", "df_design", "icc", "df_beyond_design") %in% names(r)), logical(1))),
       "all-markers rows carry ci_lo, ci_hi, df, df_design, icc, df_beyond_design")
+check(!any(grepl("Cohen's d confidence", unlist(am$caution_notes), fixed = TRUE)),
+      "all-markers caution_notes carry no Cohen's d CI note (R7)")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILED", failures))
 quit(status = if (failures == 0) 0 else 1)
