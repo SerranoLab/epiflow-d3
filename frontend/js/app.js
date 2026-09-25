@@ -3273,7 +3273,7 @@ const App = {
           <th>β</th><th>SE</th><th title="Satterthwaite df; hover a value for the design df and ICC">df</th><th>p-value</th>
           <th title="Overall test that the comparison variable matters across ALL groups (per marker × subset)">Omnibus p</th>
           <th title="LMM β divided by the pooled within-group SD of cells: a standardized effect in arcsinh units, descriptive, no confidence interval (the forest plot's interval is on β)">d (β / cell-level pooled SD, arcsinh units)</th>
-          <th>EMD/IQR</th><th>KS D</th>
+          <th>EMD/IQR</th><th title="Kolmogorov–Smirnov D between the two groups' cell distributions: a descriptive, cell-level statistic (exploratory); no p is reported for it">KS D (cell-level, exploratory)</th>
           <th>n cells</th><th>n reps</th>
           <th title="⚠ = Satterthwaite df exceed the replicate-level design df (samples − groups)">Status</th>
           <th>Significant</th><th>Direction</th><th>Model</th>

@@ -487,7 +487,6 @@ add_distribution_metrics <- function(lmm_results, data,
   emd_norm_v  <- rep(NA_real_, n)
   emd_interp_v<- rep("undefined", n)
   ks_d_v      <- rep(NA_real_, n)
-  ks_p_v      <- rep(NA_real_, n)
   pooled_iqr_v<- rep(NA_real_, n)
   n_ref_v     <- rep(NA_integer_, n)
   n_alt_v     <- rep(NA_integer_, n)
@@ -533,8 +532,9 @@ add_distribution_metrics <- function(lmm_results, data,
     emd_signed_v[i] <- e_signed
     emd_norm_v[i]   <- e_norm
     emd_interp_v[i] <- tryCatch(emd_interpret(e_norm), error = function(e) "undefined")
+    # R6: keep the KS D statistic (heatmap toggle, descriptive); its p is a
+    # cell-level test on pseudoreplicated cells and is not reported.
     ks_d_v[i]       <- unname(ks$statistic)
-    ks_p_v[i]       <- ks$p.value
     pooled_iqr_v[i] <- pooled
     n_ref_v[i]      <- length(g_ref)
     n_alt_v[i]      <- length(g_alt)
@@ -545,7 +545,6 @@ add_distribution_metrics <- function(lmm_results, data,
   lmm_results$emd_normalized     <- emd_norm_v
   lmm_results$emd_interpretation <- emd_interp_v
   lmm_results$ks_d               <- ks_d_v
-  lmm_results$ks_p_value         <- ks_p_v
   lmm_results$pooled_iqr         <- pooled_iqr_v
   lmm_results$n_ref              <- n_ref_v
   lmm_results$n_alt              <- n_alt_v

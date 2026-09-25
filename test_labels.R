@@ -130,5 +130,17 @@ check(has(a, "All marker intensities enter EpiFlow arcsinh-transformed") && has(
 check(lacks("api/R/plumber.R", "Raw phase-resolved intensity"), "plumber.R comment no longer calls arcsinh values raw")
 check(ver_of("ridgePlot.js") >= "1.2.4" && ver_of("js/app.js") >= "1.3.18", "ridgePlot / app cache-busting bumps")
 
+# ---- R6: KS D stays; KS p and BH-adjusted KS p leave the all-markers payload ----
+cat("\n--- R6 KS p ---\n")
+check(has("api/R/statistics.R", "lmm_results$ks_d               <- ks_d_v") && lacks("api/R/statistics.R", "ks_p_value") && lacks("api/R/statistics.R", "ks_p_v"), "statistics.R keeps ks_d and no longer builds ks_p_value")
+check(lacks("api/R/plumber.R", "ks_p_adj"), "plumber.R no longer BH-adjusts a KS p")
+check(has(a, "KS D (cell-level, exploratory)"), "all-markers table header labels KS D as cell-level, exploratory")
+mh <- "frontend/js/charts/markerHeatmap.js"
+check(lacks(mh, "ks_p_adj") && lacks(mh, "ks_p_value") && has(mh, "getSig = () => false;"), "marker heatmap KS view reads no KS p and draws no stars")
+check(has(mh, "no significance marks: KS D is a cell-level, descriptive statistic"), "marker heatmap KS legend says no significance marks")
+check(lacks("test_serializer_precision.R", "ks_p_value"), "serializer test no longer expects a KS p field")
+check(ver_of("markerHeatmap.js") >= "1.2.5", "markerHeatmap.js cache-busting bump (>= 1.2.5)")
+check(ver_of("js/app.js") >= "1.3.19", "app.js cache-busting bump (>= 1.3.19)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

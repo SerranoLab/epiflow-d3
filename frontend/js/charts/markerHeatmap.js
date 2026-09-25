@@ -45,9 +45,7 @@ const MarkerHeatmap = {
       emd_signed:r.emd_signed != null ? Number(r.emd_signed) : NaN,
       emd_norm:  r.emd_normalized != null ? Number(r.emd_normalized) : NaN,
       emd_interp:Array.isArray(r.emd_interpretation) ? r.emd_interpretation[0] : (r.emd_interpretation || ''),
-      ks_d:      r.ks_d != null ? Number(r.ks_d) : NaN,
-      ks_p:      r.ks_p_value != null ? Number(r.ks_p_value) : NaN,
-      ks_p_adj:  r.ks_p_adj != null ? Number(r.ks_p_adj) : NaN,
+      ks_d:      r.ks_d != null ? Number(r.ks_d) : NaN,   // R6: D only — the KS p is a cell-level test and is not reported
       pooled_iqr: r.pooled_iqr != null ? Number(r.pooled_iqr) : NaN,
       lmm_p:     Number(r['p.value']),
       lmm_p_adj: r.p_adj != null ? Number(r.p_adj) : NaN,
@@ -161,7 +159,7 @@ const MarkerHeatmap = {
       getValue = r => r.ks_d;
       getColor = r => colorScale(Math.min(1, Math.max(0, r.ks_d)));
       formatVal = r => isFinite(r.ks_d) ? r.ks_d.toFixed(3) : '—';
-      getSig = r => isFinite(r.ks_p_adj) && r.ks_p_adj < 0.05;
+      getSig = () => false;   // R6: no significance marks on a cell-level, descriptive statistic
     }
 
     const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])
@@ -195,8 +193,7 @@ const MarkerHeatmap = {
             (metric === 'emd_norm'
               ? `EMD = ${isFinite(d.emd) ? d.emd.toFixed(4) : '—'}<br>` +
                 `EMD/IQR = ${isFinite(d.emd_norm) ? d.emd_norm.toFixed(3) : '—'}` + interpHTML + dirHTML
-              : `KS D = ${isFinite(d.ks_d) ? d.ks_d.toFixed(3) : '—'}<br>` +
-                `KS p(adj) = ${fmtP(d.ks_p_adj)}`) +
+              : `KS D = ${isFinite(d.ks_d) ? d.ks_d.toFixed(3) : '—'} (cell-level, descriptive; no p)`) +
             `<br>—<br>` +
             `LMM β = ${isFinite(d.cohens_d * d.cohens_d) ? '' : ''}` +
             `${isFinite(d.lmm_p_adj) ? 'LMM p(adj) = ' + fmtP(d.lmm_p_adj) + '<br>' : ''}` +
@@ -209,12 +206,11 @@ const MarkerHeatmap = {
         })
         .on('mouseout', () => tooltip.transition().duration(200).style('opacity', 0));
 
-      // In-cell label: numeric value + significance stars (LMM p_adj for EMD,
-      // KS p_adj for KS view) so the heatmap is readable without hover.
+      // In-cell label: numeric value + significance stars from the LMM p_adj in
+      // the EMD view; the KS view carries no stars (R6: cell-level statistic).
       const valStr = formatVal(d);
-      const stars = sig
-        ? (((metric === 'emd_norm' ? d.lmm_p_adj : d.ks_p_adj) < 0.001) ? '***'
-          : ((metric === 'emd_norm' ? d.lmm_p_adj : d.ks_p_adj) < 0.01) ? '**' : '*')
+      const stars = (sig && metric === 'emd_norm')
+        ? ((d.lmm_p_adj < 0.001) ? '***' : (d.lmm_p_adj < 0.01) ? '**' : '*')
         : '';
 
       // Choose text color based on background luminance
@@ -314,6 +310,6 @@ const MarkerHeatmap = {
       .attr('font-size', '10px').attr('fill', '#475569')
       .text(metric === 'emd_norm'
         ? '★ = LMM p(adj): * < 0.05, ** < 0.01, *** < 0.001'
-        : '★ = KS p(adj): * < 0.05, ** < 0.01, *** < 0.001');
+        : 'no significance marks: KS D is a cell-level, descriptive statistic (R6)');
   }
 };

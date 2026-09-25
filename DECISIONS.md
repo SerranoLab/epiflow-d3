@@ -231,6 +231,24 @@ pairs and 6 identity pairs.
 
 ---
 
+## R6 — Cell-level KS p-values got BH adjustment and travelled with the LMM table
+Status: done (2026-09-25), branch audit/labels
+
+`run_all_markers_lmm` computed a KS test on pooled cells per marker and the
+endpoint BH-adjusted those p-values alongside the LMM p_adj
+(`statistics.R`, `plumber.R`). The KS D statistic stays in the payload —
+the marker heatmap's toggle draws it and it is a descriptive distance —
+but `ks_p_value` and `ks_p_adj` are gone from the payload, so they leave
+the table and the CSV by construction; the table header reads "KS D
+(cell-level, exploratory)". The marker heatmap's KS toggle drew
+significance stars from the BH-adjusted KS p; it now draws D alone, its
+tooltip says "cell-level, descriptive; no p" and its legend says no
+significance marks are shown. The marker-detail card's cell-level block
+(a different payload) already carries its own "cell-level — exploratory"
+label and keeps its KS p there.
+
+---
+
 ## R7 — A caution note described a Cohen's d confidence interval that was never computed
 Status: done (2026-09-25)
 

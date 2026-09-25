@@ -863,10 +863,8 @@ function(session_id, req) {
     }
   )
 
-  # BH adjustment on KS p-values too, parallel to LMM p_adj
-  if ("ks_p_value" %in% names(result) && sum(!is.na(result$ks_p_value)) > 1) {
-    result$ks_p_adj <- p.adjust(result$ks_p_value, method = "BH")
-  }
+  # R6: no KS p or BH-adjusted KS p in the all-markers payload — the KS test
+  # runs on pooled cells (pseudoreplicated); only its D statistic travels.
 
   # Determine replicate counts for caution notes
   caution_notes <- list()

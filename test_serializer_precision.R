@@ -129,11 +129,10 @@ if (!is.null(api_am$error)) stop("all-markers failed: ", api_am$error)
 loc_am <- add_distribution_metrics(
   run_all_markers_lmm(loaded$data, markers = loaded$h3_markers, comparison_var = "genotype", h3_markers = loaded$h3_markers),
   loaded$data, comparison_var = "genotype", h3_markers = loaded$h3_markers)
-if ("ks_p_value" %in% names(loc_am)) loc_am$ks_p_adj <- p.adjust(loc_am$ks_p_value, method = "BH")
-rows <- api_am$results
+rows <- api_am$results   # R6: no KS p / KS p_adj in this payload any more; ks_d stays
 check(length(rows) == nrow(loc_am) && all(vapply(seq_along(rows), function(i) identical(rows[[i]]$marker, loc_am$marker[i]), logical(1))),
       sprintf("all-markers: %d rows in the same order as in-process", length(rows)))
-for (fld in c("p.value", "p_adj", "cohens_d", "emd", "ks_p_value")) {
+for (fld in c("p.value", "p_adj", "cohens_d", "emd", "ks_d")) {
   if (!fld %in% names(loc_am)) next
   ok <- all(vapply(seq_along(rows), function(i) rel_eq(rows[[i]][[fld]], loc_am[[fld]][i]), logical(1)))
   worst <- max(vapply(seq_along(rows), function(i) { a <- num(rows[[i]][[fld]]); b <- loc_am[[fld]][i]
