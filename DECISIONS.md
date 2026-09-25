@@ -535,7 +535,33 @@ same model.
 ---
 
 ## R25 — Singular or near-singular fits silently remove the pseudoreplication protection
-Status: open (2026-09-25)
+Status: done (2026-09-25)
+
+Fix. Every LMM row (vs-reference and all-pairwise, both paths) now carries
+`df`, `df_design = n_samples − n_groups` (the df a replicate-means t-test
+would have), `n_samples`, `singular` (`lme4::isSingular`), `re_var`,
+`resid_var`, `icc = re_var / (re_var + resid_var)`, `df_beyond_design` and
+`df_note`. A row is flagged whenever its Satterthwaite df exceed df_design,
+regardless of singularity — the motivating rows were not singular: on the
+416k file the three Mitotic contrasts (867 cells) sit at df 15.7–16.9
+against a design df of 12 with ICC = 0.0076, while the three contrasts
+between the large phases sit at 9.4–10.3. The note reads "Satterthwaite df
+exceed the replicate-level design df (ICC = x): the replicate variance is
+small relative to cell variance, so the model is drawing precision from
+cells; interpret with caution." UI: both LMM tables gain a df column whose
+tooltip shows design df, samples and ICC on every row, and a Status column
+that is never empty (⚠ when flagged, "exploratory (cells as replicates)" on
+the lm path, "replicate-level ✓" otherwise) plus a footer note when any row
+is flagged; the forest tooltip shows df, design df, ICC and the flag; the
+report Methods describe the rule. The cells-as-replicates lm path reports
+`df_design` = residual df and null `re_var`/`icc`, so it is never flagged;
+its exploratory label occupies the Status column instead.
+`test_lmm_contrasts.R` asserts the flag equals df > df_design on every row,
+every flagged row carries the note with its ICC, no unflagged row carries a
+note, df is finite, and on the 416k file exactly the three Mitotic
+contrasts are flagged.
+
+Original finding (2026-09-25):
 
 What changes. The LMM's protection against pseudoreplication is the
 replicate random effect: with it, a between-group contrast is judged on

@@ -1740,7 +1740,9 @@ const App = {
       if (omni != null && !isNaN(Number(omni)))
         html += ` &nbsp;·&nbsp; omnibus p = ${fmtP(omni)} ${sigMark(omni)}`;
       html += `</div><table class="stats-table" style="font-size:11px;"><thead><tr>
-        <th>Subset</th><th>Comparison</th><th>Δβ [95% CI]</th><th>SE</th><th>df</th>
+        <th>Subset</th><th>Comparison</th><th>Δβ [95% CI]</th><th>SE</th>
+        <th title="Satterthwaite df; hover a value for the design df and ICC">df</th>
+        <th title="⚠ = Satterthwaite df exceed the replicate-level design df (samples − groups)">Status</th>
         <th>p (t)</th><th>p.adj</th><th></th><th>Direction</th></tr></thead><tbody>`;
       const f3 = v => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(3) : '—');
       pw.forEach(r => {
@@ -1750,14 +1752,15 @@ const App = {
           <td>${r.comparison}</td>
           <td><strong>${f3(r.estimate)}</strong> <span style="color:#64748b;">[${f3(r.ci_lo)}, ${f3(r.ci_hi)}]</span></td>
           <td>${f3(r.se)}</td>
-          <td>${r.df != null && Number.isFinite(Number(r.df)) ? Number(r.df).toFixed(1) : '—'}</td>
+          ${this.lmmDfCell(r)}
+          ${this.lmmStatusCell(r)}
           <td>${fmtP(r['p.value'])}</td>
           <td>${fmtP(padj)}</td>
           <td>${sigMark(padj)}</td>
           <td style="font-size:10px;">${Array.isArray(r.direction) ? r.direction[0] : (r.direction || '')}</td>
         </tr>`;
       });
-      html += `</tbody></table>`;
+      html += `</tbody></table>${this.lmmFlagFooter(pw)}`;
     } else if (data.pairwise_note) {
       html += `<p style="font-size:11px;color:#92400e;">${data.pairwise_note}</p>`;
     }
@@ -3098,6 +3101,40 @@ const App = {
       .text('Enriched →');
   },
 
+  // R25: fit diagnostics for every LMM row. The df tooltip always shows the
+  // replicate-level design df (samples − groups) and the ICC, because a
+  // reader wants them regardless of the flag; the Status column is never
+  // empty — ⚠ when Satterthwaite df exceed the design df (the model is
+  // drawing precision from cells), the exploratory label on the
+  // cells-as-replicates lm path, a replicate-level tick otherwise.
+  lmmDfTitle(r) {
+    const parts = [];
+    if (r.df_design != null && Number.isFinite(Number(r.df_design))) parts.push(`design df = ${Number(r.df_design)}`);
+    if (r.n_samples != null) parts.push(`${r.n_samples} samples`);
+    if (r.icc != null && Number.isFinite(Number(r.icc)))
+      parts.push(`ICC = ${Number(r.icc).toPrecision(3)} (replicate var ${Number(r.re_var).toPrecision(3)}, residual var ${Number(r.resid_var).toPrecision(3)})`);
+    if (r.singular === true) parts.push('singular fit: replicate variance estimated at zero');
+    return parts.join(' · ');
+  },
+  lmmDfCell(r) {
+    const df = r.df != null && Number.isFinite(Number(r.df)) ? Number(r.df).toFixed(1) : '—';
+    return `<td title="${this.lmmDfTitle(r)}">${df}</td>`;
+  },
+  lmmStatusCell(r) {
+    const isLm = r.test === 't (residual df)' || String(r.model_type || '').startsWith('lm');
+    if (r.df_beyond_design === true)
+      return `<td title="${r.df_note || ''}" style="color:#b45309;font-weight:700;text-align:center;white-space:nowrap;">⚠ df &gt; design</td>`;
+    if (isLm)
+      return `<td style="color:#92400e;font-size:10px;text-align:center;">exploratory (cells as replicates)</td>`;
+    return `<td title="Satterthwaite df within the replicate-level design df" style="color:#16a34a;font-size:10px;text-align:center;white-space:nowrap;">replicate-level ✓</td>`;
+  },
+  lmmFlagFooter(rows) {
+    const flagged = rows.filter(r => r.df_beyond_design === true);
+    if (!flagged.length) return '';
+    return `<div style="margin-top:6px;padding:6px 10px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:11px;color:#92400e;">
+      <strong>⚠ ${flagged.length} row${flagged.length > 1 ? 's' : ''}:</strong> ${flagged[0].df_note || ''}</div>`;
+  },
+
   renderStatsTable(results) {
     const arr = ensureArray(results);
     if (!arr.length) return;
@@ -3127,11 +3164,12 @@ const App = {
       <table class="stats-table">
         <thead><tr>
           <th>Marker</th><th>Subset</th><th>Contrast</th>
-          <th>β</th><th>SE</th><th>p-value</th>
+          <th>β</th><th>SE</th><th title="Satterthwaite df; hover a value for the design df and ICC">df</th><th>p-value</th>
           <th title="Overall test that the comparison variable matters across ALL groups (per marker × subset)">Omnibus p</th>
           <th>Cohen's d</th>
           <th>EMD/IQR</th><th>KS D</th>
           <th>n cells</th><th>n reps</th>
+          <th title="⚠ = Satterthwaite df exceed the replicate-level design df (samples − groups)">Status</th>
           <th>Significant</th><th>Direction</th><th>Model</th>
         </tr></thead>
         <tbody>
@@ -3151,6 +3189,7 @@ const App = {
               <td>${r.contrast_level} vs ${r.ref_level}</td>
               <td>${!isNaN(r.estimate) ? r.estimate.toFixed(4) : '-'}</td>
               <td>${!isNaN(r['std.error']) ? r['std.error'].toFixed(4) : '-'}</td>
+              ${this.lmmDfCell(r)}
               <td class="${sigClass}">${fmtP(r['p.value'])}</td>
               <td>${fmtP(r.omnibus_p)}</td>
               <td>${r.cohens_d != null && !isNaN(r.cohens_d) ? r.cohens_d.toFixed(3) : '-'}</td>
@@ -3158,13 +3197,14 @@ const App = {
               <td>${ksCell}</td>
               <td>${r.n_cells ? r.n_cells.toLocaleString() : '-'}</td>
               <td>${r.n_reps ? r.n_reps : '-'}</td>
+              ${this.lmmStatusCell(r)}
               <td class="${sigClass}" style="font-weight:600;">${sigLabel}</td>
               <td style="font-size:10px;">${dir}</td>
               <td style="font-size:10px;">${r.model_type}</td>
             </tr>`;
           }).join('')}
         </tbody>
-      </table>`;
+      </table>${this.lmmFlagFooter(rows)}`;
     this.addCSVExportButton('stats-results', 'epiflow-lmm-statistics.csv');
   },
 
@@ -4038,7 +4078,7 @@ const App = {
       <div class="report-section methods">
         <h2>Methods</h2>
         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
-        <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each reported with a 95% t interval on its own df. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
+        <p><strong>Statistical framework:</strong> Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each reported with a 95% t interval on its own df. Rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged: there the replicate variance is small relative to cell variance (low ICC), so the model draws precision from cells and the row should be interpreted with caution. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes (Cohen's d) are reported alongside p-values. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Per-group Pearson/Spearman correlations are compared as an exploratory descriptor (Δr). No replicate-level significance test is reported: correlations are computed across cells, so putting replicate N into a cell-derived Fisher-z SE is not a coherent sampling model. Δr shows where co-regulation shifts and should be confirmed with per-replicate correlation or a hierarchical bootstrap.</p>
         <p><strong>Machine learning and diagnostic assessment:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Diagnostic accuracy was estimated by leave-one-sample-out cross-validation of an LDA classifier on held-out biological samples (majority vote per sample; exact binomial 95% confidence interval on the number of samples). Multivariate differences between per-replicate mean H3-PTM profiles were tested by exact PERMANOVA (Anderson 2001, Austral Ecology 26:32-46) with R² as the effect size; the smallest attainable p is 1 over the number of distinct label arrangements (0.10 for 3 vs 3 replicates). Cell-level classification accuracy and any cell-level multivariate test are exploratory: cells from one sample fall in both training and test folds, so they do not measure generalization to a new sample.</p>

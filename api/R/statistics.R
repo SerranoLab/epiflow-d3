@@ -46,6 +46,45 @@ cohens_d_ci <- function(x, g, ref = levels(g)[1]) {
 .lmm_empty  <- function(reason) structure(data.frame(), reason = reason)
 .lmm_reason <- function(x) if (is.null(x)) NULL else attr(x, "reason", exact = TRUE)
 
+# ---- Fit diagnostics for the pseudoreplication guard (R25) ----
+# The replicate random effect is what stops cells from counting as
+# independent. df_design = n_samples - n_groups is the df a replicate-means
+# t-test would have. When the replicate variance is small relative to the
+# cell-level variance (low ICC), Satterthwaite df drift above df_design —
+# the model is drawing precision from cells — and at the boundary (singular
+# fit, replicate variance 0) they fall all the way back to the cell level.
+# Every row carries these fields; rows with df > df_design are flagged and
+# carry the note the UI and the report show.
+.lmm_fit_diag <- function(m, model_df) {
+  is_mer <- inherits(m, "merMod") || inherits(m, "lmerModLmerTest")
+  n_samples <- dplyr::n_distinct(model_df$sample_id)
+  n_groups  <- dplyr::n_distinct(model_df$comparison_group)
+  if (is_mer) {
+    vc <- as.data.frame(lme4::VarCorr(m))
+    re_var    <- vc$vcov[vc$grp == "sample_id"][1]
+    resid_var <- vc$vcov[vc$grp == "Residual"][1]
+    singular  <- isTRUE(lme4::isSingular(m))
+    df_design <- n_samples - n_groups
+  } else {                                   # cells as replicates: no replicate term
+    re_var <- NA_real_; resid_var <- stats::sigma(m)^2; singular <- NA
+    df_design <- nrow(model_df) - n_groups
+  }
+  icc <- if (is.finite(re_var) && is.finite(resid_var) && (re_var + resid_var) > 0)
+    re_var / (re_var + resid_var) else NA_real_
+  list(n_samples = n_samples, n_groups = n_groups, df_design = df_design,
+       singular = singular, re_var = re_var, resid_var = resid_var, icc = icc)
+}
+
+.lmm_df_flag <- function(df, diag) {
+  flag <- is.finite(df) & is.finite(diag$df_design) & df > diag$df_design
+  note <- ifelse(flag, paste0(
+    "Satterthwaite df exceed the replicate-level design df (ICC = ",
+    formatC(diag$icc, digits = 3, format = "g"),
+    "): the replicate variance is small relative to cell variance, so the model is ",
+    "drawing precision from cells; interpret with caution."), NA_character_)
+  list(flag = flag, note = note)
+}
+
 # R18: stratifying by the comparison variable puts one group in every stratum,
 # so nothing can be compared. The endpoints call this first and return the
 # message as the error itself (not "could not be fit: ..."); NULL = fine.
@@ -178,12 +217,21 @@ fit_stratified_lmm <- function(data, marker, stratify_by = NULL,
     # the same one the all-pairwise table uses — and the forest plot draws it
     # from the payload instead of a normal ±1.96·SE.
     if (!"df" %in% names(td)) td$df <- stats::df.residual(m)
+    diag <- .lmm_fit_diag(m, model_df)   # R25
 
     td %>%
       dplyr::filter(grepl("^comparison_group", term)) %>%
       dplyr::mutate(
         ci_lo = estimate - stats::qt(0.975, df) * std.error,
         ci_hi = estimate + stats::qt(0.975, df) * std.error,
+        n_samples = diag$n_samples,
+        df_design = diag$df_design,
+        singular  = diag$singular,
+        re_var    = diag$re_var,
+        resid_var = diag$resid_var,
+        icc       = diag$icc,
+        df_beyond_design = .lmm_df_flag(df, diag)$flag,
+        df_note          = .lmm_df_flag(df, diag)$note,
         subset = subset_label,
         marker = marker,
         n_cells = n_cells_val,
@@ -346,6 +394,12 @@ lmm_pairwise <- function(data, marker, stratify_by = NULL,
 
     pw <- tryCatch(.pairwise_satterthwaite(m), error = function(e) NULL)
     if (is.null(pw) || nrow(pw) == 0) return(NULL)
+    diag <- .lmm_fit_diag(m, df)   # R25
+    fl <- .lmm_df_flag(pw$df, diag)
+    pw$n_samples <- diag$n_samples; pw$df_design <- diag$df_design
+    pw$singular <- diag$singular; pw$re_var <- diag$re_var
+    pw$resid_var <- diag$resid_var; pw$icc <- diag$icc
+    pw$df_beyond_design <- fl$flag; pw$df_note <- fl$note
 
     omni <- tryCatch({
       at <- as.data.frame(stats::anova(m))

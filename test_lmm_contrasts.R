@@ -128,6 +128,32 @@ if (file.exists(iper)) {
   cat("  [SKIP] EPIFLOW_IPER_RDS not found — real-data block not run\n")
 }
 
+# ---- 3d. R25: the df flag is consistent with df_design on every row ----
+cat("\n--- 3d. R25 df flag (df_design = n_samples - n_groups) ---\n")
+flag_ok <- function(tbl, label) {
+  need <- c("df", "df_design", "n_samples", "singular", "re_var", "resid_var", "icc", "df_beyond_design", "df_note")
+  check(all(need %in% names(tbl)), sprintf("%s: rows carry %s", label, paste(need, collapse = ", ")))
+  fl <- as.logical(tbl$df_beyond_design)
+  check(all(fl == (tbl$df > tbl$df_design)), sprintf("%s: flagged exactly when df > df_design (%d of %d rows)", label, sum(fl), nrow(tbl)))
+  check(all(is.finite(tbl$df)), sprintf("%s: every df finite", label))
+  check(all(!fl | (!is.na(tbl$df_note) & grepl("ICC = ", tbl$df_note))), sprintf("%s: every flagged row carries the note with its ICC", label))
+  check(all(fl | is.na(tbl$df_note)), sprintf("%s: no unflagged row carries a note", label))
+}
+flag_ok(pw, "example identity-within-WT pairwise")
+flag_ok(vs, "example genotype vs-reference")
+check(isTRUE(all.equal(vs$df_design[1], 6 - 2)) && isTRUE(all.equal(pw$df_design[1], 9 - 3)),
+      sprintf("df_design = samples - groups (genotype %g, identity %g)", vs$df_design[1], pw$df_design[1]))
+check(all(is.na(pw3$re_var)) && all(is.na(pw3$icc)) && all(!pw3$df_beyond_design) && isTRUE(all.equal(pw3$df_design[1], n3 - 2)),
+      "cells-as-replicates path: re_var/icc null, never flagged, df_design = residual df")
+if (file.exists(iper)) {
+  pwi <- lmm_pairwise(dr, "H3K27ac", comparison_var = "identity", h3_marks = Lr$h3_markers)
+  flag_ok(pwi, "416k identity pairwise")
+  mit <- pwi[grepl("Mitotic", pwi$comparison), ]
+  check(nrow(mit) == 3 && all(mit$df_beyond_design) && all(!pwi$df_beyond_design[!grepl("Mitotic", pwi$comparison)]),
+        sprintf("416k identity: exactly the three Mitotic contrasts are flagged (df %.1f-%.1f > design %g; ICC %.4f, singular %s)",
+                min(mit$df), max(mit$df), mit$df_design[1], mit$icc[1], mit$singular[1]))
+}
+
 # ---- 4. Static contracts ----
 cat("\n--- 4. static ---\n")
 stats_src <- readLines("api/R/statistics.R")
@@ -139,16 +165,21 @@ check(!any(grepl("pnorm", stats_src[pw_start:pw_end])), "no normal reference ins
 check(any(grepl("lmerTest.limit", stats_src[pw_start:pw_end])), "lmerTest.limit is raised inside the pairwise function")
 for (f in c("Dockerfile.api", "deploy/Dockerfile.api"))
   check(any(grepl("^\\s*emmeans\\s*\\\\?\\s*$", readLines(f))), sprintf("%s installs emmeans", f))
+app_src <- readLines("frontend/js/app.js")
+check(any(grepl("lmmStatusCell(r)", app_src, fixed = TRUE)) && sum(grepl("this.lmmStatusCell(r)", app_src, fixed = TRUE)) >= 2,
+      "both LMM tables render a Status cell on every row")
+check(any(grepl("exceed the replicate-level design df", app_src, fixed = TRUE)), "report Methods describe the df flag")
 
 # ---- 5. API ----
 cat("\n--- 5. API payloads ---\n")
 ex <- post("/api/example", list(preset = "ipsc_npc", cells_per_rep = 600, seed = 4242L)); sid <- ex$session_id
 det <- post(paste0("/api/stats/marker-detail/", sid), list(marker = "H3K27ac", comparison_var = "identity"))
 rows <- det$pairwise
-check(length(rows) == 3 && all(vapply(rows, function(r) all(c("df", "test", "ci_lo", "ci_hi") %in% names(r)), logical(1))),
-      "marker-detail pairwise rows carry df, test, ci_lo, ci_hi")
+check(length(rows) == 3 && all(vapply(rows, function(r) all(c("df", "test", "ci_lo", "ci_hi", "df_design", "icc", "df_beyond_design") %in% names(r)), logical(1))),
+      "marker-detail pairwise rows carry df, test, ci_lo, ci_hi, df_design, icc, df_beyond_design")
 am <- post(paste0("/api/stats/all-markers/", sid), list())
-check(all(vapply(am$results, function(r) all(c("ci_lo", "ci_hi", "df") %in% names(r)), logical(1))), "all-markers rows carry ci_lo, ci_hi, df")
+check(all(vapply(am$results, function(r) all(c("ci_lo", "ci_hi", "df", "df_design", "icc", "df_beyond_design") %in% names(r)), logical(1))),
+      "all-markers rows carry ci_lo, ci_hi, df, df_design, icc, df_beyond_design")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILED", failures))
 quit(status = if (failures == 0) 0 else 1)
