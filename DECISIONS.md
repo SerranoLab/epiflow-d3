@@ -233,16 +233,72 @@ audit/diagnostic branch.
 
 ---
 
+## R14 — Statistics endpoints serialize at full precision; scatter payloads stay at 4 dp
+Status: done (2026-09-24)
+
+What changes. Every endpoint used jsonlite's default `digits = 4` (four decimal
+places) and default NA handling. Measured on jsonlite 2.0.0: a value in
+(1e-5, 5e-5] is sent as `0` (negatives as `-0`), (5e-5, 1e-4] as `0.0001`,
+(1e-4, 1e-3) at one or two significant digits; values below 1e-5 survive in
+scientific notation. An NA statistic goes out as the string `"NA"` from a
+list and as a dropped key from a data frame — never `null`. The 17
+endpoints whose payload carries p-values or effect sizes now declare
+`list(auto_unbox = TRUE, digits = NA, na = "null")`: stats/lmm,
+stats/all-markers, stats/marker-detail, stats/correlation, viz/violin,
+viz/cellcycle, viz/cellcycle-markers, phase2/positivity,
+phase2/correlation-diff, ml/randomforest, ml/gbm, ml/diagnostic,
+ml/signatures, ml/signatures-diagnostic, separation/score, controls/detect,
+titration/sweep. Per-cell and curve payloads keep the default: gating
+(points; thresholds are quantized to 4 dp by contract, R13), gating-detail,
+phase3 pca/umap/clustering, ml/clustering, ridge, heatmap, overview, elbow.
+Frontend: one shared `fmtP()` (scientific below 0.001, fixed otherwise,
+"—" for null/NaN) and `isSig()` in api.js replace three local formatters and
+twelve ad-hoc sites; `forestPlot.js` used a bare `toFixed` for p.
+
+Benefit. A p of 3e-5 or a Cohen's d of 2e-5 reaches the browser and the CSV
+as itself. A missing statistic is `null` on the wire and "—" on screen, not
+"NA", `0`, "NaN" or a thrown TypeError.
+
+Cost. Statistics payloads grow up to ~2.5× (largest today: cellcycle-markers
+12 KB → ~30 KB). No change to the 0.2–1 MB scatter payloads.
+
+Rejected alternative. A global `digits = NA`: embeddings would grow 2.5× for
+no benefit and gating's 4-dp threshold contract would need re-deriving.
+`I(17)` was already rejected under R13.
+
+Verification. `test_serializer_precision.R`: (1) static contract on
+plumber.R — every listed endpoint declares `digits = NA, na = "null"`, every
+scatter endpoint does not; (2) static frontend contract — `fmtP` defined
+once, no bare `toFixed`/unguarded `toExponential` on p fields, no BH
+adjustment in JS; (3) all-markers, positivity and PERMANOVA values equal an
+in-process recomputation to relative 1e-8; (4) an engineered dataset whose
+LMM p lies in (1e-5, 5e-5] is uploaded and its p arrives non-zero and equal
+to the in-process value; (5) a marker constant within groups yields
+`"cohens_d":null` in the raw JSON. Note: a single-replicate group does not
+produce an NA p — `fit_stratified_lmm` still fits, borrowing df from the
+other group; the endpoint's ≥ 2-replicate guard is what refuses it.
+
+---
+
+## R16 — CSV export writes formatted strings, not raw values
+Status: open (2026-09-24)
+
+What changes. `_tableToCSV` (`app.js`) scrapes `td.textContent`, so every
+"Download CSV" writes what the table shows ("2.82e-92", "20.9%", "—"), not
+the numbers. Fix: numeric cells carry a `data-raw` attribute set by each
+statistics renderer, and `_tableToCSV` prefers it over the text. Touches
+every stats table; deferred out of R14 so the serializer change ships alone.
+With `fmtP` the exported p-values are at least parseable scientific notation
+at 2–3 significant digits.
+
+---
+
 ## Open items without a finding ID (2026-09-24)
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
   detection, test scripts, env vars).
 - The plumber `cors` filter (`plumber.R`) defaults `EPIFLOW_CORS_ORIGIN` to
   `*`; review and set an allowlist before release.
-- Every endpoint except gating still serializes with jsonlite's default
-  `digits = 4`, which renders e.g. 1.2e-05 as `0` (checked 2026-09-24). Any
-  p-value or effect size below 5e-5 reaches the browser as zero. Audit which
-  payloads carry such values and switch them to `digits = NA` or `I()`.
 
 ---
 

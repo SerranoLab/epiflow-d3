@@ -691,7 +691,7 @@ function(session_id, req) {
 
 #* Get violin plot data
 #* @post /api/viz/violin/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -724,7 +724,7 @@ function(session_id, req) {
 
 #* Get cell cycle distribution
 #* @post /api/viz/cellcycle/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -738,7 +738,7 @@ function(session_id, req) {
 
 #* Per-phase H3-PTM marker analysis
 #* @post /api/viz/cellcycle-markers/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -756,9 +756,18 @@ function(session_id, req) {
 # STATISTICS ENDPOINTS
 # ===========================================================================
 
+# R14 — serializer precision. jsonlite's default digits = 4 sends any value in
+# (1e-5, 5e-5] as 0 and coarsens (5e-5, 1e-3); its default na handling sends
+# an NA statistic as the string "NA" (lists) or drops the key (data frames).
+# Endpoints whose payload carries p-values or effect sizes use digits = NA
+# (15 significant digits) and na = "null". Per-cell and curve payloads
+# (gating points, PCA/UMAP/cluster embeddings, ridge densities) keep the
+# default: display data, ~2.5x smaller. test_serializer_precision.R enforces
+# both lists.
+
 #* Run LMM for a single marker
 #* @post /api/stats/lmm/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -780,7 +789,7 @@ function(session_id, req) {
 
 #* Run LMM across all selected markers
 #* @post /api/stats/all-markers/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -870,7 +879,7 @@ function(session_id, req) {
 #* Surfaces lmm_pairwise() (every pairwise comparison, not just vs-reference)
 #* and replicate_emd_test() (per-replicate EMD + Wilcoxon/Kruskal).
 #* @post /api/stats/marker-detail/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -905,7 +914,7 @@ function(session_id, req) {
   )
 }
 #* @post /api/stats/correlation/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -927,7 +936,7 @@ function(session_id, req) {
 
 #* Compute positivity / GMM analysis for a marker
 #* @post /api/phase2/positivity/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -952,7 +961,7 @@ function(session_id, req) {
 
 #* Per-group correlation + differential correlation analysis
 #* @post /api/phase2/correlation-diff/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1238,7 +1247,7 @@ function(session_id, req) {
 
 #* Run Random Forest classifier
 #* @post /api/ml/randomforest/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1282,7 +1291,7 @@ function(session_id, req) {
 
 #* Run Gradient Boosted Model
 #* @post /api/ml/gbm/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1314,7 +1323,7 @@ function(session_id, req) {
 #* Splits by biological sample, not cell, so accuracy reflects generalization to
 #* new samples. Refuses to report a number without >= 2 samples per class.
 #* @post /api/ml/diagnostic/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1335,7 +1344,7 @@ function(session_id, req) {
 
 #* Extract H3-PTM signatures per group
 #* @post /api/ml/signatures/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1353,7 +1362,7 @@ function(session_id, req) {
 
 #* Enhanced signatures with diagnostic assessment
 #* @post /api/ml/signatures-diagnostic/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1448,7 +1457,7 @@ prune_idle_sessions <- function(ttl_min = NULL) {
 
 #* Detect available controls (Q1-Q4) and assess negative quality
 #* @post /api/controls/detect/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1473,7 +1482,7 @@ function(session_id, req) {
 
 #* General A-vs-B separation score for one or more markers (current filter)
 #* @post /api/separation/score/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -1494,7 +1503,7 @@ function(session_id, req) {
 
 #* Titration sweep with recommendation + plain-language interpretation
 #* @post /api/titration/sweep/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))

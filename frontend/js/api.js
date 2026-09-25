@@ -18,6 +18,26 @@ function ensureArray(val) {
   return [val];
 }
 
+// Global utility (R14): the one way a p-value is formatted for display —
+// scientific below 0.001, fixed otherwise. null / "NA" / NaN / undefined
+// render as an em dash, never 0, "NaN" or a thrown TypeError. The API sends
+// missing statistics as null (na = "null") and full precision (digits = NA),
+// so this is where display precision is decided, nowhere else.
+function fmtP(v, digits = 4) {
+  if (v == null) return '—';
+  const x = Number(v);
+  if (!Number.isFinite(x)) return '—';
+  return x < 0.001 ? x.toExponential(2) : x.toFixed(digits);
+}
+
+// Global utility (R14): significance that never treats a missing p as
+// significant (null < 0.05 is true in JS because null coerces to 0).
+function isSig(v, alpha = 0.05) {
+  if (v == null) return false;
+  const x = Number(v);
+  return Number.isFinite(x) && x < alpha;
+}
+
 // Global utility: reorder a list so the reference value comes first, with the
 // rest keeping their existing order. No-op when ref is absent (e.g. grouping by
 // a variable that isn't the comparison variable), so it's always safe to apply.

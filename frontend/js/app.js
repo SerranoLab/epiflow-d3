@@ -1703,9 +1703,8 @@ const App = {
   renderMarkerDetail(data) {
     const el = document.getElementById('stats-detail');
     if (!el) return;
-    const fmtP = v => (v == null || isNaN(Number(v))) ? '-'
-      : (Number(v) < 0.001 ? Number(v).toExponential(2) : Number(v).toFixed(4));
-    const sigMark = v => (v != null && Number(v) < 0.05)
+    // fmtP is the shared p-value formatter in api.js (R14)
+    const sigMark = v => isSig(v)
       ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#94a3b8">ns</span>';
     let html = `<h3 style="margin:6px 0;">Marker detail: ${data.marker}</h3>`;
 
@@ -1793,7 +1792,7 @@ const App = {
               <td>Chi-square</td>
               <td>${Number(cs.statistic).toFixed(2)}</td>
               <td>${cs.df}</td>
-              <td class="${sig ? 'sig' : 'ns'}">${Number(cs.p_value).toExponential(2)}</td>
+              <td class="${sig ? 'sig' : 'ns'}">${fmtP(cs.p_value)}</td>
               <td>Cramér's V = ${cramersV} <span style="font-size:9px;color:#94a3b8;">(${effectInterpretation})</span></td>
               <td style="font-size:11px;">
                 ${Number(cs.cramers_v) < 0.1 
@@ -1915,7 +1914,7 @@ const App = {
           .style('cursor', 'pointer')
           .on('mouseover', (event) => {
             tooltip.transition().duration(100).style('opacity', 1);
-            tooltip.html(`<strong>${d.marker}</strong> in <strong>${d.phase}</strong><br>Effect: ${d.effect_size.toFixed(3)}<br>p=${d.p_value.toExponential(2)}<br>p(adj)=${d.p_adjusted.toExponential(2)}<br>${d.direction}`);
+            tooltip.html(`<strong>${d.marker}</strong> in <strong>${d.phase}</strong><br>Effect: ${Number.isFinite(Number(d.effect_size)) ? Number(d.effect_size).toFixed(3) : '—'}<br>p=${fmtP(d.p_value)}<br>p(adj)=${fmtP(d.p_adjusted)}<br>${d.direction}`);
           })
           .on('mousemove', (event) => {
             tooltip.style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 20) + 'px');
@@ -1960,13 +1959,13 @@ const App = {
       // Stats table
       let html = '<h4 style="margin:8px 0;">Phase × Marker Summary (BH-adjusted p-values)</h4>';
       html += '<table class="stats-table" style="font-size:11px;"><thead><tr><th>Phase</th><th>Marker</th><th>Effect</th><th>p(adj)</th><th>Direction</th></tr></thead><tbody>';
-      results.filter(r => r.p_adjusted < 0.05).sort((a, b) => a.p_adjusted - b.p_adjusted).forEach(r => {
+      results.filter(r => isSig(r.p_adjusted)).sort((a, b) => a.p_adjusted - b.p_adjusted).forEach(r => {
         html += `<tr><td>${r.phase}</td><td><strong>${r.marker}</strong></td>`;
-        html += `<td>${r.effect_size.toFixed(3)}</td>`;
-        html += `<td class="sig">${r.p_adjusted < 0.001 ? r.p_adjusted.toExponential(2) : r.p_adjusted.toFixed(3)}</td>`;
+        html += `<td>${Number.isFinite(Number(r.effect_size)) ? Number(r.effect_size).toFixed(3) : '—'}</td>`;
+        html += `<td class="sig">${fmtP(r.p_adjusted, 3)}</td>`;
         html += `<td style="font-size:10px;">${r.direction}</td></tr>`;
       });
-      if (!results.some(r => r.p_adjusted < 0.05)) html += '<tr><td colspan="5" style="color:#94a3b8;">No significant results after BH correction</td></tr>';
+      if (!results.some(r => isSig(r.p_adjusted))) html += '<tr><td colspan="5" style="color:#94a3b8;">No significant results after BH correction</td></tr>';
       html += '</tbody></table>';
       document.getElementById('cellcycle-phase-stats').innerHTML = html;
 
@@ -1996,15 +1995,13 @@ const App = {
         html += '<th>Marker</th><th>Test</th><th>Statistic</th><th>p-value</th><th>p (adj.)</th><th>Effect</th><th>Direction</th>';
         html += '</tr></thead><tbody>';
         stats.forEach(s => {
-          const p = Number(s.p_value);
-          const padj = Number(s.p_adjusted);
-          const sig = padj < 0.05;
+          const sig = isSig(s.p_adjusted);
           html += `<tr>
             <td><strong>${s.marker}</strong></td>
             <td>${s.test}</td>
             <td>${Number(s.statistic).toFixed(2)}</td>
-            <td class="${p < 0.05 ? 'sig' : 'ns'}">${p < 0.001 ? p.toExponential(2) : p.toFixed(3)}</td>
-            <td class="${sig ? 'sig' : 'ns'}">${padj < 0.001 ? padj.toExponential(2) : padj.toFixed(3)}</td>
+            <td class="${isSig(s.p_value) ? 'sig' : 'ns'}">${fmtP(s.p_value, 3)}</td>
+            <td class="${sig ? 'sig' : 'ns'}">${fmtP(s.p_adjusted, 3)}</td>
             <td>${s.effect_size != null && !isNaN(Number(s.effect_size)) ? Number(s.effect_size).toFixed(3) : '-'}</td>
             <td style="font-size:11px;">${s.direction || ''}</td>
           </tr>`;
@@ -2651,11 +2648,10 @@ const App = {
           cMarkers.forEach(m => {
             const entry = consistency.find(c => c.identity === id && c.marker === m);
             if (entry) {
-              const p = Number(entry.p_value);
               const est = Number(entry.estimate);
-              const sig = p < 0.05;
+              const sig = isSig(entry.p_value);
               const dir = est > 0 ? '↑' : '↓';
-              html += `<td style="color:${sig ? (est > 0 ? '#b2182b' : '#2166ac') : '#94a3b8'};font-weight:${sig ? '700' : '400'};text-align:center;" title="β=${est.toFixed(3)}, p=${p.toExponential(2)}">
+              html += `<td style="color:${sig ? (est > 0 ? '#b2182b' : '#2166ac') : '#94a3b8'};font-weight:${sig ? '700' : '400'};text-align:center;" title="β=${est.toFixed(3)}, p=${fmtP(entry.p_value)}">
                 ${sig ? dir : '·'}</td>`;
             } else {
               html += '<td style="color:#e2e8f0;text-align:center;">-</td>';
@@ -2800,8 +2796,7 @@ const App = {
         <strong>Not estimable.</strong> ${pm?.error || 'PERMANOVA returned no result.'}</div>`;
       return;
     }
-    const fmtP = x => (Number.isFinite(x) ? (x < 0.001 ? x.toExponential(2) : x.toFixed(3)) : '—');
-    const r2 = Number(pm.r2), p = Number(pm.p_value), minP = Number(pm.min_attainable_p);
+    const r2 = Number(pm.r2), p = pm.p_value, minP = pm.min_attainable_p;
     const spc = pm.samples_per_class
       ? Object.entries(pm.samples_per_class).map(([g, v]) => g + ' = ' + v).join(', ') : '';
     const pHead = pm.exact ? `p (exact, ${pm.n_arrangements} label arrangements)` : `p (${pm.n_permutations} permutations)`;
@@ -2814,11 +2809,11 @@ const App = {
         <table class="stats-table" style="font-size:12px;">
           <tr><th>Test</th><th>pseudo-F</th><th>df₁</th><th>df₂</th><th>${pHead}</th><th>Smallest attainable p</th></tr>
           <tr><td>${pm.test}</td><td>${Number(pm.pseudo_f).toFixed(2)}</td><td>${pm.df1}</td><td>${pm.df2}</td>
-              <td>${fmtP(p)}</td><td>${fmtP(minP)}</td></tr>
+              <td>${fmtP(p, 3)}</td><td>${fmtP(minP, 3)}</td></tr>
         </table>
       </div>
       <p style="font-size:11px;color:#64748b;margin:6px 0 0;">${pm.n_samples} biological samples (${spc}); one mean profile per sample, Euclidean distance.
-        At this replicate count no p below ${fmtP(minP)} is possible, so R² is the number to read; p only says whether the observed partition is the most extreme one.</p>`;
+        At this replicate count no p below ${fmtP(minP, 3)} is possible, so R² is the number to read; p only says whether the observed partition is the most extreme one.</p>`;
   },
 
   renderStratifiedSignaturesChart(containerId, stratSigs, strata, groups, markers, stratifyBy) {
@@ -3232,9 +3227,10 @@ const App = {
       // Distribution tests
       if (data.ks_test) {
         const t = data.ks_test;
-        const kp = Number(t.ks_p_value);
-        const wp = Number(t.wilcoxon_p_value);
-        const fp = Number(t.fisher_p_value);
+        // Raw p fields, not Number(): fmtP renders a null p as "—" (R14)
+        const kp = t.ks_p_value;
+        const wp = t.wilcoxon_p_value;
+        const fp = t.fisher_p_value;
         const cd = Number(t.cliffs_delta);
         const cdInterp = Math.abs(cd) < 0.147 ? 'negligible' : Math.abs(cd) < 0.33 ? 'small' : Math.abs(cd) < 0.474 ? 'medium' : 'large';
         const groups = ensureArray(t.groups);
@@ -3243,29 +3239,28 @@ const App = {
           // ---- 3+ groups: omnibus ANOVA + Tukey HSD pairwise ----
           const rt = t.replicate_test;
           if (rt && rt.pairwise) {
-            const op = Number(rt.omnibus_p_value);
-            const kp2 = Number(rt.kruskal_p_value);
-            const osig = op < 0.05;
+            const op = rt.omnibus_p_value;
+            const kp2 = rt.kruskal_p_value;
+            const osig = isSig(op);
             html += `<div style="margin-top:12px;padding:12px;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;font-size:12px;">
               <strong style="font-size:13px;color:#15803d;">🧪 Multi-group replicate-level test (${groups.length} groups)</strong><br>
               <span style="font-size:10px;color:#64748b;">${rt.note || 'Biological replicates are the unit of analysis.'}</span><br><br>
               <strong>Omnibus one-way ANOVA</strong>: F(${rt.omnibus_df1}, ${rt.omnibus_df2}) = ${Number(rt.omnibus_F).toFixed(2)},
-              p = ${op < 0.001 ? op.toExponential(2) : op.toFixed(4)}
+              p = ${fmtP(op)}
               ${osig ? ' <span style="color:#16a34a">✓ significant</span>' : ' <span style="color:#94a3b8">ns</span>'}<br>
-              <span style="font-size:11px;color:#64748b;">Kruskal-Wallis (nonparametric backup): p = ${kp2 < 0.001 ? kp2.toExponential(2) : kp2.toFixed(4)}</span>
+              <span style="font-size:11px;color:#64748b;">Kruskal-Wallis (nonparametric backup): p = ${fmtP(kp2)}</span>
             </div>`;
             html += `<div style="margin-top:8px;font-size:12px;">
               <strong>Tukey HSD pairwise (family-wise corrected)</strong>
               <table class="stats-table" style="font-size:11px;margin-top:4px;">
               <thead><tr><th>Comparison</th><th>Δ frac (pp)</th><th>95% CI</th><th>p.adj</th><th></th></tr></thead><tbody>`;
             ensureArray(rt.pairwise).forEach(p => {
-              const padj = Number(p.p_adj);
-              const sig = padj < 0.05;
+              const sig = isSig(p.p_adj);
               html += `<tr>
                 <td>${p.comparison}</td>
                 <td>${(Number(p.diff_frac) * 100).toFixed(1)}</td>
                 <td>${(Number(p.ci_lo) * 100).toFixed(1)} to ${(Number(p.ci_hi) * 100).toFixed(1)}</td>
-                <td>${padj < 0.001 ? padj.toExponential(2) : padj.toFixed(4)}</td>
+                <td>${fmtP(p.p_adj)}</td>
                 <td>${sig ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#94a3b8">ns</span>'}</td>
               </tr>`;
             });
@@ -3281,12 +3276,12 @@ const App = {
         // REPLICATE-LEVEL TEST (primary inference)
         if (t.replicate_test && t.replicate_test.p_value !== undefined) {
           const rt = t.replicate_test;
-          const rp = Number(rt.p_value);
-          const rsig = rp < 0.05;
+          const rp = rt.p_value;
+          const rsig = isSig(rp);
           html += `<div style="margin-top:12px;padding:12px;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;font-size:12px;">
             <strong style="font-size:13px;color:#15803d;">🧪 Replicate-Level Test (Primary) — ${groups[0]} vs ${groups[1]}</strong><br>
             <span style="font-size:10px;color:#64748b;">${rt.note || 'Biological replicates are the unit of analysis.'}</span><br><br>
-            <strong>Fraction-positive t-test</strong>: p = ${rp < 0.001 ? rp.toExponential(2) : rp.toFixed(4)}
+            <strong>Fraction-positive t-test</strong>: p = ${fmtP(rp)}
             ${rsig ? ' <span style="color:#16a34a">✓ significant</span>' : ' <span style="color:#94a3b8">ns</span>'}<br>
             Mean fraction positive: ${groups[0]} = ${(Number(rt.mean_frac_g1) * 100).toFixed(1)}%,
             ${groups[1]} = ${(Number(rt.mean_frac_g2) * 100).toFixed(1)}%
@@ -3302,9 +3297,8 @@ const App = {
         // Replicate-level mean intensity test
         if (t.replicate_mean_test) {
           const rmt = t.replicate_mean_test;
-          const rmtp = Number(rmt.p_value);
           html += `<div style="margin-top:4px;padding:6px 12px;background:#ecfdf5;border-radius:4px;font-size:11px;">
-            <strong>Replicate mean intensity t-test</strong>: p = ${rmtp < 0.001 ? rmtp.toExponential(2) : rmtp.toFixed(4)}
+            <strong>Replicate mean intensity t-test</strong>: p = ${fmtP(rmt.p_value)}
             (mean: ${Number(rmt.mean_g1).toFixed(3)} vs ${Number(rmt.mean_g2).toFixed(3)})
           </div>`;
         }
@@ -3331,11 +3325,11 @@ const App = {
             ${emdDir ? '<br><span style="font-size:10px;color:#64748b;">' + emdDir + '</span>' : ''}
           </div>
           <strong>Wilcoxon rank-sum</strong>: W = ${Number(t.wilcoxon_statistic).toFixed(0)},
-          p = ${wp < 0.001 ? wp.toExponential(2) : wp.toFixed(4)}<br>
+          p = ${fmtP(wp)}<br>
           <strong>KS test</strong>: D = ${Number(t.ks_statistic).toFixed(4)},
-          p = ${kp < 0.001 ? kp.toExponential(2) : kp.toFixed(4)}
+          p = ${fmtP(kp)}
           <span style="font-size:10px;color:#64748b;">(misses pure shape changes — see EMD)</span><br>
-          <strong>Fisher's exact</strong>: p = ${!isNaN(fp) ? (fp < 0.001 ? fp.toExponential(2) : fp.toFixed(4)) : '—'}<br>
+          <strong>Fisher's exact</strong>: p = ${fmtP(fp)}<br>
           <strong>Cliff's delta</strong>: δ = ${!isNaN(cd) ? cd.toFixed(3) : '—'}
           <span style="color:#64748b;">(${cdInterp}${cd > 0 ? ', ' + groups[1] + ' higher' : cd < 0 ? ', ' + groups[0] + ' higher' : ''})</span><br>
           <strong>Δ fraction positive</strong>: ${(Number(t.delta_fraction) * 100).toFixed(1)} percentage points
@@ -3572,7 +3566,7 @@ const App = {
         <td>${r1.toFixed(3)}</td><td>${r2.toFixed(3)}</td>
         <td style="font-weight:600;color:${delta > 0 ? '#b2182b' : '#2166ac'}">${delta > 0 ? '+' : ''}${delta.toFixed(3)}</td>
         <td>${Number(d.z_statistic).toFixed(2)}</td>
-        <td>${d.p_adjusted < 0.001 ? d.p_adjusted.toExponential(2) : d.p_adjusted.toFixed(4)}</td>
+        <td>${fmtP(d.p_adjusted)}</td>
         <td style="font-size:10px;color:#64748b;">${d.test_note ? (d.test_note.includes('replicate') ? '<span style="color:#15803d;">replicates</span>' : '<span style="color:#f59e0b;">cells</span>') : '—'}</td>
         <td style="font-size:11px;">${interp}</td>
       </tr>`;

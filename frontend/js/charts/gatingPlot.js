@@ -261,7 +261,8 @@ const GatingPlot = {
       // R2: the replicate-level test is the primary result. Effect size is
       // Δ percentage points (g2 − g1) with its Welch 95% CI; Cohen's d and
       // the t/df sit in the tooltip on Δ rather than as columns.
-      const fmtP = p => (Number.isFinite(p) ? (p < 0.001 ? p.toExponential(2) : p.toFixed(4)) : '—');
+      // p-values go through the shared fmtP in api.js (R14): pass the raw
+      // field, never Number(field), so a null p renders "—" rather than 0.
       // toFixed keeps the sign of tiny negatives ("-0.0"); render those as 0.0.
       const fmtNum = (v, d = 1) => {
         if (!Number.isFinite(v)) return '—';
@@ -285,8 +286,8 @@ const GatingPlot = {
             <td>${fmtNum(100 * Number(t.mean_frac_g2))}%</td>
             <td title="${tip}"><strong>${fmtNum(Number(t.delta_pp))}</strong> [${fmtNum(Number(t.ci_low))}, ${fmtNum(Number(t.ci_high))}]</td>
             <td>${t.n_reps_g1}/${t.n_reps_g2}</td>
-            <td>${fmtP(Number(t.p_value))}</td>
-            <td>${fmtP(Number(t.p_adjusted))}</td>
+            <td>${fmtP(t.p_value)}</td>
+            <td>${fmtP(t.p_adjusted)}</td>
           </tr>`;
         });
         html += '</tbody></table>';
@@ -301,7 +302,7 @@ const GatingPlot = {
       // the cell-level p lives in the tooltip only and carries no verdict.
       if (data.chi_test && Number.isFinite(Number(data.chi_test.statistic))) {
         html += `<p style="font-size:12px;color:#64748b;margin-top:8px;"
-          title="cell-level p = ${fmtP(Number(data.chi_test.p_value))} — exploratory, not for inference">
+          title="cell-level p = ${fmtP(data.chi_test.p_value)} — exploratory, not for inference">
           Chi-square on individual cells (exploratory): χ² = ${Number(data.chi_test.statistic).toFixed(2)},
           df = ${data.chi_test.df}, Cramér's V = ${fmtNum(Number(data.chi_test.cramers_v), 2)}
         </p>`;

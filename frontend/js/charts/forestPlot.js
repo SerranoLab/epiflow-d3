@@ -199,8 +199,7 @@ const ForestPlot = {
 
       // P-value
       const pVal = d['p.value'];
-      const pText = pVal < 0.001 ? 'p<0.001' :
-                    pVal < 0.01 ? `p=${pVal.toFixed(3)}` : `p=${pVal.toFixed(2)}`;
+      const pText = `p=${fmtP(pVal, 3)}`;   // shared formatter (api.js): scientific below 0.001, "—" when missing
       g.append('text')
         .attr('x', width + 10).attr('y', y)
         .attr('dominant-baseline', 'middle').attr('font-size', '10px')
@@ -220,7 +219,7 @@ const ForestPlot = {
             β = ${d.estimate.toFixed(4)}<br>
             SE = ${d['std.error'].toFixed(4)}<br>
             95% CI: [${d.ci_lo.toFixed(3)}, ${d.ci_hi.toFixed(3)}]<br>
-            p = ${pVal.toExponential(2)}<br>
+            p = ${fmtP(pVal)}<br>
             ${d.cohens_d != null ? "Cohen's d = " + d.cohens_d.toFixed(3) : ''}
             ${d.n_cells ? '<br>n = ' + d.n_cells.toLocaleString() : ''}
           `);

@@ -136,7 +136,7 @@ const VolcanoPlot = {
         tooltip.html(`
           <strong>${d.label}</strong><br>
           β = ${d.estimate.toFixed(4)}<br>
-          p = ${d['p.value'].toExponential(2)}<br>
+          p = ${fmtP(d['p.value'])}<br>
           -log₁₀(p) = ${d.neg_log10_p.toFixed(2)}<br>
           ${d.cohens_d != null ? "Cohen's d = " + d.cohens_d.toFixed(3) : ''}
         `);
