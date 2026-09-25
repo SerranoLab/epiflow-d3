@@ -12,20 +12,30 @@ const VolcanoPlot = {
       return;
     }
 
-    const data = ensureArray(results).map(r => ({
+    // R20/L4: the y axis and the significance rule use the BH-adjusted p
+    // (p_adj, computed across all markers in run_all_markers_lmm), matching
+    // the all-markers table. A payload without p_adj falls back to the
+    // unadjusted p and the axis says so.
+    const rowsIn = ensureArray(results);
+    const usesAdj = rowsIn.some(r => r.p_adj != null && !isNaN(Number(r.p_adj)));
+    const pField = usesAdj ? 'p_adj' : 'p.value';
+    const pName = usesAdj ? 'p_adj (BH)' : 'p (unadjusted)';
+    const data = rowsIn.map(r => ({
       ...r,
       estimate: Number(r.estimate),
       'std.error': Number(r['std.error']),
       'p.value': Number(r['p.value']),
+      p_adj: r.p_adj != null ? Number(r.p_adj) : NaN,
       cohens_d: r.cohens_d != null ? Number(r.cohens_d) : null,
       marker: Array.isArray(r.marker) ? r.marker[0] : String(r.marker || ''),
       subset: r.subset ? (Array.isArray(r.subset) ? r.subset[0] : String(r.subset)) : null,
     })).filter(r =>
-      !isNaN(r.estimate) && !isNaN(r['p.value']) && r['p.value'] > 0
+      !isNaN(r.estimate) && !isNaN(r[pField]) && r[pField] > 0
     ).map(d => ({
       ...d,
-      neg_log10_p: -Math.log10(d['p.value']),
-      significant: d['p.value'] < 0.05 && Math.abs(d.estimate) > 0.1,
+      neg_log10_p: -Math.log10(d[pField]),
+      // |β| > 0.1 arcsinh units is a display cut for labelling, not a test
+      significant: d[pField] < 0.05 && Math.abs(d.estimate) > 0.1,
       label: d.subset ? `${d.marker} · ${d.subset}` : d.marker
     }));
 
@@ -57,7 +67,7 @@ const VolcanoPlot = {
       .attr('y', 32)
       .attr('text-anchor', 'middle')
       .attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text(`${contrast0 ? contrast0 + ' · ' : ''}Significant: p<0.05 & |β|>0.1`);
+      .text(`${contrast0 ? contrast0 + ' · ' : ''}Highlighted: ${pName} < 0.05 & |β| > 0.1 arcsinh units (display cut, not a test)`);
     // Interaction hint lives in its own element (class ui-hint) so the HTML
     // report can strip it; it means nothing on paper.
     svg.append('text')
@@ -94,7 +104,7 @@ const VolcanoPlot = {
     g.append('text')
       .attr('x', width / 2).attr('y', height + 40)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text('Effect size (β)');
+      .text('LMM β (difference vs reference, arcsinh units)');
 
     const yAxisG = g.append('g').attr('class', 'axis')
       .call(d3.axisLeft(yScale).ticks(8));
@@ -102,7 +112,7 @@ const VolcanoPlot = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -55)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text('-log₁₀(p-value)');
+      .text(`−log₁₀ ${pName}`);
 
     const gridG = g.append('g').attr('class', 'grid')
       .call(d3.axisLeft(yScale).ticks(8).tickSize(-width).tickFormat(''));
@@ -120,7 +130,7 @@ const VolcanoPlot = {
     plotG.append('text').attr('class', 'sig-label')
       .attr('x', width - 5).attr('y', yScale(sigLine) - 5)
       .attr('text-anchor', 'end').attr('font-size', '10px').attr('fill', '#dc2626')
-      .text('p = 0.05');
+      .text(`${pName} = 0.05`);
 
     plotG.append('line').attr('class', 'zero-line')
       .attr('x1', xScale(0)).attr('x2', xScale(0))
@@ -148,9 +158,9 @@ const VolcanoPlot = {
         tooltip.transition().duration(100).style('opacity', 1);
         tooltip.html(`
           <strong>${d.label}</strong><br>
-          β = ${d.estimate.toFixed(4)}<br>
-          p = ${fmtP(d['p.value'])}<br>
-          -log₁₀(p) = ${d.neg_log10_p.toFixed(2)}<br>
+          β = ${d.estimate.toFixed(4)} (arcsinh units)<br>
+          p = ${fmtP(d['p.value'])} · p_adj (BH) = ${fmtP(d.p_adj)}<br>
+          −log₁₀ ${pName} = ${d.neg_log10_p.toFixed(2)}<br>
           ${d.cohens_d != null ? "d (β / pooled SD) = " + d.cohens_d.toFixed(3) : ''}
         `);
       })

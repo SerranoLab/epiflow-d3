@@ -35,5 +35,18 @@ check(has(f, "const simpleSig = ensureArray(data.significance || []);"), "render
 check(has("USER_GUIDE.md", "Welch t-test on replicate means"), "USER_GUIDE names the violin test")
 check(ver_of("violinPlot.js") >= "1.2.5", "violinPlot.js cache-busting bump (>= 1.2.5)")
 
+# ---- L4 + R20: volcano/forest name the LMM β in arcsinh units and the BH-adjusted p; no fold change anywhere ----
+cat("\n--- L4 + R20 volcano / forest labels ---\n")
+v <- "frontend/js/charts/volcanoPlot.js"; fo <- "frontend/js/charts/forestPlot.js"
+check(has(v, "neg_log10_p: -Math.log10(d[pField])") && has(v, "const pField = usesAdj ? 'p_adj' : 'p.value';"), "volcano y and rule use p_adj (BH) when present")
+check(has(v, "LMM β (difference vs reference, arcsinh units)") && has(fo, "LMM β (difference vs reference, arcsinh units)"), "volcano and forest x axes name β in arcsinh units")
+check(lacks(v, "'Effect size (β)'") && lacks(fo, "'Effect size (β)'") && lacks(v, "'-log₁₀(p-value)'") && lacks(v, "Significant: p<0.05"), "old 'Effect size (β)', '-log₁₀(p-value)' and 'Significant: p<0.05' labels are gone")
+check(has(v, "display cut, not a test"), "volcano subtitle calls |β| > 0.1 a display cut")
+for (d in c("README.md", "USER_GUIDE.md", "frontend/js/app.js"))
+  check(lacks(d, "fold-change") && lacks(d, "fold change") && lacks(d, "Log₂") && lacks(d, "log₂ fold"), sprintf("%s has no fold-change / log₂ wording", d))
+check(has("README.md", "−log₁₀ BH-adjusted p") && has("USER_GUIDE.md", "−log₁₀ BH-adjusted p"), "README and USER_GUIDE describe the volcano as β vs −log₁₀ BH-adjusted p")
+check(has("frontend/js/app.js", "The volcano plot shows β (arcsinh units) against −log₁₀ of the BH-adjusted p") && has("frontend/js/app.js", "the volcano against −log₁₀ of the BH-adjusted p"), "both Methods texts carry the volcano sentence")
+check(ver_of("volcanoPlot.js") >= "1.2.6" && ver_of("forestPlot.js") >= "1.2.8", "volcanoPlot / forestPlot cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

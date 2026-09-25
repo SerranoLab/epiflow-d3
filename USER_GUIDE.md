@@ -149,7 +149,7 @@ Effect sizes with 95% confidence intervals across all markers. Sorted by magnitu
 
 ### Volcano Plot
 
-Log₂ fold-change vs. −log₁₀ adjusted p-value. Markers in the upper corners are both significant and biologically meaningful.
+LMM β (the difference vs the reference group, in arcsinh units; nothing is expressed as a ratio) vs. −log₁₀ BH-adjusted p. Points above the dashed line have p_adj < 0.05; the |β| > 0.1 cut only decides which points are labelled, it is not a test. The forest plot shows the same β with its 95% t interval.
 
 ### Cell Cycle Analysis
 

@@ -21,8 +21,8 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 
 ### Statistical Analysis
 - **Linear mixed models (LMM)** — `value ~ group + (1|replicate)` with Benjamini-Hochberg correction, accounting for cell-level nesting within biological replicates
-- **Forest plots** — effect sizes with 95% confidence intervals across all markers
-- **Volcano plots** — log₂ fold-change vs. −log₁₀ adjusted p-value with significance thresholds
+- **Forest plots** — LMM β (difference vs reference, arcsinh units) with 95% t intervals across all markers
+- **Volcano plots** — LMM β (arcsinh units) vs. −log₁₀ BH-adjusted p; the |β| > 0.1 line is a display cut, not a test
 - **Cell cycle–resolved analysis** — per-phase marker comparisons (G1, S, G2/M) with summary heatmaps
 
 ### Advanced Analysis

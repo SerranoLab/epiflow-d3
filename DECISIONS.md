@@ -499,7 +499,14 @@ payload names its scale; no "SBR" field; knee computed from absolute steps.
 ---
 
 ## R20 — Volcano is documented as "log₂ fold-change vs −log₁₀ adjusted p"; it plots LMM β on arcsinh vs unadjusted p
-Status: open (2026-09-25)
+Status: done (2026-09-25), with L4, branch audit/labels. Decision: the
+volcano's y axis and its highlight rule use the BH-adjusted `p_adj`
+(computed across all markers in `run_all_markers_lmm`), matching the
+all-markers table; a payload without `p_adj` falls back to the unadjusted p
+and the axis says "p (unadjusted)". x axis and forest axis read "LMM β
+(difference vs reference, arcsinh units)"; the |β| > 0.1 line is labelled
+as a display cut, not a test; README, USER_GUIDE and both Methods texts say
+the same. No fold change is computed anywhere.
 
 What changes. `README.md:25` and `USER_GUIDE.md:152` describe the volcano as
 log₂ fold-change against −log₁₀ adjusted p. Nothing in the codebase
@@ -803,6 +810,13 @@ now prints it as a subtitle ("Welch t (replicate means): p = 0.023 (3 vs 3
 replicates)") or "replicate-level test not estimable (fewer than 2
 replicates per group)" when two groups have no test. USER_GUIDE says which
 test each violin shows.
+
+### L4 — README and User Guide called the volcano "log₂ fold-change vs −log₁₀ adjusted p"
+Status: done (2026-09-25), together with R20 (see R20 for the axis and p decision)
+
+Nothing computes a fold change; x is the LMM β in arcsinh units and, until
+this pass, y was the unadjusted p. Docs now say "LMM β (arcsinh units) vs
+−log₁₀ BH-adjusted p" and the code plots p_adj.
 
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check

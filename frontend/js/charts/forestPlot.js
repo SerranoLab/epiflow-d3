@@ -116,7 +116,7 @@ const ForestPlot = {
       .attr('y', 48)
       .attr('text-anchor', 'middle')
       .attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text('Dot = effect size (β); whiskers = 95% CI. A CI crossing the dashed line (β = 0) means not significant.');
+      .text('Dot = LMM β (difference vs reference, arcsinh units); whiskers = 95% t interval on the Satterthwaite df. An interval crossing β = 0 means not significant.');
 
     const xExtent = d3.extent(data.flatMap(d => [d.ci_lo, d.ci_hi]));
     const xPad = (xExtent[1] - xExtent[0]) * 0.1 || 1;
@@ -136,7 +136,7 @@ const ForestPlot = {
     g.append('text')
       .attr('x', width / 2).attr('y', height + 40)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text('Effect size (β)');
+      .text('LMM β (difference vs reference, arcsinh units)');
 
     // Directional guide so a reader knows which way is "more" / "less"
     g.append('text')
