@@ -316,11 +316,17 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
       pos_peak <- max(pos_scaled, na.rm = TRUE)
       density_peak <- max(d$y)
       min_visible <- density_peak * 0.08  # at least 8% of density height
+      # L7: a component drawn below 8% of the density peak is rescaled up to
+      # that height for visibility; the factor is reported so the legend can
+      # say by how much (the curve is no longer the fitted component).
+      neg_boost <- 1; pos_boost <- 1
       if (neg_peak > 0 && neg_peak < min_visible) {
-        neg_scaled <- neg_scaled * (min_visible / neg_peak)
+        neg_boost  <- min_visible / neg_peak
+        neg_scaled <- neg_scaled * neg_boost
       }
       if (pos_peak > 0 && pos_peak < min_visible) {
-        pos_scaled <- pos_scaled * (min_visible / pos_peak)
+        pos_boost  <- min_visible / pos_peak
+        pos_scaled <- pos_scaled * pos_boost
       }
       gmm_curves <- list(
         x = xs,
@@ -328,6 +334,8 @@ compute_positivity <- function(data, marker, comparison_var = "genotype",
         pos = pos_scaled,
         neg_boosted = neg_peak < min_visible,
         pos_boosted = pos_peak < min_visible,
+        neg_boost_factor = neg_boost,
+        pos_boost_factor = pos_boost,
         mean_neg = gmm_result$mean_neg,
         mean_pos = gmm_result$mean_pos
       )

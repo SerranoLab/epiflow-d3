@@ -840,6 +840,17 @@ signature-profile heatmap in the Diagnostic panel is a different quantity —
 `compute_signatures`) — and its subtitle now says that instead of "mean
 z-scores".
 
+### L7 — Positivity GMM component curves are rescaled for visibility without saying by how much
+Status: done (2026-09-25)
+
+`compute_positivity` (`phase2.R`) rescales a fitted component whose peak
+falls below 8 % of the density peak up to that height; the legend said only
+"(scaled ×)". The payload now carries `neg_boost_factor` /
+`pos_boost_factor`, the legend reads "GMM negative (×3.2 for visibility)",
+and a footnote states that a dashed component is drawn taller than fitted.
+The threshold and the fractions positive are unaffected (they use the fit,
+not the drawn curve).
+
 ### L11 — Grouped-CV headline title is fixed "leave-one-sample-out" while cv_type can be grouped 5-fold
 Status: open (2026-09-25), from the R28 browser check
 

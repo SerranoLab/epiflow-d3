@@ -65,5 +65,12 @@ check(has("frontend/js/app.js", "(group mean − global mean) / global cell SD p
 check(has("frontend/index.html", "read the sign, not the size"), "heatmap tab help says read sign, not size")
 check(ver_of("heatmap.js") >= "1.2.3" && ver_of("js/app.js") >= "1.3.12", "heatmap.js / app.js cache-busting bumps")
 
+# ---- L7: positivity GMM curves state their visibility rescaling factor ----
+cat("\n--- L7 positivity GMM legend ---\n")
+check(has("api/R/phase2.R", "neg_boost_factor = neg_boost") && has("api/R/phase2.R", "pos_boost_factor = pos_boost"), "phase2.R reports the boost factors")
+check(has("frontend/js/charts/positivityPlot.js", "for visibility)") && lacks("frontend/js/charts/positivityPlot.js", "' (scaled ×)'"), "legend says ×factor for visibility; old '(scaled ×)' gone")
+check(has("frontend/js/charts/positivityPlot.js", "drawn taller than fitted"), "legend footnote says the component is drawn taller than fitted")
+check(ver_of("positivityPlot.js") >= "1.2.3", "positivityPlot.js cache-busting bump (>= 1.2.3)")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

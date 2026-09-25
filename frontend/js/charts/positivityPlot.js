@@ -197,18 +197,26 @@ const PositivityPlot = {
     // GMM legend
     if (data.gmm_curves) {
       const gy = 20 + groupStats.length * 50 + 10;
+      // L7: a component below 8% of the density peak is drawn rescaled; say by
+      // how much, so the reader knows the curve is not the fitted component.
       const negBoosted = data.gmm_curves.neg_boosted;
       const posBoosted = data.gmm_curves.pos_boosted;
+      const boostText = f => (Number.isFinite(Number(f)) ? ` (×${Number(f).toFixed(1)} for visibility)` : ' (rescaled for visibility)');
       legend.append('line').attr('x1', 0).attr('x2', 24).attr('y1', gy).attr('y2', gy)
         .attr('stroke', '#1e293b').attr('stroke-width', 2).attr('stroke-dasharray', '8,4');
       legend.append('text').attr('x', 30).attr('y', gy + 4)
         .attr('font-size', '10px').attr('fill', '#1e293b')
-        .text('GMM negative' + (negBoosted ? ' (scaled ×)' : ''));
+        .text('GMM negative' + (negBoosted ? boostText(data.gmm_curves.neg_boost_factor) : ''));
       legend.append('line').attr('x1', 0).attr('x2', 24).attr('y1', gy + 16).attr('y2', gy + 16)
         .attr('stroke', '#d97706').attr('stroke-width', 2).attr('stroke-dasharray', '8,4');
       legend.append('text').attr('x', 30).attr('y', gy + 20)
         .attr('font-size', '10px').attr('fill', '#d97706')
-        .text('GMM positive' + (posBoosted ? ' (scaled ×)' : ''));
+        .text('GMM positive' + (posBoosted ? boostText(data.gmm_curves.pos_boost_factor) : ''));
+      if (negBoosted || posBoosted) {
+        legend.append('text').attr('x', 0).attr('y', gy + 34)
+          .attr('font-size', '9px').attr('fill', '#94a3b8')
+          .text('dashed component drawn taller than fitted (below 8% of the density peak)');
+      }
     }
 
     // Tooltip
