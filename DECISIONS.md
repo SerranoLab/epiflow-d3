@@ -1025,6 +1025,16 @@ profiles of mean per-cell mark intensity, z-scored per marker"; USER_GUIDE
 section "Epigenetic Signatures" retitled and reworded the same way. Static
 checks in `test_labels.R`.
 
+### L17 — Gating plot axes name the marker only
+Status: open (2026-09-30)
+
+`gatingPlot.js` labels its x and y axes with the bare marker names
+(`data.marker_x`, `data.marker_y`); CLAUDE.md now requires quantity and
+scale on every axis. Fix: "H3K27ac (arcsinh intensity)" on both axes (the
+gating scatter draws the imported arcsinh values; phenotypic markers are on
+the same scale), and a `test_labels.R` check. Fold into the next label
+commit or the Gate Finder work, whichever comes first.
+
 ### L15 — Ridge subtitle "n" counts long-format rows (cells × markers), not cells
 Status: done (2026-09-25), branch fix/ridge-labels, from the v1.4.1 browser check
 
@@ -1058,6 +1068,15 @@ equals that genotype's distinct-cell count, not 5× it.
 ---
 
 ## Gate Finder — motivation
+
+Design note (2026-09-30). Supervised population-discovery methods — CellCnn
+(Arvaniti & Claassen 2017), citrus (Bruggner et al. 2014) and MASC (Fonseka
+et al. 2018) — learn or test which cell subsets associate with a sample-level
+label and need tens of samples (they are cross-validated or mixed-modelled at
+the sample level). With 3–4 replicates per group they cannot be fit honestly,
+so they are deferred until a patient cohort exists. Until then the Gate
+Finder stays a within-dataset tool (clusters → gates, AUROC separation) whose
+claims are descriptive, never a classifier validated on held-out samples.
 - Quadrant gating with axis-aligned thresholds is a poor fit for diagonal
   populations (seen on the 416k-cell, 3-group dataset, 2026-09-24): a
   population that runs along the diagonal is split across two or more

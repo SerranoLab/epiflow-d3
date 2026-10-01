@@ -17,6 +17,9 @@ the frontend. Local dev: see LOCAL_DEV.md (API on :8000, frontend on :8080).
 - Every axis label, subtitle and legend names the quantity actually plotted and
   the test actually computed. If the code changes the test, change the label
   in the same commit.
+- Every plot axis names the quantity **and its scale**, e.g. "H3K27ac (arcsinh
+  intensity)", "Δβ (arcsinh units)", "fraction of cells (%)". A bare marker
+  name or a bare "Intensity" is not an axis label.
 - Effect sizes are reported next to every p-value.
 - Seed every stochastic step (`set.seed`, `seed =` arguments) and keep
   analyzed-vs-displayed cell counts separate in the payload.
@@ -29,6 +32,8 @@ the frontend. Local dev: see LOCAL_DEV.md (API on :8000, frontend on :8080).
   edits. Surgical edits, not rewrites.
 - Every pass ends with a test script in the repo root (`test_*.R`) that would
   have caught the bug, runnable with `Rscript test_x.R` against the local API.
+- `test_labels.R` gets a static check for every new chart: its axis labels
+  (quantity + scale), subtitle and legend strings are asserted present.
 - Frontend and backend changes for one finding go in the same commit.
 - When a chart's payload changes, bump the `?v=` query string of that JS file
   in `frontend/index.html` so browsers drop the cached copy.
