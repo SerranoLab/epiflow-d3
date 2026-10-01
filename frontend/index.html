@@ -479,7 +479,10 @@
           <div class="panel-header">
             <h2>Marker Distributions (arcsinh intensity)</h2>
             <div class="panel-controls">
-              <select id="violin-marker" class="select-input"></select>
+              <select id="violin-scale" class="select-input" title="y axis per panel on the imported arcsinh scale, or one shared standardized axis">
+                <option value="raw">y: independent per panel (arcsinh intensity)</option>
+                <option value="robust">y: shared, standardized per marker (median / MAD; MAD = median absolute deviation)</option>
+              </select>
               <select id="violin-groupby" class="select-input">
                 <option value="genotype">Group by Genotype</option>
                 <option value="identity">Group by Identity</option>
@@ -493,7 +496,11 @@
               <button class="btn btn-sm" id="violin-export-png"><i class="fas fa-image"></i> PNG</button>
             </div>
           </div>
-          <div class="help-panel"><i class="fas fa-info-circle"></i> Violin plots show distribution shape with box plot summaries. <strong>Tip:</strong> Group by Identity, color by Genotype for side-by-side paired comparisons within each cell population.</div>
+          <div class="feature-select-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            <span style="font-size:11px;color:#64748b;font-weight:600;">Markers (one panel each):</span>
+            <span id="violin-marker-checks" style="display:flex;flex-wrap:wrap;gap:12px;font-size:12px;"></span>
+          </div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> One violin panel per ticked marker (small multiples), all panels sharing the group order. The y axis is the <strong>arcsinh intensity (as imported)</strong> per panel, or — with the shared option — <strong>standardized per marker (median / MAD; MAD = median absolute deviation)</strong> so every mark sits on one axis. Each panel's test is a Welch t on replicate means; in grouped mode BH is applied <strong>within the panel</strong>, not across panels. Export writes one SVG with lettered panels. <strong>Tip:</strong> Group by Identity, color by Genotype for side-by-side paired comparisons within each cell population.</div>
           <div class="chart-container" id="violin-chart"></div>
         </div>
 
@@ -1111,7 +1118,7 @@
   <script src="js/api.js?v=1.2.5"></script>
   <script src="js/dataManager.js?v=1.2.2"></script>
   <script src="js/charts/ridgePlot.js?v=1.2.5"></script>
-  <script src="js/charts/violinPlot.js?v=1.2.5"></script>
+  <script src="js/charts/violinPlot.js?v=1.3.0"></script>
   <script src="js/charts/pcaPlot.js?v=1.2.2"></script>
   <script src="js/charts/heatmap.js?v=1.2.3"></script>
   <script src="js/charts/forestPlot.js?v=1.2.8"></script>
@@ -1125,6 +1132,6 @@
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.4"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.21"></script>
+  <script src="js/app.js?v=1.3.22"></script>
 </body>
 </html>

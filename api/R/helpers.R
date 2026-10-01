@@ -401,25 +401,9 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
   if (length(markers) == 0) return(list(error = "No H3-PTM markers in data"))
 
   # Per-marker robust standardization (median / MAD), pooled across ALL
-  # conditions so between-condition shifts are preserved. Applied uniformly to
-  # every cell of a marker. Falls back MAD -> SD -> 1 when MAD is degenerate.
-  if (identical(scale_mode, "robust")) {
-    mstats <- data %>%
-      dplyr::filter(H3PTM %in% markers, !is.na(value)) %>%
-      dplyr::group_by(H3PTM) %>%
-      dplyr::summarise(.center = median(value, na.rm = TRUE),
-                       .mad = stats::mad(value, na.rm = TRUE),
-                       .sd  = stats::sd(value, na.rm = TRUE),
-                       .groups = "drop") %>%
-      dplyr::mutate(.scale = dplyr::if_else(is.finite(.mad) & .mad > 0, .mad,
-                            dplyr::if_else(is.finite(.sd) & .sd > 0, .sd, 1)))
-    data <- data %>%
-      dplyr::left_join(dplyr::select(mstats, H3PTM, .center, .scale), by = "H3PTM") %>%
-      dplyr::mutate(value = dplyr::if_else(
-        is.finite(.center) & is.finite(.scale) & .scale > 0,
-        (value - .center) / .scale, value)) %>%
-      dplyr::select(-.center, -.scale)
-  }
+  # conditions so between-condition shifts are preserved (F2: shared with the
+  # violin small multiples via .robust_standardize_long).
+  if (identical(scale_mode, "robust")) data <- .robust_standardize_long(data, markers)$data
   # L14: same wording as the scale toggle and the help text in index.html.
   x_label <- if (identical(scale_mode, "robust")) {
     "standardized per marker (median / MAD; MAD = median absolute deviation)"
@@ -491,6 +475,43 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
   )
 }
 
+# Robust per-marker standardization of long-format H3 rows: value -> (value -
+# median) / MAD per H3PTM, pooled across ALL conditions so between-condition
+# shifts are preserved; applied uniformly to every cell of a marker. Falls
+# back MAD -> SD -> 1 when MAD is degenerate. Used by the ridge overlay and
+# the violin small multiples (F2). Returns the data and the per-marker table.
+.robust_standardize_long <- function(data, markers) {
+  mstats <- data %>%
+    dplyr::filter(H3PTM %in% markers, !is.na(value)) %>%
+    dplyr::group_by(H3PTM) %>%
+    dplyr::summarise(.center = median(value, na.rm = TRUE),
+                     .mad = stats::mad(value, na.rm = TRUE),
+                     .sd  = stats::sd(value, na.rm = TRUE),
+                     .groups = "drop") %>%
+    dplyr::mutate(.scale = dplyr::if_else(is.finite(.mad) & .mad > 0, .mad,
+                          dplyr::if_else(is.finite(.sd) & .sd > 0, .sd, 1)))
+  data <- data %>%
+    dplyr::left_join(dplyr::select(mstats, H3PTM, .center, .scale), by = "H3PTM") %>%
+    dplyr::mutate(value = dplyr::if_else(
+      is.finite(.center) & is.finite(.scale) & .scale > 0,
+      (value - .center) / .scale, value)) %>%
+    dplyr::select(-.center, -.scale)
+  list(data = data,
+       stats = data.frame(marker = mstats$H3PTM, center = mstats$.center, scale = mstats$.scale,
+                          stringsAsFactors = FALSE))
+}
+
+# Same idea for a phenotypic (wide, one value per cell) column: median / MAD
+# over distinct cells. Returns the transformed data and one stats row.
+.robust_standardize_wide <- function(data, col) {
+  cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
+  v <- cells[[col]]; v <- v[is.finite(v)]
+  center <- median(v); md <- stats::mad(v); sdv <- stats::sd(v)
+  scale <- if (is.finite(md) && md > 0) md else if (is.finite(sdv) && sdv > 0) sdv else 1
+  data[[col]] <- (data[[col]] - center) / scale
+  list(data = data, stats = data.frame(marker = col, center = center, scale = scale, stringsAsFactors = FALSE))
+}
+
 # F1: quantile summary of one marker within one level. n_cells counts the
 # finite values (one row per cell per marker); n_replicates counts the
 # replicates behind them, so a level built from a single replicate is visible
@@ -506,13 +527,15 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
        n_replicates = if (is.null(reps)) NA_integer_ else dplyr::n_distinct(reps))
 }
 
-#' Compute violin plot data
+#' One violin panel (one marker). F2: compute_violin_data() wraps this over a
+#' markers vector; the per-panel replicate-means tests and their BH (grouped
+#' mode, across groups) stay inside the panel — no adjustment across panels.
 #' @param data Filtered dataset
 #' @param marker H3-PTM marker or phenotypic marker name
 #' @param group_by Grouping variable
 #' @param h3_markers Vector of H3-PTM names (to detect marker type)
-compute_violin_data <- function(data, marker, group_by = "genotype",
-                                color_by = NULL, h3_markers = NULL) {
+.violin_panel <- function(data, marker, group_by = "genotype",
+                          color_by = NULL, h3_markers = NULL) {
   is_h3 <- !is.null(h3_markers) && marker %in% h3_markers
 
   # Determine if grouped mode (color_by differs from group_by)
@@ -681,6 +704,54 @@ compute_violin_data <- function(data, marker, group_by = "genotype",
 
     result
   }
+}
+
+#' Violin small multiples (F2): one panel per marker, every panel sharing the
+#' group order; optional per-marker robust standardization (median / MAD,
+#' the ridge overlay's code) so all panels can share one y axis.
+#' @param markers character vector (a single `marker` is still accepted)
+#' @param scale_mode "raw" (arcsinh intensity as imported) or "robust"
+compute_violin_data <- function(data, markers = NULL, group_by = "genotype",
+                                color_by = NULL, h3_markers = NULL,
+                                scale_mode = "raw", marker = NULL) {
+  markers <- as.character(unlist(markers %||% marker))
+  markers <- markers[nzchar(markers)]
+  if (!length(markers)) return(list(error = "No marker selected"))
+  h3_markers <- h3_markers %||% character(0)
+
+  standardization <- NULL
+  if (identical(scale_mode, "robust")) {
+    h3_sel <- intersect(markers, h3_markers)
+    if (length(h3_sel)) {
+      st <- .robust_standardize_long(data, h3_sel); data <- st$data; standardization <- st$stats
+    }
+    for (col in intersect(setdiff(markers, h3_sel), names(data))) {
+      st <- .robust_standardize_wide(data, col); data <- st$data
+      standardization <- rbind(standardization, st$stats)
+    }
+  }
+
+  panels <- lapply(markers, function(m) {
+    p <- .violin_panel(data, m, group_by = group_by, color_by = color_by, h3_markers = h3_markers)
+    p$marker <- m
+    p
+  })
+  groups_seen <- unique(unlist(lapply(panels, function(p)
+    if (is.null(p$error)) vapply(p$violins, function(v) as.character(v$group), character(1)) else character(0))))
+
+  list(
+    panels = safe_I(panels),
+    markers = safe_I(markers),
+    group_by = group_by,
+    color_by = color_by,
+    scale_mode = scale_mode,
+    # L14 wording: the axis says what scale it is on.
+    y_label = if (identical(scale_mode, "robust"))
+      "standardized per marker (median / MAD; MAD = median absolute deviation)" else "arcsinh intensity (as imported)",
+    standardization = if (is.null(standardization)) NULL else safe_I(lapply(seq_len(nrow(standardization)), function(i) as.list(standardization[i, ]))),
+    group_order = safe_I(sort(groups_seen)),
+    multiplicity = "BH within panel; no adjustment across panels"
+  )
 }
 
 # ---- PCA computation ----

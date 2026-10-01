@@ -712,12 +712,14 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # F2: markers vector -> one panel per marker; `marker` (single) still accepted.
   compute_violin_data(
     store$filtered_data,
-    marker     = params$marker %||% store$metadata$h3_markers[1],
+    markers    = params$markers %||% params$marker %||% store$metadata$h3_markers[1],
     group_by   = params$group_by %||% "genotype",
     color_by   = params$color_by,
-    h3_markers = store$metadata$h3_markers
+    h3_markers = store$metadata$h3_markers,
+    scale_mode = params$scale_mode %||% "raw"
   )
 }
 

@@ -598,6 +598,16 @@ option ii) reads the stamped cofactor or refuses. Until then the Gate
 Finder exports arcsinh thresholds only, and the schema docs say
 "arcsinh-transformed fluorescence intensity".
 
+Validation (2026-10-01), on the NPC PAX6/H3K27me3 export (189,059 cells,
+12 channels): `asinh(raw / cofactor)` with per-channel cofactors read from
+the OmiQ Scaling CSV reproduces OmiQ's scaled export to the export's
+5-significant-digit rounding (max |diff| 9e-5; slope 1, intercept 0).
+Cofactors differ by channel on this panel — 6000 for most markers, 600
+FxCycle, 1000 Pax6, 400 autofluorescence — so the Import tab must read
+the Scaling CSV by primary channel name, never apply a global value.
+`Orig_Row_Number` is stable across exports. Keep these three files (raw
+export, scaled export, Scaling CSV) as the Import tab's validation fixture.
+
 Verification. `test_data_contract.R`: an `.rds` without the attributes
 loads with a warning that is surfaced in the upload response; one with
 them echoes transform and cofactor in `/api/metadata`.
@@ -829,6 +839,35 @@ the same rows in the same order. Verification: the all-markers payload with
 `EPIFLOW_CORES=1` and `EPIFLOW_CORES=4` compared field by field to 1e-12;
 wall time recorded in the entry; memory per worker checked on the droplet
 (each fork holds a copy of `filtered_data`).
+
+---
+
+## R32 — Per-channel arcsinh cofactors are set by eye in OmiQ; the Import tab should suggest, stamp and stress-test them
+Status: open (2026-10-01); Import tab (with R21)
+
+What changes. The cofactors that define the arcsinh scale (R21 validation:
+6000 for most markers, 600 FxCycle, 1000 Pax6, 400 autofluorescence on the
+NPC panel) are chosen by eye in OmiQ. The Import tab adds, per channel:
+(1) a data-driven suggestion — a logicle-style value from the negative
+population's robust spread (the cofactor that linearizes the region where
+the negatives sit), and the flowVS Bartlett variance-stabilizing choice
+(Azad et al. 2016) — shown beside the OmiQ value from the Scaling CSV;
+(2) the chosen value and the rule that produced it ("omiq", "logicle",
+"flowVS", "manual") stamped into the `.rds` attributes alongside the
+transform (R21); (3) a cofactor-sensitivity check on the primary contrast:
+re-run it at c/2 and 2c and report how much the headline statistic moves.
+
+Manual. State which statistics are cofactor-invariant — anything rank- or
+proportion-based: AUROC and %>p95 (titration), KS D, Wilcoxon, Cliff's δ,
+positivity fractions (threshold re-derived on the same scale), gate
+fractions, PERMANOVA on ranks if used — and which are not: LMM β and its
+d, EMD / IQR, correlations and Fisher z, means and medians of intensity,
+the ridge/violin shapes. A conclusion that depends on a non-invariant
+statistic should survive the c/2 – 2c check before it is reported.
+
+Backing. Azad, Rajwa & Pothen 2016 (flowVS, BMC Bioinformatics); Parks,
+Roederer & Moore 2006 (logicle); R19 (titration metrics on arcsinh), R21
+(data contract).
 
 ---
 
@@ -1064,6 +1103,44 @@ equals that genotype's distinct-cell count, not 5× it.
   the root files (`/opt/epiflow-d3`, runbook step 5); `deploy/` is the
   template `deploy/DEPLOYMENT.md` copies from on a fresh host and must be
   kept identical to the root copies.
+
+---
+
+## F2 — Violin small multiples: one panel per marker, shared group order, optional standardized shared axis, one SVG
+Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0 (audit doc "three features", F2)
+
+What changed. `compute_violin_data` (`helpers.R`) takes a `markers` vector
+(a single `marker` is still accepted) and returns `panels`, one per
+marker, each the former single-marker result (violins with q25 / median /
+q75 / mean / n cells; the per-panel replicate-means Welch t), plus
+`group_order`, `scale_mode`, `y_label`, `standardization` and
+`multiplicity`. `scale_mode = "robust"` standardizes each marker by its
+pooled median / MAD before the panels are built — the ridge overlay's code,
+now `.robust_standardize_long()` (H3 long rows) and
+`.robust_standardize_wide()` (phenotypic columns), shared by both tabs.
+`violinPlot.js` draws every panel into **one `<svg>`** (up to 3 columns,
+lettered "(a) H3K27ac …"), shared x order (reference first), shared colour
+levels and one legend in grouped mode, y per panel on the imported scale or
+one shared y domain when standardized; the y label names quantity and scale
+("H3K27ac (arcsinh intensity)" / "H3K27ac (standardized, median / MAD)").
+The Violin tab's marker select became a checklist (H3 marks ticked,
+phenotypic markers after a separator) with a y-axis mode select. Export and
+the figure composer take the single SVG unchanged.
+
+Multiplicity. BH is applied **within each panel** (across that panel's
+groups, as before); nothing is adjusted across panels in this commit. The
+grouped-mode subtitle says "BH within panel" and both Methods texts state it.
+
+Verification. `test_violin_panels.R`: five markers → five panels in the
+requested order, every panel's violins in `group_order`; simple mode gives
+one Welch t per panel equal to an in-process `t.test` on replicate means
+to 1e-8, grouped mode per-group rows with BH within the panel; robust mode:
+each marker's pooled standardized median is 0 and `standardization`
+center / scale equal in-process median / MAD, a group's standardized
+median equals (raw median − center) / scale; legacy `marker` → one panel;
+`y_label` strings; ridge live check still green after the refactor.
+`test_labels.R`: y-label templates, scale options, checklist, help text,
+"BH within panel" in the subtitle and both Methods texts.
 
 ---
 
