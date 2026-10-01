@@ -1119,6 +1119,10 @@ equals that genotype's distinct-cell count, not 5× it.
 ---
 
 ## Open items without a finding ID (2026-09-24)
+- `test_ridge_all_markers.R` (v1.2.0) calls `compute_ridge_all_markers()`, a
+  function renamed to `compute_ridge_overlay()`; it has errored since then.
+  Either port it to the overlay function (and give it a PASS/FAIL verdict
+  line) or delete it. Found 2026-10-01 while running every script for 1.5.0.
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
   detection, test scripts, env vars).
