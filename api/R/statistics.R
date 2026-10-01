@@ -429,11 +429,35 @@ lmm_pairwise <- function(data, marker, stratify_by = NULL,
 }
 
 # ---- Run all-marker analysis ----
+# R31: worker count for per-marker fits. EPIFLOW_CORES (integer); default is
+# detectCores() - 1; 1 means the serial path (also the Windows fallback, where
+# fork-based mclapply is unavailable). Capped at the number of markers.
+.epiflow_cores <- function(n_tasks = Inf) {
+  env <- suppressWarnings(as.integer(Sys.getenv("EPIFLOW_CORES", "")))
+  cores <- if (is.na(env) || env < 1) max(1L, parallel::detectCores() - 1L) else env
+  if (.Platform$OS.type == "windows") cores <- 1L
+  as.integer(max(1L, min(cores, n_tasks)))
+}
+
+# R31: map a fit over markers, in parallel across markers when more than one
+# core is available. mclapply forks the API process, so every worker sees the
+# same data and the same RNG state; results come back in `markers` order, so a
+# parallel run is element-for-element identical to the serial one (there is no
+# stochastic step inside a fit). A worker that errors returns a try-error, which
+# fn's own tryCatch has already turned into a zero-row result with a reason.
+.epiflow_map_markers <- function(markers, fn) {
+  cores <- .epiflow_cores(length(markers))
+  if (cores <= 1L) return(lapply(markers, fn))
+  out <- parallel::mclapply(markers, fn, mc.cores = cores, mc.preschedule = FALSE, mc.cleanup = TRUE)
+  # A fork-level failure (not a fit error) surfaces as a try-error object.
+  lapply(out, function(r) if (inherits(r, "try-error")) .lmm_empty(as.character(r)) else r)
+}
+
 run_all_markers_lmm <- function(data, markers, comparison_var = "genotype",
                                  stratify_by = NULL, ref_level = NULL,
                                  h3_markers = NULL,
                                  use_cells_as_replicates = FALSE) {
-  results <- purrr::map(markers, function(m) {
+  results <- .epiflow_map_markers(markers, function(m) {
     tryCatch(
       fit_stratified_lmm(data, m,
                           stratify_by = stratify_by,

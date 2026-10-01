@@ -1,303 +1,294 @@
 // ============================================================================
-// violinPlot.js — D3 violin plot with grouped/dodged mode (Phase 1 fix)
+// violinPlot.js — D3 violin plots as small multiples (F2)
+//
+// One <svg> holds one panel per marker. Every panel shares the group order
+// (reference first) and, in grouped mode, the colour levels; the y domain is
+// per panel on the imported arcsinh scale, or one shared domain when the
+// payload is standardized per marker (median / MAD). Each panel carries its
+// own replicate-means test; BH is within panel, never across panels.
 // ============================================================================
 
 const ViolinPlot = {
+  PANEL_HEIGHT: 300,
+  SINGLE_HEIGHT: 400,
+  MAX_COLS: 3,
+
   /**
-   * Render violins. Supports two modes:
-   *  1. Simple: group_by only (color = group)
-   *  2. Grouped: group_by + color_by (side-by-side within each group)
+   * Render. `data` is the F2 payload { panels: [...], group_order, scale_mode,
+   * y_label, color_by, group_by } — a legacy single-marker payload (with
+   * `violins` at the top level) is treated as one panel.
    */
   render(containerId, data, options = {}) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
 
-    if (!data || !data.violins || data.violins.length === 0) {
-      container.innerHTML = '<p class="text-center" style="padding:40px;color:#94a3b8;">No data available</p>';
+    const panels = (data && data.panels) ? ensureArray(data.panels) : (data && data.violins ? [data] : []);
+    const usable = panels.filter(p => p && !p.error && p.violins && ensureArray(p.violins).length);
+    if (!usable.length) {
+      const why = panels.map(p => p && p.error ? `${p.marker || ''}: ${p.error}` : '').filter(Boolean).join('; ');
+      container.innerHTML = `<p class="text-center" style="padding:40px;color:#94a3b8;">No data available${why ? ' — ' + why : ''}</p>`;
       return;
     }
 
-    // Normalize jsonlite boxing: single values may arrive as arrays
-    data.violins.forEach(v => {
-      if (Array.isArray(v.group)) v.group = v.group[0];
-      v.group = String(v.group || '');
-      if (v.color_level !== undefined && v.color_level !== null) {
-        if (Array.isArray(v.color_level)) v.color_level = v.color_level[0];
-        v.color_level = String(v.color_level);
-      }
+    // Normalize jsonlite boxing on every panel
+    panels.forEach(p => {
+      p.violins = ensureArray(p.violins || []);
+      p.violins.forEach(v => {
+        if (Array.isArray(v.group)) v.group = v.group[0];
+        v.group = String(v.group || '');
+        if (v.color_level !== undefined && v.color_level !== null) {
+          if (Array.isArray(v.color_level)) v.color_level = v.color_level[0];
+          v.color_level = String(v.color_level);
+        }
+      });
+      p.marker = Array.isArray(p.marker) ? p.marker[0] : String(p.marker || '');
     });
 
-    // Detect grouped mode: violin data has a color_level field
-    const isGrouped = data.violins[0].color_level !== undefined && data.violins[0].color_level !== null;
+    const isGrouped = usable[0].violins[0].color_level !== undefined && usable[0].violins[0].color_level !== null;
+    const refLevel = data.ref_level;
+    const sharedY = data.scale_mode === 'robust';
+    // Shared axis is the 1st–99th percentile of the pooled standardized values
+    // (payload shared_axis); the tails are clipped and the label says so.
+    const sa = sharedY && data.shared_axis && Number.isFinite(Number(data.shared_axis.q01)) ? data.shared_axis : null;
+    const yUnit = sharedY
+      ? (sa ? '(standardized, median / MAD; axis truncated at 1st–99th pct)' : '(standardized, median / MAD)')
+      : '(arcsinh intensity)';
 
+    // Shared group order across panels (payload order, reference first)
+    const seen = [...new Set(usable.flatMap(p => p.violins.map(v => v.group)))];
+    const groupOrder = orderRefFirst(
+      (data.group_order && ensureArray(data.group_order).length) ? ensureArray(data.group_order).map(String).filter(g => seen.includes(g)) : seen,
+      refLevel);
+    const colorLevels = isGrouped
+      ? orderRefFirst([...new Set(usable.flatMap(p => p.violins.map(v => v.color_level)))].sort(), refLevel)
+      : null;
+    const colorType = isGrouped ? (data.color_by || 'genotype') : (data.group_by || 'genotype');
+    const colorScale = getColorScale(colorType, isGrouped ? colorLevels : groupOrder, DataManager.serverPalette);
+
+    // Shared y domain (standardized scale): global min/max over every violin
+    let sharedDomain = null;
+    if (sharedY) {
+      if (sa) {
+        const q01 = Number(sa.q01), q99 = Number(sa.q99), r = (q99 - q01) || 1;
+        sharedDomain = [q01, q99 + r * 0.12];   // headroom for brackets; tails beyond are clipped
+      } else {
+        const vals = usable.flatMap(p => p.violins.flatMap(v => [Number(v.min), Number(v.max)])).filter(x => !isNaN(x));
+        const r = (d3.max(vals) - d3.min(vals)) || 1;
+        sharedDomain = [d3.min(vals) - r * 0.05, d3.max(vals) + r * 0.12];
+      }
+    }
+
+    // Layout: one svg, ncol × nrow panels
+    const n = panels.length;
+    const single = n === 1;
+    const ncol = Math.min(this.MAX_COLS, n);
+    const nrow = Math.ceil(n / ncol);
+    const margin = { top: single ? 45 : 52, right: isGrouped ? (single ? 140 : 30) : 30, bottom: single ? 110 : 95, left: 70 };
+    const totalW = Math.max(300, container.clientWidth);
+    const legendW = (isGrouped && !single) ? 130 : 0;
+    const panelOuterW = Math.floor((totalW - legendW) / ncol);
+    const width = Math.max(120, panelOuterW - margin.left - margin.right);
+    const height = single ? this.SINGLE_HEIGHT : this.PANEL_HEIGHT;
+    const panelOuterH = height + margin.top + margin.bottom;
+
+    const svg = d3.select(`#${containerId}`).append('svg')
+      .attr('width', panelOuterW * ncol + legendW)
+      .attr('height', panelOuterH * nrow);
+    const defs = svg.append('defs');
+    const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])
+      .join('div').attr('class', 'd3-tooltip').style('opacity', 0);
+
+    panels.forEach((p, i) => {
+      const col = i % ncol, row = Math.floor(i / ncol);
+      const ox = col * panelOuterW, oy = row * panelOuterH;
+      const letter = single ? '' : `(${String.fromCharCode(97 + i)}) `;
+      const panelG = svg.append('g').attr('class', 'violin-panel').attr('transform', `translate(${ox},${oy})`);
+      const title = options.title || `${letter}${p.marker} — by ${data.group_by || p.group_by}${isGrouped ? `, colored by ${colorType}` : ''}`;
+      panelG.append('text').attr('class', 'chart-title')
+        .attr('x', (width + margin.left + margin.right) / 2).attr('y', 18)
+        .attr('text-anchor', 'middle').attr('font-size', single ? null : '12px').text(title);
+
+      if (p.error || !p.violins.length) {
+        panelG.append('text').attr('x', (width + margin.left + margin.right) / 2).attr('y', margin.top + height / 2)
+          .attr('text-anchor', 'middle').attr('font-size', '11px').attr('fill', '#94a3b8')
+          .text(p.error || 'no data');
+        return;
+      }
+
+      const geom = {
+        width, height, margin, groups: groupOrder, colorLevels, colorScale, colorType, tooltip, defs,
+        yLabel: `${p.marker} ${yUnit}`,
+        yDomain: sharedDomain,
+        clipId: `violin-clip-${containerId}-${i}-${Math.random().toString(36).slice(2, 7)}`
+      };
+      if (isGrouped) this._drawGroupedPanel(panelG, p, geom);
+      else this._drawSimplePanel(panelG, p, geom);
+    });
+
+    // One legend for grouped mode (colour levels are shared across panels)
     if (isGrouped) {
-      this.renderGrouped(containerId, data, options);
-    } else {
-      this.renderSimple(containerId, data, options);
+      const lx = single ? (margin.left + width + 20) : (panelOuterW * ncol + 10);
+      const legend = svg.append('g').attr('transform', `translate(${lx}, ${margin.top})`);
+      legend.append('text').attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#64748b').text(colorType);
+      colorLevels.forEach((level, i) => {
+        const lg = legend.append('g').attr('transform', `translate(0, ${18 + i * 22})`);
+        lg.append('rect').attr('width', 14).attr('height', 14).attr('fill', colorScale(level)).attr('fill-opacity', 0.6).attr('rx', 2);
+        lg.append('text').attr('x', 20).attr('y', 11).attr('font-size', '11px').attr('fill', '#1a202c').text(level);
+      });
     }
   },
 
-  renderSimple(containerId, data, options) {
-    const container = document.getElementById(containerId);
-    const margin = { top: 40, right: 30, bottom: 90, left: 70 };
-    const width = Math.max(100, container.clientWidth - margin.left - margin.right);
-    const height = 400;
-    const clipId = 'violin-clip-' + Math.random().toString(36).slice(2, 8);
+  // Simple mode: one violin per group; the panel's test is the replicate-means
+  // Welch t for two groups (L3 wording) or "not estimable".
+  _drawSimplePanel(panelG, data, geom) {
+    const { width, height, margin, groups, tooltip } = geom;
+    const centerX = (width + margin.left + margin.right) / 2;
 
-    const svg = d3.select(`#${containerId}`)
-      .append('svg')
-      .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom);
+    // Clip exactly to the plot area (tails beyond a truncated shared axis are
+    // cut); n labels are drawn in the unclipped panel group.
+    geom.defs.append('clipPath').attr('id', geom.clipId)
+      .append('rect').attr('width', width).attr('height', height);
+    const g = panelG.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const plotG = g.append('g').attr('clip-path', `url(#${geom.clipId})`);
 
-    // Clip path — curves cannot escape chart area (top/sides) but allow room below for n-labels
-    svg.append('defs').append('clipPath').attr('id', clipId)
-      .append('rect').attr('width', width).attr('height', height + 60);
-
-    const g = svg.append('g')
-      .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    // Clipped content group
-    const plotG = g.append('g').attr('clip-path', `url(#${clipId})`);
-
-    svg.append('text')
-      .attr('class', 'chart-title')
-      .attr('x', (width + margin.left + margin.right) / 2)
-      .attr('y', 20)
-      .attr('text-anchor', 'middle')
-      .text(options.title || `${data.marker} — by ${data.group_by}`);
-
-    const groups = orderRefFirst([...new Set(data.violins.map(v => v.group))], data.ref_level);
     const xScale = d3.scaleBand().domain(groups).range([0, width]).padding(0.2);
 
-    // L3: the payload carries a replicate-level test for two groups (Welch t on
-    // replicate means); show it, or say why it is not estimable.
     const simpleSig = ensureArray(data.significance || []);
+    const present = groups.filter(gr => data.violins.some(v => v.group === gr));
     let sigText = '';
     if (simpleSig.length) {
       const s = simpleSig[0];
       sigText = `${s.test_type || 'replicate-level test'}: p = ${fmtP(s.p_value)} (${s.n_replicates || '—'} replicates)`;
-    } else if (groups.length === 2) {
+    } else if (present.length === 2) {
       sigText = 'replicate-level test not estimable (fewer than 2 replicates per group)';
     }
     if (sigText) {
-      svg.append('text')
-        .attr('x', (width + margin.left + margin.right) / 2).attr('y', 34)
-        .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b')
-        .text(sigText);
+      panelG.append('text').attr('x', centerX).attr('y', 34)
+        .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#64748b').text(sigText);
     }
 
     const allVals = data.violins.flatMap(v => [Number(v.min), Number(v.max)]).filter(x => !isNaN(x));
-    const yPad = (d3.max(allVals) - d3.min(allVals)) * 0.05;
+    const yPad = ((d3.max(allVals) - d3.min(allVals)) || 1) * 0.05;
     const yScale = d3.scaleLinear()
-      .domain([d3.min(allVals) - yPad, d3.max(allVals) + yPad])
+      .domain(geom.yDomain || [d3.min(allVals) - yPad, d3.max(allVals) + yPad])
       .range([height, 0]);
 
-    const colorScale = getColorScale(data.group_by || 'genotype', groups, DataManager.serverPalette);
-
-    // Axes
     g.append('g').attr('class', 'axis').attr('transform', `translate(0,${height})`)
       .call(d3.axisBottom(xScale))
       .selectAll('text').attr('transform', 'rotate(-30)').attr('text-anchor', 'end').attr('font-size', '11px');
-
     g.append('g').attr('class', 'axis').call(d3.axisLeft(yScale).ticks(8));
-
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -55)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text(data.marker + ' (arcsinh intensity)');   // L1: imported arcsinh value, unscaled
-
+      .text(geom.yLabel);   // quantity + scale (CLAUDE.md)
     g.append('g').attr('class', 'grid')
       .call(d3.axisLeft(yScale).ticks(8).tickSize(-width).tickFormat(''));
 
-    const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])
-      .join('div').attr('class', 'd3-tooltip').style('opacity', 0);
-
     data.violins.forEach(v => {
+      if (xScale(v.group) === undefined) return;
       this._drawSingleViolin(plotG, v, xScale(v.group) + xScale.bandwidth() / 2,
-        xScale.bandwidth() * 0.8, yScale, colorScale(v.group), height, tooltip);
+        xScale.bandwidth() * 0.8, yScale, geom.colorScale(v.group), height, tooltip, null, g);
     });
   },
 
-  renderGrouped(containerId, data, options) {
-    const container = document.getElementById(containerId);
+  // Grouped mode: side-by-side colour levels within each group; per-group
+  // replicate-means Welch t with BH within this panel (L2 wording).
+  _drawGroupedPanel(panelG, data, geom) {
+    const { width, height, margin, groups, colorLevels, colorScale, tooltip } = geom;
+    const centerX = (width + margin.left + margin.right) / 2;
 
-    const outerGroups = orderRefFirst([...new Set(data.violins.map(v => v.group))], data.ref_level);
-    const colorLevels = orderRefFirst([...new Set(data.violins.map(v => v.color_level))].sort(), data.ref_level);
+    geom.defs.append('clipPath').attr('id', geom.clipId)
+      .append('rect').attr('width', width).attr('height', height);
+    const g = panelG.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const plotG = g.append('g').attr('clip-path', `url(#${geom.clipId})`);
 
-    const margin = { top: 45, right: 140, bottom: 110, left: 70 };
-    const width = Math.max(100, container.clientWidth - margin.left - margin.right);
-    const height = 420;
-    const clipId = 'violin-grp-clip-' + Math.random().toString(36).slice(2, 8);
-
-    const svg = d3.select(`#${containerId}`)
-      .append('svg')
-      .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom);
-
-    svg.append('defs').append('clipPath').attr('id', clipId)
-      .append('rect').attr('width', width).attr('height', height + 70);
-
-    const g = svg.append('g')
-      .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    const plotG = g.append('g').attr('clip-path', `url(#${clipId})`);
-
-    svg.append('text')
-      .attr('class', 'chart-title')
-      .attr('x', (width + margin.left + margin.right) / 2)
-      .attr('y', 18)
-      .attr('text-anchor', 'middle')
-      .text(options.title || `${data.marker} — by ${data.group_by}, colored by ${data.color_by}`);
-
-    // Subtitle with significance info
-    // L2: the subtitle names the test the payload ran (a Welch t on replicate
-    // means per group, BH across groups) — never a fixed "Wilcoxon" string.
+    // Per-group significance rows come from the payload (one Welch t on
+    // replicate means per group when there are two colour levels), BH across
+    // this panel's groups only.
     const sigList = ensureArray(data.significance || []);
     const hasSig = sigList.length > 0;
     const testName = hasSig ? (sigList[0].test_type || 'replicate-level test') : '';
-    svg.append('text')
-      .attr('x', (width + margin.left + margin.right) / 2)
-      .attr('y', 33)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text(hasSig ? `${testName} per group, BH across groups: * p<0.05, ** p<0.01, *** p<0.001` : '');
+    panelG.append('text').attr('class', 'violin-panel-subtitle').attr('x', centerX).attr('y', 33)
+      .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#94a3b8')
+      .text(hasSig ? `${testName} per group, BH within panel: * p<0.05, ** p<0.01, *** p<0.001`
+                   : (colorLevels.length === 2 ? 'replicate-level test not estimable (fewer than 2 replicates per group)' : ''));
 
-    // Outer scale (groups) and inner scale (colors within group)
-    const xOuter = d3.scaleBand()
-      .domain(outerGroups)
-      .range([0, width])
-      .paddingInner(0.15)
-      .paddingOuter(0.05);
-
-    const xInner = d3.scaleBand()
-      .domain(colorLevels)
-      .range([0, xOuter.bandwidth()])
-      .padding(0.05);
+    const xOuter = d3.scaleBand().domain(groups).range([0, width]).paddingInner(0.15).paddingOuter(0.05);
+    const xInner = d3.scaleBand().domain(colorLevels).range([0, xOuter.bandwidth()]).padding(0.05);
 
     const allVals = data.violins.flatMap(v => [Number(v.min), Number(v.max)]).filter(x => !isNaN(x));
-    const hasSigTests = data.significance && ensureArray(data.significance).some(s => {
-      const p = Number(s.p_adjusted != null ? s.p_adjusted : s.p_value);
-      return !isNaN(p) && p < 0.05;
-    });
-    const yRange = d3.max(allVals) - d3.min(allVals);
-    const yPadBottom = yRange * 0.05 || 1;
-    const yPadTop = hasSigTests ? yRange * 0.12 : yRange * 0.05 || 1;
+    const hasSigTests = sigList.some(s => { const p = Number(s.p_adjusted != null ? s.p_adjusted : s.p_value); return !isNaN(p) && p < 0.05; });
+    const yRange = (d3.max(allVals) - d3.min(allVals)) || 1;
     const yScale = d3.scaleLinear()
-      .domain([d3.min(allVals) - yPadBottom, d3.max(allVals) + yPadTop])
+      .domain(geom.yDomain || [d3.min(allVals) - yRange * 0.05, d3.max(allVals) + (hasSigTests ? yRange * 0.12 : yRange * 0.05)])
       .range([height, 0]);
 
-    const colorType = data.color_by || 'genotype';
-    const colorScale = getColorScale(colorType, colorLevels, DataManager.serverPalette);
-
-    // Axes
     g.append('g').attr('class', 'axis').attr('transform', `translate(0,${height})`)
       .call(d3.axisBottom(xOuter))
       .selectAll('text').attr('transform', 'rotate(-30)').attr('text-anchor', 'end').attr('font-size', '11px');
-
     g.append('g').attr('class', 'axis').call(d3.axisLeft(yScale).ticks(8));
-
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -55)
       .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '12px')
-      .text(data.marker + ' (arcsinh intensity)');   // L1: imported arcsinh value, unscaled
-
+      .text(geom.yLabel);   // quantity + scale (CLAUDE.md)
     g.append('g').attr('class', 'grid')
       .call(d3.axisLeft(yScale).ticks(8).tickSize(-width).tickFormat(''));
 
-    // Group separators
-    outerGroups.forEach((gr, i) => {
+    groups.forEach((gr, i) => {
       if (i > 0) {
         const x = xOuter(gr) - xOuter.step() * xOuter.paddingInner() / 2;
-        g.append('line')
-          .attr('x1', x).attr('x2', x)
-          .attr('y1', 0).attr('y2', height)
-          .attr('stroke', '#e2e8f0')
-          .attr('stroke-width', 1)
-          .attr('stroke-dasharray', '4,4');
+        g.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', height)
+          .attr('stroke', '#e2e8f0').attr('stroke-width', 1).attr('stroke-dasharray', '4,4');
       }
     });
 
-    const tooltip = d3.select('body').selectAll('.d3-tooltip').data([0])
-      .join('div').attr('class', 'd3-tooltip').style('opacity', 0);
-
-    // Draw grouped violins
     data.violins.forEach(v => {
       const outerX = xOuter(v.group);
       const innerX = xInner(v.color_level);
       if (outerX === undefined || innerX === undefined) return;
-
-      const centerX = outerX + innerX + xInner.bandwidth() / 2;
-      const maxWidth = xInner.bandwidth() * 0.9;
-      const color = colorScale(v.color_level);
-
-      this._drawSingleViolin(plotG, v, centerX, maxWidth, yScale, color, height, tooltip, v.color_level);
+      // showN = false: per-violin n labels collide inside a group; one label per group below.
+      this._drawSingleViolin(plotG, v, outerX + innerX + xInner.bandwidth() / 2,
+        xInner.bandwidth() * 0.9, yScale, colorScale(v.color_level), height, tooltip, v.color_level, g, false);
     });
 
-    // Significance asterisks (when comparing 2 color levels per group)
-    const sigTests = data.significance ? ensureArray(data.significance) : [];
-    if (sigTests.length > 0) {
-      sigTests.forEach(st => {
-        const gr = Array.isArray(st.group) ? st.group[0] : String(st.group || '');
-        const padj = Number(st.p_adjusted != null ? st.p_adjusted : st.p_value);
-        if (isNaN(padj) || padj >= 0.05) return; // not significant
-
-        const stars = padj < 0.001 ? '***' : padj < 0.01 ? '**' : '*';
-        const gx = xOuter(gr);
-        if (gx === undefined) return;
-
-        // Find max y for this group's violins
-        const groupViolins = data.violins.filter(v => String(v.group) === gr);
-        const maxVal = d3.max(groupViolins, v => Number(v.max));
-        // Clamp bracket to visible area (at least 20px from top)
-        const rawBracketY = yScale(maxVal) - 18;
-        const bracketY = Math.max(20, rawBracketY);
-
-        // Bracket endpoints: centered on inner violins
-        const bx1 = gx + xInner.bandwidth() * 0.5;
-        const bx2 = gx + xOuter.bandwidth() - xInner.bandwidth() * 0.5;
-
-        g.append('line')
-          .attr('x1', bx1).attr('x2', bx2)
-          .attr('y1', bracketY).attr('y2', bracketY)
-          .attr('stroke', '#475569').attr('stroke-width', 0.8);
-        g.append('line')
-          .attr('x1', bx1).attr('x2', bx1)
-          .attr('y1', bracketY).attr('y2', bracketY + 4)
-          .attr('stroke', '#475569').attr('stroke-width', 0.8);
-        g.append('line')
-          .attr('x1', bx2).attr('x2', bx2)
-          .attr('y1', bracketY).attr('y2', bracketY + 4)
-          .attr('stroke', '#475569').attr('stroke-width', 0.8);
-        g.append('text')
-          .attr('x', (bx1 + bx2) / 2).attr('y', bracketY - 4)
-          .attr('text-anchor', 'middle').attr('font-size', '11px')
-          .attr('font-weight', '600').attr('fill', '#1a202c')
-          .text(stars);
+    // One n label per group: cells per colour level in legend order ("n = 900 · 900").
+    groups.forEach(gr => {
+      const parts = colorLevels.map(cl => {
+        const v = data.violins.find(x => x.group === gr && x.color_level === cl);
+        return v ? Number(v.n).toLocaleString() : '—';
       });
-    }
+      g.append('text')
+        .attr('x', xOuter(gr) + xOuter.bandwidth() / 2).attr('y', height + 65)
+        .attr('text-anchor', 'middle').attr('font-size', '7px').attr('fill', '#94a3b8')
+        .text(`n = ${parts.join(' · ')}`);
+    });
+    g.append('text').attr('x', 0).attr('y', height + 78)
+      .attr('font-size', '7px').attr('fill', '#94a3b8')
+      .text(`n per group = cells per ${geom.colorType || 'colour level'}, in legend order`);
 
-    // Legend
-    const legend = svg.append('g')
-      .attr('transform', `translate(${width + margin.left + 20}, ${margin.top})`);
-
-    legend.append('text')
-      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#64748b')
-      .text(colorType);
-
-    colorLevels.forEach((level, i) => {
-      const lg = legend.append('g').attr('transform', `translate(0, ${18 + i * 22})`);
-      lg.append('rect')
-        .attr('width', 14).attr('height', 14)
-        .attr('fill', colorScale(level))
-        .attr('fill-opacity', 0.6).attr('rx', 2);
-      lg.append('text')
-        .attr('x', 20).attr('y', 11)
-        .attr('font-size', '11px').attr('fill', '#1a202c')
-        .text(level);
+    // Significance asterisks (two colour levels per group), BH within this panel
+    sigList.forEach(st => {
+      const gr = Array.isArray(st.group) ? st.group[0] : String(st.group || '');
+      const padj = Number(st.p_adjusted != null ? st.p_adjusted : st.p_value);
+      if (isNaN(padj) || padj >= 0.05) return;
+      const stars = padj < 0.001 ? '***' : padj < 0.01 ? '**' : '*';
+      const gx = xOuter(gr);
+      if (gx === undefined) return;
+      const maxVal = d3.max(data.violins.filter(v => v.group === gr), v => Number(v.max));
+      const bracketY = Math.max(20, yScale(maxVal) - 18);
+      const bx1 = gx + xInner.bandwidth() * 0.5;
+      const bx2 = gx + xOuter.bandwidth() - xInner.bandwidth() * 0.5;
+      g.append('line').attr('x1', bx1).attr('x2', bx2).attr('y1', bracketY).attr('y2', bracketY).attr('stroke', '#475569').attr('stroke-width', 0.8);
+      g.append('line').attr('x1', bx1).attr('x2', bx1).attr('y1', bracketY).attr('y2', bracketY + 4).attr('stroke', '#475569').attr('stroke-width', 0.8);
+      g.append('line').attr('x1', bx2).attr('x2', bx2).attr('y1', bracketY).attr('y2', bracketY + 4).attr('stroke', '#475569').attr('stroke-width', 0.8);
+      g.append('text').attr('x', (bx1 + bx2) / 2).attr('y', bracketY - 4)
+        .attr('text-anchor', 'middle').attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#1a202c').text(stars);
     });
   },
 
-  _drawSingleViolin(g, rawV, centerX, maxWidth, yScale, color, chartHeight, tooltip, sublabel) {
+  // labelG: unclipped group for the n label (the plot group is clipped to the
+  // axis so truncated tails are cut); showN = false suppresses the label.
+  _drawSingleViolin(g, rawV, centerX, maxWidth, yScale, color, chartHeight, tooltip, sublabel, labelG, showN = true) {
     // Defensive: ensure all numeric fields are numbers (jsonlite may box as arrays)
     const v = {
       ...rawV,
@@ -364,11 +355,13 @@ const ViolinPlot = {
       .attr('y1', yScale(v.q75)).attr('y2', yScale(v.max))
       .attr('stroke', color).attr('stroke-width', 1);
 
-    // N label (below rotated x-axis labels — pushed further down)
-    g.append('text')
-      .attr('x', centerX).attr('y', chartHeight + 65)
-      .attr('text-anchor', 'middle').attr('font-size', '7px').attr('fill', '#94a3b8')
-      .text(`n=${v.n.toLocaleString()}`);
+    // N label (below rotated x-axis labels — pushed further down), unclipped
+    if (showN) {
+      (labelG || g).append('text')
+        .attr('x', centerX).attr('y', chartHeight + 65)
+        .attr('text-anchor', 'middle').attr('font-size', '7px').attr('fill', '#94a3b8')
+        .text(`n=${v.n.toLocaleString()}`);
+    }
 
     // Hover
     g.append('rect')

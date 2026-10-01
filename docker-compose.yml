@@ -25,6 +25,10 @@ services:
     environment:
       - R_MAX_UPLOAD_SIZE=200  # MB
       - EPIFLOW_CORS_ORIGIN=https://epiflow.serranolab.org
+      # R31: all-markers LMM workers. 1 = serial (current production behaviour);
+      # raise after checking per-worker memory on the droplet (each fork holds
+      # the session's filtered data; see DECISIONS.md R31).
+      - EPIFLOW_CORES=1
     # Internal only — nginx proxies to this
     expose:
       - "8000"

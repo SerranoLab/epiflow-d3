@@ -96,7 +96,7 @@ Click **Apply Filters** after adjusting. The filtered cell count updates in the 
 Bird's-eye view of your dataset:
 - Cell counts by genotype, identity, replicate
 - Cell cycle distribution per genotype
-- Mean ± SD marker summaries for each H3-PTM and phenotypic marker (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to the range, dashed line = median; these are not quartile boxes, so a bimodal mark is not described by them)
+- Marker summaries for each H3-PTM and phenotypic marker as box plots (box = Q1–Q3, line = median, whiskers = 5th–95th percentile, dot = mean), for all cells and split by any metadata column ("Split by": genotype, identity, cell cycle, replicate, a gate population or a cluster). Hover a box for its quantiles, n cells and n replicates — a level built from a single replicate is flagged.
 
 Check here first for data quality: unbalanced replicates, unexpected cell cycle distributions, or outlier markers.
 

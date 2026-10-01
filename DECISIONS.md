@@ -598,6 +598,16 @@ option ii) reads the stamped cofactor or refuses. Until then the Gate
 Finder exports arcsinh thresholds only, and the schema docs say
 "arcsinh-transformed fluorescence intensity".
 
+Validation (2026-10-01), on the NPC PAX6/H3K27me3 export (189,059 cells,
+12 channels): `asinh(raw / cofactor)` with per-channel cofactors read from
+the OmiQ Scaling CSV reproduces OmiQ's scaled export to the export's
+5-significant-digit rounding (max |diff| 9e-5; slope 1, intercept 0).
+Cofactors differ by channel on this panel — 6000 for most markers, 600
+FxCycle, 1000 Pax6, 400 autofluorescence — so the Import tab must read
+the Scaling CSV by primary channel name, never apply a global value.
+`Orig_Row_Number` is stable across exports. Keep these three files (raw
+export, scaled export, Scaling CSV) as the Import tab's validation fixture.
+
 Verification. `test_data_contract.R`: an `.rds` without the attributes
 loads with a warning that is surfaced in the upload response; one with
 them echoes transform and cofactor in `/api/metadata`.
@@ -814,7 +824,36 @@ gives the same k / n as today.
 ---
 
 ## R31 — run_all_markers_lmm fits markers sequentially on one core
-Status: open (2026-09-25); plan with the F1/F2 session
+Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0
+
+Done. `run_all_markers_lmm` maps the per-marker fit through
+`.epiflow_map_markers()`: `parallel::mclapply` across markers with
+`.epiflow_cores()` workers — `EPIFLOW_CORES` if set, else
+`detectCores() − 1`, capped at the number of markers, 1 on Windows
+(no fork). `mc.preschedule = FALSE` so one slow marker does not hold a
+batch; results come back in `markers` order; a fork-level failure becomes
+a zero-row result with its reason like a fit error. There is no stochastic
+step inside a fit (grep: no `set.seed` / `sample` in the LMM path), so the
+parallel run is element-for-element identical to the serial one. BH runs
+after the bind over the same rows in the same order.
+
+Measured (2026-10-01, 16-core Mac): example (5 markers, 3,600 cells)
+serial 0.41 s → 0.15 s with 4 workers; 416k-cell file (5 markers)
+serial 10.3 s → 4.1 s with 4 workers; results identical to 1e-12 both
+times, API payload equal to the in-process serial run.
+
+Production. `docker-compose.yml` pins `EPIFLOW_CORES=1` (current
+behaviour) until per-worker memory is checked on the droplet — each fork
+holds the session's `filtered_data` (copy-on-write, so mostly shared, but
+the fit's own allocations are per worker). Raise it there after a
+`docker stats` run on the 416k file. `LOCAL_DEV.md` documents the variable.
+
+Verification. `test_lmm_parallel.R`: `EPIFLOW_CORES=1` vs `4` identical
+to 1e-12 (plain and stratified runs); failure reasons and positions kept;
+all-failed run identical; API all-markers equals the serial in-process run;
+optional 416k timing block.
+
+(Original entry, 2026-09-25.)
 
 `run_all_markers_lmm` (`statistics.R`) is a `purrr::map` over markers, each
 calling `fit_stratified_lmm` (lmer + emmeans + distribution metrics); on the
@@ -829,6 +868,35 @@ the same rows in the same order. Verification: the all-markers payload with
 `EPIFLOW_CORES=1` and `EPIFLOW_CORES=4` compared field by field to 1e-12;
 wall time recorded in the entry; memory per worker checked on the droplet
 (each fork holds a copy of `filtered_data`).
+
+---
+
+## R32 — Per-channel arcsinh cofactors are set by eye in OmiQ; the Import tab should suggest, stamp and stress-test them
+Status: open (2026-10-01); Import tab (with R21)
+
+What changes. The cofactors that define the arcsinh scale (R21 validation:
+6000 for most markers, 600 FxCycle, 1000 Pax6, 400 autofluorescence on the
+NPC panel) are chosen by eye in OmiQ. The Import tab adds, per channel:
+(1) a data-driven suggestion — a logicle-style value from the negative
+population's robust spread (the cofactor that linearizes the region where
+the negatives sit), and the flowVS Bartlett variance-stabilizing choice
+(Azad et al. 2016) — shown beside the OmiQ value from the Scaling CSV;
+(2) the chosen value and the rule that produced it ("omiq", "logicle",
+"flowVS", "manual") stamped into the `.rds` attributes alongside the
+transform (R21); (3) a cofactor-sensitivity check on the primary contrast:
+re-run it at c/2 and 2c and report how much the headline statistic moves.
+
+Manual. State which statistics are cofactor-invariant — anything rank- or
+proportion-based: AUROC and %>p95 (titration), KS D, Wilcoxon, Cliff's δ,
+positivity fractions (threshold re-derived on the same scale), gate
+fractions, PERMANOVA on ranks if used — and which are not: LMM β and its
+d, EMD / IQR, correlations and Fisher z, means and medians of intensity,
+the ridge/violin shapes. A conclusion that depends on a non-invariant
+statistic should survive the c/2 – 2c check before it is reported.
+
+Backing. Azad, Rajwa & Pothen 2016 (flowVS, BMC Bioinformatics); Parks,
+Roederer & Moore 2006 (logicle); R19 (titration metrics on arcsinh), R21
+(data contract).
 
 ---
 
@@ -1025,6 +1093,16 @@ profiles of mean per-cell mark intensity, z-scored per marker"; USER_GUIDE
 section "Epigenetic Signatures" retitled and reworded the same way. Static
 checks in `test_labels.R`.
 
+### L17 — Gating plot axes name the marker only
+Status: open (2026-09-30)
+
+`gatingPlot.js` labels its x and y axes with the bare marker names
+(`data.marker_x`, `data.marker_y`); CLAUDE.md now requires quantity and
+scale on every axis. Fix: "H3K27ac (arcsinh intensity)" on both axes (the
+gating scatter draws the imported arcsinh values; phenotypic markers are on
+the same scale), and a `test_labels.R` check. Fold into the next label
+commit or the Gate Finder work, whichever comes first.
+
 ### L15 — Ridge subtitle "n" counts long-format rows (cells × markers), not cells
 Status: done (2026-09-25), branch fix/ridge-labels, from the v1.4.1 browser check
 
@@ -1041,6 +1119,10 @@ equals that genotype's distinct-cell count, not 5× it.
 ---
 
 ## Open items without a finding ID (2026-09-24)
+- `test_ridge_all_markers.R` (v1.2.0) calls `compute_ridge_all_markers()`, a
+  function renamed to `compute_ridge_overlay()`; it has errored since then.
+  Either port it to the overlay function (and give it a PASS/FAIL verdict
+  line) or delete it. Found 2026-10-01 while running every script for 1.5.0.
 - `LOCAL_DEV.md` was missing although CLAUDE.md and CLAUDE_CODE_RUNBOOK.md
   reference it; rewritten 2026-09-24 (loopback binding, api.js base
   detection, test scripts, env vars).
@@ -1057,7 +1139,108 @@ equals that genotype's distinct-cell count, not 5× it.
 
 ---
 
+## F2 — Violin small multiples: one panel per marker, shared group order, optional standardized shared axis, one SVG
+Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0 (audit doc "three features", F2)
+
+What changed. `compute_violin_data` (`helpers.R`) takes a `markers` vector
+(a single `marker` is still accepted) and returns `panels`, one per
+marker, each the former single-marker result (violins with q25 / median /
+q75 / mean / n cells; the per-panel replicate-means Welch t), plus
+`group_order`, `scale_mode`, `y_label`, `standardization` and
+`multiplicity`. `scale_mode = "robust"` standardizes each marker by its
+pooled median / MAD before the panels are built — the ridge overlay's code,
+now `.robust_standardize_long()` (H3 long rows) and
+`.robust_standardize_wide()` (phenotypic columns), shared by both tabs.
+`violinPlot.js` draws every panel into **one `<svg>`** (up to 3 columns,
+lettered "(a) H3K27ac …"), shared x order (reference first), shared colour
+levels and one legend in grouped mode, y per panel on the imported scale or
+one shared y domain when standardized; the y label names quantity and scale
+("H3K27ac (arcsinh intensity)" / "H3K27ac (standardized, median / MAD)").
+The Violin tab's marker select became a checklist (H3 marks ticked,
+phenotypic markers after a separator) with a y-axis mode select. Export and
+the figure composer take the single SVG unchanged.
+
+Follow-up (2026-10-01, browser check). (1) The shared standardized axis is
+the 1st–99th percentile of the standardized values pooled across the
+selected markers (`shared_axis` in the payload); the plot clips the tails
+and the y label adds "axis truncated at 1st–99th pct". The help text now
+says that median / MAD is the width of whatever population dominates a
+marker — on a mostly-negative marker (Caspase3) the negative population's
+— so standardized values are not comparable across such markers.
+(2) Grouped panels no longer print one n per violin (they collided); each
+group gets one "n = a · b" label in legend order plus a legend line.
+(3) Grouped mode renders the per-group significance rows and the "BH
+within panel" subtitle (and says "not estimable" when a two-level
+comparison has no replicate test); `test_violin_panels.R` asserts the
+rows the frontend draws from.
+
+Multiplicity. BH is applied **within each panel** (across that panel's
+groups, as before); nothing is adjusted across panels in this commit. The
+grouped-mode subtitle says "BH within panel" and both Methods texts state it.
+
+Verification. `test_violin_panels.R`: five markers → five panels in the
+requested order, every panel's violins in `group_order`; simple mode gives
+one Welch t per panel equal to an in-process `t.test` on replicate means
+to 1e-8, grouped mode per-group rows with BH within the panel; robust mode:
+each marker's pooled standardized median is 0 and `standardization`
+center / scale equal in-process median / MAD, a group's standardized
+median equals (raw median − center) / scale; legacy `marker` → one panel;
+`y_label` strings; ridge live check still green after the refactor.
+`test_labels.R`: y-label templates, scale options, checklist, help text,
+"BH within panel" in the subtitle and both Methods texts.
+
+---
+
+## F1 — Overview marker summaries: box plots (Q1–Q3; whiskers 5th–95th percentile) split by any metadata column
+Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0 (audit doc "three features", F1)
+
+What changed. `/api/data/overview` takes `stratify_by` (genotype, identity,
+cell_cycle, replicate, any detected metadata column, and gate_population /
+cluster_identity while a gate or clustering is applied) and returns, for
+every H3 mark and phenotypic marker × level, q05 / q25 / median / q75 / q95
+/ mean / n_cells / n_replicates (`.quantile_stats`, `helpers.R`; quantile
+type 7). The all-cells `marker_stats` / `pheno_stats` carry the same
+quantiles (sd / min / max kept for the cards); `marker_stats_by_cond` is
+gone. The endpoint serializes at full precision (R14 rule: statistics
+travel at full precision). `overviewCharts.js` draws one box encoding for
+both charts — box Q1–Q3, solid median line, whiskers with caps at the 5th
+and 95th percentiles, open dot = mean — with a tooltip giving the quantiles,
+n cells and n replicates and an amber "1 replicate" flag; a "Split by"
+select drives the second chart and levels are ordered reference first;
+colours follow the split variable's palette. This retires the L5 mean ± SD
+box and its caveat. Both Methods texts, README and USER_GUIDE describe the
+box the same way.
+
+Naming. The chart is named by its quantiles, never after the 1.5 × IQR
+box-and-whisker convention: these whiskers are the 5th and 95th
+percentiles. `test_labels.R` forbids that author's name for the box plot
+across UI, docs and this file (only "Tukey HSD", the positivity post-hoc
+test, may appear).
+
+Deferred. The audit's "show violins" toggle on the overview — the Violin
+tab's small multiples (F2) cover it.
+
+Verification. `test_overview_quantiles.R`: rows = markers × levels; order
+q05 ≤ q25 ≤ median ≤ q75 ≤ q95; every number equals an in-process
+`quantile(type = 7)` / mean / distinct-cell / distinct-replicate count to
+1e-8; Σ n_cells over levels = metadata n_cells per marker; replicate strata
+report n_replicates = 1; default stratum = genotype; unknown column and an
+absent gate column return naming errors. `test_labels.R`: axis label,
+headings, Split-by select, Methods sentences, report chart list, no
+"mean ± 1 SD", the box-plot naming rule.
+
+---
+
 ## Gate Finder — motivation
+
+Design note (2026-09-30). Supervised population-discovery methods — CellCnn
+(Arvaniti & Claassen 2017), citrus (Bruggner et al. 2014) and MASC (Fonseka
+et al. 2018) — learn or test which cell subsets associate with a sample-level
+label and need tens of samples (they are cross-validated or mixed-modelled at
+the sample level). With 3–4 replicates per group they cannot be fit honestly,
+so they are deferred until a patient cohort exists. Until then the Gate
+Finder stays a within-dataset tool (clusters → gates, AUROC separation) whose
+claims are descriptive, never a classifier validated on held-out samples.
 - Quadrant gating with axis-aligned thresholds is a poor fit for diagonal
   populations (seen on the 416k-cell, 3-group dataset, 2026-09-24): a
   population that runs along the diagonal is split across two or more

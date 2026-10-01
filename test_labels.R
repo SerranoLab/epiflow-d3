@@ -16,14 +16,14 @@ ver_of <- function(file) { idx <- lines_of("frontend/index.html"); m <- regmatch
 # ---- L1: violin y axis names the arcsinh value, not a z-score ----
 cat("\n--- L1 violin y axis ---\n")
 f <- "frontend/js/charts/violinPlot.js"
-check(has(f, "' (arcsinh intensity)'", 2), "both violin y-axis labels read '(arcsinh intensity)'")
+check(has(f, "'(arcsinh intensity)'") && has(f, "yLabel: `${p.marker} ${yUnit}`"), "violin y-axis labels read 'marker (arcsinh intensity)' (F2: one template for every panel)")
 check(lacks(f, "(z-score)"), "no '(z-score)' label remains in violinPlot.js")
 check(ver_of("violinPlot.js") >= "1.2.3", "violinPlot.js cache-busting bump (>= 1.2.3)")
 
 # ---- L2: grouped violin subtitle names the Welch t on replicate means ----
 cat("\n--- L2 grouped violin subtitle ---\n")
 check(lacks(f, "Wilcoxon test per group"), "no fixed 'Wilcoxon test per group' subtitle in violinPlot.js")
-check(has(f, "${testName} per group, BH across groups"), "subtitle is built from the payload's test_type")
+check(has(f, "${testName} per group, BH within panel"), "subtitle is built from the payload's test_type (F2: BH within panel)")
 check(has("api/R/helpers.R", 'test_type = "Welch t (replicate means)"', 2) && lacks("api/R/helpers.R", 'test_type = "t-test (replicate means)"'),
       "helpers.R test_type reads 'Welch t (replicate means)' in both violin payloads")
 check(ver_of("violinPlot.js") >= "1.2.4", "violinPlot.js cache-busting bump (>= 1.2.4)")
@@ -51,9 +51,10 @@ check(ver_of("volcanoPlot.js") >= "1.2.6" && ver_of("forestPlot.js") >= "1.2.8",
 # ---- L5: overview summaries are labelled mean ± SD, not box-and-whisker ----
 cat("\n--- L5 overview mean ± SD labels ---\n")
 o <- "frontend/js/charts/overviewCharts.js"
-check(has(o, "arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range)", 2), "both overview y axes name mean ± SD on the arcsinh scale")
+# (F1 superseded the mean ± SD box: both overview axes now use OverviewCharts.BOX_AXIS_LABEL, checked in the F1 block.)
+check(has(o, ".text(OverviewCharts.BOX_AXIS_LABEL)", 2), "both overview y axes use the shared box-plot label")
 check(lacks(o, "'Intensity (box = mean ± SD)'") && lacks(o, "'Intensity'"), "old 'Intensity' labels are gone")
-check(has("frontend/index.html", "not quartiles"), "overview heading says not quartiles")
+check(lacks("frontend/index.html", "not quartiles") && has("frontend/index.html", "box = Q1–Q3 · line = median · whiskers = 5th–95th percentile", 2), "overview headings describe the quantile box (the L5 caveat is retired)")
 check(lacks("README.md", "box-and-whisker") && lacks("USER_GUIDE.md", "Box-and-whisker"), "README / USER_GUIDE no longer say box-and-whisker")
 check(ver_of("overviewCharts.js") >= "1.2.3", "overviewCharts.js cache-busting bump (>= 1.2.3)")
 
@@ -211,6 +212,37 @@ for (d in c("frontend/index.html", "README.md", "USER_GUIDE.md")) {
 check(has("frontend/index.html", "overlapping curves show the between-group difference in per-cell mark intensity for that population"), "ridge tip names per-cell mark intensity")
 check(has("README.md", "mean per-cell mark intensity") && has("USER_GUIDE.md", "mean per-cell mark intensity"), "README and USER_GUIDE signatures lines say mean per-cell mark intensity")
 check(lacks("USER_GUIDE.md", "epigenetic landscape") && lacks("USER_GUIDE.md", "mean-expression heatmap"), "USER_GUIDE heatmap line no longer says mean-expression / epigenetic landscape")
+
+# ---- F1: overview box plots (Q1–Q3; whiskers 5th–95th percentile) — never "Tukey", never mean ± SD ----
+cat("\n--- F1 overview box-plot labels ---\n")
+oc <- "frontend/js/charts/overviewCharts.js"
+check(has(oc, "BOX_AXIS_LABEL: 'arcsinh intensity'"), "overview y-axis label is 'arcsinh intensity' (quantity + scale; the box encoding is in the legend and heading)")
+check(has(oc, ".text('Q1–Q3')") && has(oc, ".text('5th–95th pct')") && has(oc, "['rect', 'Q1–Q3'], ['line', 'Median'], ['whisker', '5th–95th pct'], ['dot', 'Mean']"), "both overview legends spell out the box encoding")
+check(lacks(oc, "mean ± 1 SD") && lacks("frontend/index.html", "mean ± 1 SD") && lacks(oc, "renderMarkerDistByCond"), "no mean ± SD box or by-condition renderer remains")
+check(has("frontend/index.html", "Marker distribution (all cells)") && has("frontend/index.html", 'id="overview-split"') && has("frontend/index.html", "hover for n cells and n replicates"), "overview headings, Split-by select and n-cells/n-replicates hint present")
+# "Tukey HSD" (the positivity post-hoc test) is a real Tukey procedure and may appear; the box plot never may.
+no_tukey_box <- function(f_) { l <- lines_of(f_); !any(grepl("Tukey", l, fixed = TRUE) & !grepl("Tukey HSD", l, fixed = TRUE)) }
+for (f_ in c("frontend/index.html", oc, "README.md", "USER_GUIDE.md", "DECISIONS.md", "frontend/js/app.js"))
+  check(no_tukey_box(f_), sprintf("%s never calls the box plot Tukey (only 'Tukey HSD' allowed)", f_))
+check(has(a, "Overview marker summaries are box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean)") && has(a, "Marker summaries are box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean)"), "both Methods texts describe the overview box plots")
+check(has(a, "'overview-marker-dist', 'overview-marker-dist-cond'"), "HTML report includes the split marker-distribution chart")
+check(ver_of("overviewCharts.js") >= "1.3.1" && ver_of("js/app.js") >= "1.3.21", "overviewCharts / app cache-busting bumps")
+
+# ---- F2: violin small multiples — labels name quantity + scale; BH within panel ----
+cat("\n--- F2 violin small multiples ---\n")
+vp <- "frontend/js/charts/violinPlot.js"
+check(has(vp, "? (sa ? '(standardized, median / MAD; axis truncated at 1st–99th pct)' : '(standardized, median / MAD)')") && has(vp, ": '(arcsinh intensity)';") && has(vp, "yLabel: `${p.marker} ${yUnit}`"), "violin y label = marker + scale, and names the 1st–99th pct truncation on the shared axis")
+# F2 follow-up: shared axis truncation, the median/MAD caveat, grouped n labels, grouped subtitle
+check(has(vp, "sharedDomain = [q01, q99 + r * 0.12];") && has(vp, ".attr('width', width).attr('height', height);", 2), "shared axis uses the pooled 1st–99th pct and both panel clips cut the tails")
+check(has("frontend/index.html", "1st–99th percentile of the pooled standardized values") && has("frontend/index.html", "mostly-negative marker such as Caspase3"), "help text states the truncation and the median/MAD caveat for mostly-negative markers")
+check(has(vp, "n per group = cells per ${geom.colorType || 'colour level'}, in legend order") && has(vp, "`n = ${parts.join(' · ')}`"), "grouped panels: one n label per group plus a legend line (no colliding per-violin labels)")
+check(has(vp, ".attr('class', 'violin-panel-subtitle')") && has(vp, "sigList.forEach(st => {"), "grouped panel renders the BH-within-panel subtitle and the per-group significance brackets")
+check(has(vp, "per group, BH within panel: * p<0.05, ** p<0.01, *** p<0.001") && lacks(vp, "BH across groups"), "grouped subtitle says BH within panel")
+check(has("frontend/index.html", "y: independent per panel (arcsinh intensity)") && has("frontend/index.html", "y: shared, standardized per marker (median / MAD; MAD = median absolute deviation)"), "violin scale select options name both scales")
+check(has("frontend/index.html", 'id="violin-marker-checks"') && lacks("frontend/index.html", 'id="violin-marker"') && has("frontend/index.html", "BH is applied <strong>within the panel</strong>"), "violin checklist present, single select gone, help text says BH within panel")
+check(has(a, "BH correction is applied within each panel, not across panels") && has(a, "BH within panel, not across panels"), "both Methods texts state BH within panel")
+check(lacks(a, "'violin-marker'") && has(a, "#violin-marker-checks input:checked"), "app.js reads the violin checklist")
+check(ver_of("violinPlot.js") >= "1.3.0" && ver_of("js/app.js") >= "1.3.22", "violinPlot / app cache-busting bumps")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

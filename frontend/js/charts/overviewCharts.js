@@ -82,15 +82,12 @@ const OverviewCharts = {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
 
+    // F1: rows carry quantiles (q05/q25/median/q75/q95), mean, n cells and n
+    // replicates; the box is Q1–Q3 with whiskers at the 5th and 95th percentiles.
     const allStats = [...ensureArray(markerStats), ...ensureArray(phenoStats)].map(s => ({
       marker: s.marker,
-      mean: Number(s.mean),
-      median: Number(s.median),
-      sd: Number(s.sd),
-      min: Number(s.min),
-      max: Number(s.max),
-      n: Number(s.n),
-      isH3: markerStats.some(m => m.marker === s.marker)
+      ...OverviewCharts._quantileFields(s),
+      isH3: ensureArray(markerStats).some(m => m.marker === s.marker)
     }));
 
     if (!allStats.length) return;
@@ -111,8 +108,8 @@ const OverviewCharts = {
       .range([0, width])
       .padding(0.3);
 
-    const yMin = d3.min(allStats, d => d.mean - 2 * d.sd);
-    const yMax = d3.max(allStats, d => d.mean + 2 * d.sd);
+    const yMin = d3.min(allStats, d => Math.min(d.q05, d.mean));
+    const yMax = d3.max(allStats, d => Math.max(d.q95, d.mean));
     const yScale = d3.scaleLinear()
       .domain([yMin, yMax])
       .range([height, 0]).nice();
@@ -134,71 +131,107 @@ const OverviewCharts = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -45)
       .attr('text-anchor', 'middle').attr('font-size', '11px').attr('fill', '#64748b')
-      .text('arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range)');   // L5: not quartiles
+      .text(OverviewCharts.BOX_AXIS_LABEL);
 
-    // Box-whisker for each marker
+    const tooltip = OverviewCharts._tooltip();
     allStats.forEach(d => {
       const cx = xScale(d.marker) + xScale.bandwidth() / 2;
       const bw = xScale.bandwidth() * 0.6;
-      const color = d.isH3 ? '#0084b8' : '#e07800';
-
-      // Whiskers (mean ± 2SD)
-      const lo = Math.max(d.min, d.mean - 2 * d.sd);
-      const hi = Math.min(d.max, d.mean + 2 * d.sd);
-      g.append('line')
-        .attr('x1', cx).attr('x2', cx)
-        .attr('y1', yScale(lo)).attr('y2', yScale(hi))
-        .attr('stroke', color).attr('stroke-width', 1.5);
-
-      // Caps
-      [lo, hi].forEach(v => {
-        g.append('line')
-          .attr('x1', cx - bw / 3).attr('x2', cx + bw / 3)
-          .attr('y1', yScale(v)).attr('y2', yScale(v))
-          .attr('stroke', color).attr('stroke-width', 1.5);
-      });
-
-      // Box (mean ± 1SD)
-      const boxLo = d.mean - d.sd;
-      const boxHi = d.mean + d.sd;
-      g.append('rect')
-        .attr('x', cx - bw / 2)
-        .attr('y', yScale(boxHi))
-        .attr('width', bw)
-        .attr('height', Math.max(0, yScale(boxLo) - yScale(boxHi)))
-        .attr('fill', color).attr('fill-opacity', 0.25)
-        .attr('stroke', color).attr('stroke-width', 1.5)
-        .attr('rx', 2);
-
-      // Mean dot
-      g.append('circle')
-        .attr('cx', cx).attr('cy', yScale(d.mean))
-        .attr('r', 3).attr('fill', color);
-
-      // Median dashed line (prominent)
-      g.append('line')
-        .attr('x1', cx - bw / 2).attr('x2', cx + bw / 2)
-        .attr('y1', yScale(d.median)).attr('y2', yScale(d.median))
-        .attr('stroke', color).attr('stroke-width', 2)
-        .attr('stroke-dasharray', '4,2');
+      const color = d.isH3 ? OKABE_ITO[0] : OKABE_ITO[1];
+      OverviewCharts._quantileBox(g, d, cx, bw, yScale, color, tooltip, d.marker);
     });
 
     // Legend
     const legendG = svg.append('g')
       .attr('transform', `translate(${margin.left + 10}, ${margin.top - 15})`);
 
-    [{ label: 'H3-PTM', color: '#0084b8' }, { label: 'Phenotypic', color: '#e07800' }].forEach((item, i) => {
+    [{ label: 'H3-PTM', color: OKABE_ITO[0] }, { label: 'Phenotypic', color: OKABE_ITO[1] }].forEach((item, i) => {
       const lg = legendG.append('g').attr('transform', `translate(${i * 110}, 0)`);
       lg.append('rect').attr('width', 12).attr('height', 12).attr('fill', item.color).attr('fill-opacity', 0.7).attr('rx', 2);
       lg.append('text').attr('x', 16).attr('y', 10).attr('font-size', '10px').attr('fill', '#475569').text(item.label);
     });
-    // Encoding legend
-    const encG = legendG.append('g').attr('transform', 'translate(240, 0)');
-    encG.append('line').attr('x1', 0).attr('x2', 18).attr('y1', 6).attr('y2', 6)
-      .attr('stroke', '#64748b').attr('stroke-width', 2).attr('stroke-dasharray', '4,2');
-    encG.append('text').attr('x', 22).attr('y', 10).attr('font-size', '9px').attr('fill', '#64748b').text('Median');
-    encG.append('circle').attr('cx', 70).attr('cy', 6).attr('r', 3).attr('fill', '#64748b');
-    encG.append('text').attr('x', 77).attr('y', 10).attr('font-size', '9px').attr('fill', '#64748b').text('Mean');
+    OverviewCharts._encodingLegend(legendG.append('g').attr('transform', 'translate(240, 0)'));
+  },
+
+  // F1: shared box-plot encoding — whiskers are the 5th and 95th percentiles,
+  // not 1.5 × IQR, so the chart is named by its quantiles everywhere.
+  // Axis names the quantity and scale; the box encoding lives in the legend and the heading.
+  BOX_AXIS_LABEL: 'arcsinh intensity',
+
+  _quantileFields(s) {
+    return {
+      q05: Number(s.q05), q25: Number(s.q25), median: Number(s.median),
+      q75: Number(s.q75), q95: Number(s.q95), mean: Number(s.mean),
+      n_cells: Number(s.n_cells), n_replicates: s.n_replicates != null ? Number(s.n_replicates) : NaN
+    };
+  },
+
+  _tooltip() {
+    return d3.select('body').selectAll('.d3-tooltip').data([0])
+      .join('div').attr('class', 'd3-tooltip').style('opacity', 0);
+  },
+
+  // Box = Q1–Q3, solid line = median, whiskers with caps = 5th–95th percentile,
+  // dot = mean. Tooltip prints the quantiles, n cells and n replicates; a level
+  // built from a single replicate is flagged.
+  _quantileBox(g, d, cx, bw, yScale, color, tooltip, label) {
+    const f = v => (Number.isFinite(v) ? v.toFixed(3) : '—');
+    const grp = g.append('g').attr('class', 'quantile-box');
+    grp.append('line').attr('x1', cx).attr('x2', cx)
+      .attr('y1', yScale(d.q05)).attr('y2', yScale(d.q95))
+      .attr('stroke', color).attr('stroke-width', 1.5);
+    [d.q05, d.q95].forEach(v => {
+      grp.append('line').attr('x1', cx - bw / 3).attr('x2', cx + bw / 3)
+        .attr('y1', yScale(v)).attr('y2', yScale(v))
+        .attr('stroke', color).attr('stroke-width', 1.5);
+    });
+    grp.append('rect')
+      .attr('x', cx - bw / 2).attr('y', yScale(d.q75))
+      .attr('width', bw).attr('height', Math.max(0, yScale(d.q25) - yScale(d.q75)))
+      .attr('fill', color).attr('fill-opacity', 0.25)
+      .attr('stroke', color).attr('stroke-width', 1.5).attr('rx', 2);
+    grp.append('line')
+      .attr('x1', cx - bw / 2).attr('x2', cx + bw / 2)
+      .attr('y1', yScale(d.median)).attr('y2', yScale(d.median))
+      .attr('stroke', color).attr('stroke-width', 2.5);
+    grp.append('circle').attr('cx', cx).attr('cy', yScale(d.mean)).attr('r', 3)
+      .attr('fill', '#fff').attr('stroke', color).attr('stroke-width', 1.5);
+    if (tooltip) {
+      const oneRep = d.n_replicates === 1;
+      grp.append('rect').attr('x', cx - bw / 2 - 2).attr('y', yScale(d.q95) - 2)
+        .attr('width', bw + 4).attr('height', Math.max(4, yScale(d.q05) - yScale(d.q95) + 4))
+        .attr('fill', 'transparent')
+        .on('mouseover', () => {
+          tooltip.transition().duration(100).style('opacity', 1);
+          tooltip.html(`<strong>${label}</strong><br>` +
+            `median ${f(d.median)} · mean ${f(d.mean)}<br>` +
+            `Q1 ${f(d.q25)} · Q3 ${f(d.q75)}<br>` +
+            `5th ${f(d.q05)} · 95th ${f(d.q95)}<br>` +
+            `n = ${Number.isFinite(d.n_cells) ? d.n_cells.toLocaleString() : '—'} cells · ` +
+            (Number.isFinite(d.n_replicates)
+              ? (oneRep ? '<span style="color:#b45309;">1 replicate</span>' : `${d.n_replicates} replicates`)
+              : 'replicates —'));
+        })
+        .on('mousemove', (event) => {
+          tooltip.style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 20) + 'px');
+        })
+        .on('mouseout', () => tooltip.style('opacity', 0));
+    }
+  },
+
+  _encodingLegend(encG) {
+    encG.append('rect').attr('x', 0).attr('y', 1).attr('width', 10).attr('height', 10)
+      .attr('fill', '#64748b').attr('fill-opacity', 0.25).attr('stroke', '#64748b').attr('rx', 2);
+    encG.append('text').attr('x', 14).attr('y', 10).attr('font-size', '9px').attr('fill', '#64748b').text('Q1–Q3');
+    encG.append('line').attr('x1', 52).attr('x2', 70).attr('y1', 6).attr('y2', 6)
+      .attr('stroke', '#64748b').attr('stroke-width', 2.5);
+    encG.append('text').attr('x', 74).attr('y', 10).attr('font-size', '9px').attr('fill', '#64748b').text('Median');
+    encG.append('line').attr('x1', 116).attr('x2', 116).attr('y1', 0).attr('y2', 12)
+      .attr('stroke', '#64748b').attr('stroke-width', 1.5);
+    encG.append('text').attr('x', 121).attr('y', 10).attr('font-size', '9px').attr('fill', '#64748b').text('5th–95th pct');
+    encG.append('circle').attr('cx', 190).attr('cy', 6).attr('r', 3)
+      .attr('fill', '#fff').attr('stroke', '#64748b').attr('stroke-width', 1.5);
+    encG.append('text').attr('x', 197).attr('y', 10).attr('font-size', '9px').attr('fill', '#64748b').text('Mean');
   },
 
   /** Grouped bar chart: condition x cell cycle */
@@ -436,28 +469,26 @@ const OverviewCharts = {
   },
 
   /**
-   * Marker distribution by condition — side-by-side box-whiskers
-   * markerStatsByCond: [{marker, condition, mean, median, sd, min, max, n}]
+   * Marker distribution by level of a split variable (F1) — side-by-side box
+   * plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean).
+   * rawStats: [{marker, level, q05, q25, median, q75, q95, mean, n_cells, n_replicates}]
    */
-  renderMarkerDistByCond(containerId, rawStats, conditionColorScale) {
+  renderMarkerDistByLevel(containerId, rawStats, stratifyBy, levelOrder) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
 
+    // F1: one box per marker × level of stratify_by (any metadata column).
     const allStats = ensureArray(rawStats).map(s => ({
       marker: s.marker,
-      condition: s.condition,
-      mean: Number(s.mean),
-      median: Number(s.median),
-      sd: Number(s.sd),
-      min: Number(s.min),
-      max: Number(s.max),
-      n: Number(s.n)
+      condition: Array.isArray(s.level) ? String(s.level[0]) : String(s.level),
+      ...OverviewCharts._quantileFields(s)
     }));
 
     if (!allStats.length) return;
 
     const markers = [...new Set(allStats.map(d => d.marker))];
-    const conditions = [...new Set(allStats.map(d => d.condition))].sort();
+    const present = new Set(allStats.map(d => d.condition));
+    const conditions = (levelOrder && levelOrder.length ? levelOrder.filter(l => present.has(l)) : [...present].sort());
 
     const margin = { top: 30, right: 120, bottom: 80, left: 60 };
     const width = Math.max(100, container.clientWidth - margin.left - margin.right);
@@ -471,21 +502,15 @@ const OverviewCharts = {
     const x0 = d3.scaleBand().domain(markers).range([0, width]).paddingInner(0.2);
     const x1 = d3.scaleBand().domain(conditions).range([0, x0.bandwidth()]).padding(0.15);
 
-    const yMin = d3.min(allStats, d => d.mean - 2 * d.sd);
-    const yMax = d3.max(allStats, d => d.mean + 2 * d.sd);
+    const yMin = d3.min(allStats, d => Math.min(d.q05, d.mean));
+    const yMax = d3.max(allStats, d => Math.max(d.q95, d.mean));
     const yScale = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]).nice();
 
     let colorScale;
-    if (conditionColorScale) {
-      colorScale = conditionColorScale;
-    } else {
-      try {
-        colorScale = getColorScale('genotype', conditions, DataManager.serverPalette);
-      } catch (e) {
-        colorScale = d3.scaleOrdinal().domain(conditions).range(d3.schemeTableau10);
-      }
-      if (!colorScale) colorScale = d3.scaleOrdinal().domain(conditions).range(d3.schemeTableau10);
-    }
+    try {
+      colorScale = getColorScale(stratifyBy || 'genotype', conditions, DataManager.serverPalette);
+    } catch (e) { colorScale = null; }
+    if (!colorScale) colorScale = d3.scaleOrdinal().domain(conditions).range(CLUSTER_PALETTE_20);
 
     // Grid
     g.append('g').attr('class', 'grid')
@@ -500,46 +525,13 @@ const OverviewCharts = {
     g.append('text').attr('transform', 'rotate(-90)')
       .attr('x', -height / 2).attr('y', -45)
       .attr('text-anchor', 'middle').attr('font-size', '11px').attr('fill', '#64748b')
-      .text('arcsinh intensity (box = mean ± 1 SD, whiskers = mean ± 2 SD clipped to range)');   // L5: not quartiles
+      .text(OverviewCharts.BOX_AXIS_LABEL);
 
-    // Draw per-condition box-whiskers
+    const tooltip = OverviewCharts._tooltip();
     allStats.forEach(d => {
       const cx = x0(d.marker) + x1(d.condition) + x1.bandwidth() / 2;
       const bw = x1.bandwidth() * 0.7;
-      const color = colorScale(d.condition);
-
-      // Whiskers
-      const lo = Math.max(d.min, d.mean - 2 * d.sd);
-      const hi = Math.min(d.max, d.mean + 2 * d.sd);
-      g.append('line').attr('x1', cx).attr('x2', cx)
-        .attr('y1', yScale(lo)).attr('y2', yScale(hi))
-        .attr('stroke', color).attr('stroke-width', 1.5);
-      [lo, hi].forEach(v => {
-        g.append('line').attr('x1', cx - bw / 3).attr('x2', cx + bw / 3)
-          .attr('y1', yScale(v)).attr('y2', yScale(v))
-          .attr('stroke', color).attr('stroke-width', 1.5);
-      });
-
-      // Box (mean ± 1SD)
-      const boxLo = d.mean - d.sd, boxHi = d.mean + d.sd;
-      g.append('rect')
-        .attr('x', cx - bw / 2).attr('y', yScale(boxHi))
-        .attr('width', bw)
-        .attr('height', Math.max(0, yScale(boxLo) - yScale(boxHi)))
-        .attr('fill', color).attr('fill-opacity', 0.2)
-        .attr('stroke', color).attr('stroke-width', 1.5).attr('rx', 2);
-
-      // Median dashed line
-      g.append('line')
-        .attr('x1', cx - bw / 2).attr('x2', cx + bw / 2)
-        .attr('y1', yScale(d.median)).attr('y2', yScale(d.median))
-        .attr('stroke', color).attr('stroke-width', 2)
-        .attr('stroke-dasharray', '4,2');
-
-      // Mean dot
-      g.append('circle')
-        .attr('cx', cx).attr('cy', yScale(d.mean))
-        .attr('r', 3).attr('fill', color);
+      OverviewCharts._quantileBox(g, d, cx, bw, yScale, colorScale(d.condition), tooltip, `${d.marker} · ${d.condition}`);
     });
 
     // Legend
@@ -552,14 +544,19 @@ const OverviewCharts = {
       lg.append('text').attr('x', 16).attr('y', 10)
         .attr('font-size', '10px').attr('fill', '#475569').text(c);
     });
-    // Encoding legend
+    // Encoding legend (stacked under the level swatches)
     const ey = conditions.length * 18 + 10;
-    legendG.append('line').attr('x1', 0).attr('x2', 18).attr('y1', ey).attr('y2', ey)
-      .attr('stroke', '#64748b').attr('stroke-width', 2).attr('stroke-dasharray', '4,2');
-    legendG.append('text').attr('x', 22).attr('y', ey + 4)
-      .attr('font-size', '9px').attr('fill', '#64748b').text('Median');
-    legendG.append('circle').attr('cx', 9).attr('cy', ey + 16).attr('r', 3).attr('fill', '#64748b');
-    legendG.append('text').attr('x', 22).attr('y', ey + 20)
-      .attr('font-size', '9px').attr('fill', '#64748b').text('Mean');
+    const enc = legendG.append('g').attr('transform', `translate(0, ${ey})`);
+    const rows = [
+      ['rect', 'Q1–Q3'], ['line', 'Median'], ['whisker', '5th–95th pct'], ['dot', 'Mean']
+    ];
+    rows.forEach(([kind, label], i) => {
+      const y = i * 14;
+      if (kind === 'rect') enc.append('rect').attr('x', 0).attr('y', y).attr('width', 12).attr('height', 10).attr('fill', '#64748b').attr('fill-opacity', 0.25).attr('stroke', '#64748b').attr('rx', 2);
+      if (kind === 'line') enc.append('line').attr('x1', 0).attr('x2', 12).attr('y1', y + 5).attr('y2', y + 5).attr('stroke', '#64748b').attr('stroke-width', 2.5);
+      if (kind === 'whisker') enc.append('line').attr('x1', 6).attr('x2', 6).attr('y1', y).attr('y2', y + 10).attr('stroke', '#64748b').attr('stroke-width', 1.5);
+      if (kind === 'dot') enc.append('circle').attr('cx', 6).attr('cy', y + 5).attr('r', 3).attr('fill', '#fff').attr('stroke', '#64748b').attr('stroke-width', 1.5);
+      enc.append('text').attr('x', 18).attr('y', y + 9).attr('font-size', '9px').attr('fill', '#64748b').text(label);
+    });
   }
 };

@@ -52,11 +52,12 @@ FULL_PRECISION <- c(
   "/api/viz/cellcycle-markers", "/api/phase2/positivity",
   "/api/phase2/correlation-diff", "/api/ml/randomforest", "/api/ml/gbm",
   "/api/ml/diagnostic", "/api/ml/signatures", "/api/ml/signatures-diagnostic",
-  "/api/separation/score", "/api/controls/detect", "/api/titration/sweep")
+  "/api/separation/score", "/api/controls/detect", "/api/titration/sweep",
+  "/api/data/overview")   # F1: quantile summaries are statistics; full precision since 1.5.0
 DEFAULT_PRECISION <- c(
   "/api/phase2/gating", "/api/phase2/gating-detail", "/api/phase3/pca",
   "/api/phase3/umap", "/api/phase3/clustering", "/api/ml/clustering",
-  "/api/viz/ridge", "/api/viz/heatmap", "/api/data/overview", "/api/phase3/elbow")
+  "/api/viz/ridge", "/api/viz/heatmap", "/api/phase3/elbow")
 
 src <- readLines("api/R/plumber.R")
 post_idx <- grep("^#\\* @post ", src)

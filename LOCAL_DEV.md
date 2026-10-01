@@ -62,6 +62,7 @@ unreachable.
 | Variable | Default | Effect |
 |---|---|---|
 | `EPIFLOW_CORS_ORIGIN` | `https://epiflow.serranolab.org` | CORS allowlist (comma-separated exact origins). Set it to `*` explicitly for local dev (the start command above does); production leaves the default. |
+| `EPIFLOW_CORES` | `detectCores() − 1` | Workers for the all-markers LMM (one marker per worker, `parallel::mclapply`; R31). `1` = serial, and the Windows fallback. Results are identical at any value; the droplet pins it in `docker-compose.yml`. |
 | `EPIFLOW_SCATTER_DISPLAY_CAP` | `12000` | Display cap for the UMAP/PCA/cluster scatters (phase3.R). The gating endpoint has its own `max_points` (default 15000; 0 = no cap) and ignores this. |
 
 ## If something goes wrong

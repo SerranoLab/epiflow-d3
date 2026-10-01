@@ -3,6 +3,70 @@
 Earlier release notes: `CHANGELOG_v1.2.0.md`. Finding IDs (R1 …, L1 …) refer to
 the September 2026 publication audit; each has an entry in `DECISIONS.md`.
 
+## EpiFlow D3 v1.5.0 — 2026-10-01
+
+The first feature release after the audit (branch `features/overview-violin`):
+the two "usefulness" features from the audit doc, a parallel all-markers LMM,
+and the axis-label convention written into CLAUDE.md.
+
+### Added
+- **F1 — Overview marker summaries as box plots.** `/api/data/overview` takes
+  `stratify_by` (genotype, identity, cell cycle, replicate, any metadata
+  column, gate population / cluster while applied) and returns, per marker ×
+  level, q05 / q25 / median / q75 / q95 / mean / n cells / n replicates at
+  full precision. Both overview charts draw box = Q1–Q3, line = median,
+  whiskers = 5th–95th percentile, dot = mean, with a tooltip giving the
+  quantiles, n cells and n replicates (a single-replicate level is flagged);
+  a "Split by" select drives the second chart. The mean ± SD box (L5) is
+  retired. The y axis reads "arcsinh intensity"; the encoding is in the
+  legend and heading. Never called a Tukey box: these whiskers are
+  percentiles, not 1.5 × IQR.
+- **F2 — Violin small multiples.** The Violin tab draws one panel per ticked
+  marker into a single SVG (lettered, ≤ 3 columns), all panels sharing the
+  group order and, in grouped mode, the colour levels and one legend. The y
+  axis is the imported arcsinh intensity per panel, or — "shared,
+  standardized per marker (median / MAD)" — one axis over the 1st–99th
+  percentile of the pooled standardized values with the tails clipped (the
+  label says so). Each panel's Welch t on replicate means runs per panel;
+  **BH is within panel, never across panels** (subtitle and Methods say so).
+  Grouped panels print one n label per group. Help text notes that median /
+  MAD on a mostly-negative marker (Caspase3) is the negative population's
+  width, so standardized values are not comparable across such markers.
+- **R31 — Parallel all-markers LMM.** `run_all_markers_lmm` fits markers
+  across `EPIFLOW_CORES` workers (`parallel::mclapply`; default
+  `detectCores() − 1`; 1 = serial / Windows). Results are identical to the
+  serial run to 1e-12; 416k cells × 5 markers: 10.3 s → 4.1 s on 4 workers.
+  Production is pinned at `EPIFLOW_CORES=1` until per-worker memory is
+  checked on the droplet.
+
+### Changed
+- CLAUDE.md: every plot axis names the quantity **and its scale**;
+  `test_labels.R` gets a check for each new chart.
+- `/api/viz/violin` accepts `markers` (vector) and `scale_mode`; a single
+  `marker` still works. `/api/data/overview` serializes at full precision and
+  no longer returns `marker_stats_by_cond`.
+- The ridge overlay's median / MAD standardization is now
+  `.robust_standardize_long()`, shared with the violin tab (ridge output unchanged).
+
+### Logged (open)
+- **L17** — gating plot axes name the marker only; add "(arcsinh intensity)".
+- **R32** — Import tab: per-channel arcsinh cofactor suggestions (logicle-style,
+  flowVS), stamped into the `.rds` with the rule name, plus a c/2 – 2c
+  sensitivity check; manual lists which statistics are cofactor-invariant.
+- **R21 validation note** — OmiQ's scaled export is reproduced by
+  `asinh(raw / cofactor)` with per-channel cofactors from the Scaling CSV
+  (max |diff| 9e-5); cofactors differ by channel (6000 / 600 / 1000 / 400).
+- Gate Finder design note: CellCnn, citrus and MASC deferred until a patient
+  cohort exists (they need tens of samples).
+
+### Tests
+New: `test_overview_quantiles.R`, `test_violin_panels.R`, `test_lmm_parallel.R`.
+All eleven audit suites (the `test_*.R` scripts with a PASS/FAIL verdict) pass
+against the local API; the older informational scripts run clean, except
+`test_ridge_all_markers.R`, which still calls the pre-1.2 name
+`compute_ridge_all_markers()` (renamed to `compute_ridge_overlay()`) and has
+been stale since v1.2.0 — logged under open items, not touched here.
+
 ## EpiFlow D3 v1.4.2 — 2026-09-25
 
 Two ridge-plot label findings from the v1.4.1 browser check (branch
