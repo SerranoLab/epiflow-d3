@@ -491,6 +491,21 @@ compute_ridge_overlay <- function(data, markers = NULL, group_by = "genotype",
   )
 }
 
+# F1: quantile summary of one marker within one level. n_cells counts the
+# finite values (one row per cell per marker); n_replicates counts the
+# replicates behind them, so a level built from a single replicate is visible
+# as such. Quantiles are type 7 (R default). NULL below 2 values.
+.quantile_stats <- function(vals, reps = NULL) {
+  ok <- is.finite(vals)
+  vals <- vals[ok]
+  if (!is.null(reps)) reps <- reps[ok]
+  if (length(vals) < 2) return(NULL)
+  q <- unname(stats::quantile(vals, c(0.05, 0.25, 0.5, 0.75, 0.95), type = 7))
+  list(q05 = q[1], q25 = q[2], median = q[3], q75 = q[4], q95 = q[5],
+       mean = mean(vals), n_cells = length(vals),
+       n_replicates = if (is.null(reps)) NA_integer_ else dplyr::n_distinct(reps))
+}
+
 #' Compute violin plot data
 #' @param data Filtered dataset
 #' @param marker H3-PTM marker or phenotypic marker name

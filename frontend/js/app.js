@@ -277,6 +277,16 @@ const App = {
       });
     });
 
+    // F1: Overview "Split by" — every categorical column plus replicate; no "None".
+    const splitSel = document.getElementById('overview-split');
+    if (splitSel) {
+      const keep = splitSel.value;
+      const opts = [...new Set([...uniqueGroupOpts, 'replicate'])];
+      splitSel.innerHTML = opts.map(col =>
+        `<option value="${col}">Split by ${col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>`).join('');
+      splitSel.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
+    }
+
     // Populate comparison variable dropdown
     const compSelect = document.getElementById('filter-comparison-var');
     if (compSelect) {
@@ -443,7 +453,7 @@ const App = {
     const dynamicCols = ['gate_population', 'cluster_identity'];
     const groupBySelects = ['ridge-groupby', 'violin-groupby', 'heatmap-groupby'];
     const colorBySelects = ['ridge-colorby', 'violin-colorby'];
-    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify'];
+    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify', 'overview-split'];   // F1: gate / cluster columns reach the Split-by select too
     const allSelects = [...groupBySelects, ...colorBySelects, ...stratifySelects];
 
     allSelects.forEach(selId => {
@@ -672,7 +682,11 @@ const App = {
 
   async loadOverview() {
     try {
-      const data = await EpiFlowAPI.getOverview();
+      // F1: the marker summaries split by whichever column the Split-by select names.
+      const splitSel = document.getElementById('overview-split');
+      const stratifyBy = (splitSel && splitSel.value) ? splitSel.value : DataManager.getComparisonVar();
+      const data = await EpiFlowAPI.getOverview({ stratify_by: stratifyBy });
+      if (data.error) { this.showInlineMessage('overview-message', data.error, 'error'); return; }
       OverviewCharts.renderCards('overview-cards', data);
 
       // Bar charts for cell counts
@@ -709,10 +723,17 @@ const App = {
       OverviewCharts.renderMarkerDistribution('overview-marker-dist',
         ensureArray(data.marker_stats), ensureArray(data.pheno_stats));
 
-      // Marker distribution by condition
-      const markerStatsByCond = ensureArray(data.marker_stats_by_cond);
-      if (markerStatsByCond.length) {
-        OverviewCharts.renderMarkerDistByCond('overview-marker-dist-cond', markerStatsByCond);
+      // Marker distribution by level of the split variable (F1)
+      const byLevel = ensureArray(data.marker_stats_by_level);
+      const splitVar = data.stratify_by || stratifyBy;
+      const levelOrder = orderRefFirst(ensureArray(data.levels).map(String), this.getRefLevel());
+      const splitLabel = document.getElementById('overview-split-label');
+      if (splitLabel) splitLabel.textContent = splitVar.replace(/_/g, ' ');
+      if (byLevel.length) {
+        OverviewCharts.renderMarkerDistByLevel('overview-marker-dist-cond', byLevel, splitVar, levelOrder);
+      } else {
+        document.getElementById('overview-marker-dist-cond').innerHTML =
+          '<p style="padding:16px;color:#94a3b8;font-size:12px;">No level of this variable has 2 or more cells.</p>';
       }
 
       // Cross table
@@ -1020,6 +1041,7 @@ const App = {
     document.getElementById('run-all-ml-btn').addEventListener('click', () => this.runAllML());
     document.getElementById('run-diagnostic-btn').addEventListener('click', () => this.runDiagnostic());
     document.getElementById('refresh-overview-btn').addEventListener('click', () => this.loadOverview());
+    document.getElementById('overview-split')?.addEventListener('change', () => { if (this.currentTab === 'overview') this.loadOverview(); });
     document.getElementById('run-forest-btn').addEventListener('click', () => this.runForestDirect());
     document.getElementById('forest-marker-filter').addEventListener('change', () => { if (this.currentTab === 'forest') this.loadForest(); });
     document.getElementById('forest-stratify').addEventListener('change', () => { /* user clicks Generate to apply */ });
@@ -4277,7 +4299,7 @@ const App = {
       <div class="report-section methods">
         <h2>Methods</h2>
         <p>Spectral flow cytometry data were analyzed using EpiFlow D3 (Serrano Lab, Center for Regenerative Medicine (CReM), Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell and analyzed at the biological replicate level.</p>
-        <p><strong>Statistical framework:</strong> All marker intensities enter EpiFlow arcsinh-transformed (OMIQ export) and every statistic below is computed on that scale. Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each reported with a 95% t interval on its own df. Rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged: there the replicate variance is small relative to cell variance (low ICC), so the model draws precision from cells and the row should be interpreted with caution. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units) alongside p-values; no confidence interval is given for d — the interval shown on the forest plot is on β. The volcano plot shows β (arcsinh units) against −log₁₀ of the BH-adjusted p; its |β| > 0.1 line is a display cut for labelling, not a test. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
+        <p><strong>Statistical framework:</strong> All marker intensities enter EpiFlow arcsinh-transformed (OMIQ export) and every statistic below is computed on that scale. Overview marker summaries are box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean) per marker and level of the chosen split variable, each with its n cells and n replicates. Linear mixed models (LMM; <code>value ~ group + (1|replicate)</code>) were used to test per-marker differences while accounting for cell-level nesting within biological replicates. An omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each reported with a 95% t interval on its own df. Rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged: there the replicate variance is small relative to cell variance (low ICC), so the model draws precision from cells and the row should be interpreted with caution. Distribution shifts were additionally quantified by the 1D Earth Mover's Distance (Wasserstein-1, normalized to the pooled inter-quartile range; Orlova et al., PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared by a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). P-values were corrected for multiple comparisons using the Benjamini-Hochberg (BH) procedure. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units) alongside p-values; no confidence interval is given for d — the interval shown on the forest plot is on β. The volcano plot shows β (arcsinh units) against −log₁₀ of the BH-adjusted p; its |β| > 0.1 line is a display cut for labelling, not a test. Cell-level tests (KS, Wilcoxon, Fisher's exact, chi-square) are provided as exploratory metrics and should not be used for inferential claims given pseudoreplication. Quadrant-gate frequencies were compared between groups by Welch t-tests on per-replicate quadrant fractions, reported as the difference in percentage points with a 95% confidence interval and BH-adjusted across the four (compositional) quadrants; the cell-level chi-square is summarized by Cramér's V only.</p>
         <p><strong>Positivity analysis:</strong> Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC), was used to determine marker positivity. Replicate-level fraction-positive comparisons serve as the primary inference — a t-test for two groups, or one-way ANOVA with Tukey HSD post-hoc tests for three or more groups; cell-level distribution tests are flagged as exploratory.</p>
         <p><strong>Differential correlation:</strong> Within each biological replicate, marker-pair correlations (Pearson or Spearman) were computed across cells and Fisher z-transformed (z = atanh r); groups were compared by a Welch t-test on z across replicates for every group pair. Δz with its 95% CI is the tested effect; Δr = tanh(mean z) difference is reported descriptively without an interval; p-values were BH-corrected across all group and marker pairs in one family. Groups with fewer than two replicates are not estimable. Correlations across a mixed population can reflect composition rather than co-regulation (Aarts et al. 2014) and were read within strata.</p>
         <p><strong>Machine learning and diagnostic assessment:</strong> Random Forest, Gradient Boosted Models (xgboost), and LDA were used for classification. Diagnostic accuracy was estimated by grouped cross-validation of an LDA classifier holding out whole biological samples (leave-one-sample-out up to 10 samples, grouped 5-fold above; majority vote per sample; exact binomial 95% confidence interval on the number of samples). Multivariate differences between per-replicate mean H3-PTM profiles were tested by exact PERMANOVA (Anderson 2001, Austral Ecology 26:32-46) with R² as the effect size; the smallest attainable p is 1 over the number of distinct label arrangements (0.10 for 3 vs 3 replicates). Cell-level classification accuracy and any cell-level multivariate test are exploratory: cells from one sample fall in both training and test folds, so they do not measure generalization to a new sample.</p>
@@ -4383,7 +4405,7 @@ ${sections.join('\n')}
     const year = new Date().getFullYear();
     const date = new Date().toISOString().slice(0, 10);
     const citation = `EpiFlow D3: A spectral flow cytometry analysis platform for multiparametric histone H3 post-translational modification profiling. Serrano Lab, Center for Regenerative Medicine (CReM), Boston University. https://serranolab.github.io/online/. Accessed ${date}.`;
-    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 ${this.version ? 'v' + this.version : ''} (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell; intensities were arcsinh-transformed before import and analyzed on that scale. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each with a 95% t interval on its own df; rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units), without a confidence interval; forest and volcano plots show β in arcsinh units, the volcano against −log₁₀ of the BH-adjusted p. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). Diagnostic accuracy was estimated by grouped cross-validation of an LDA classifier holding out whole biological samples (leave-one-sample-out up to 10 samples, grouped 5-fold above), scored as samples called correctly by majority vote with an exact binomial 95% confidence interval. Differential correlation was tested at the replicate level: marker-pair correlations were computed within each replicate, Fisher z-transformed, and compared between groups by a Welch t-test on z (Δz with 95% CI; Δr reported descriptively); correlations were read within strata because mixed populations can produce composition artifacts (Aarts et al. 2014). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
+    const methods = `Spectral flow cytometry data were analyzed using EpiFlow D3 ${this.version ? 'v' + this.version : ''} (Serrano Lab, Center for Regenerative Medicine, Boston University). Multiparametric histone H3 post-translational modification (PTM) profiles were measured per cell; intensities were arcsinh-transformed before import and analyzed on that scale. Marker summaries are box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean) per marker and level, with n cells and n replicates. Between-group comparisons used linear mixed models (LMM; value ~ group + (1|replicate)) to account for cell-level nesting within biological replicates; an omnibus F-test assessed the overall effect of group, and all pairwise contrasts were estimated from the model with Satterthwaite degrees of freedom (emmeans), each with a 95% t interval on its own df; rows whose Satterthwaite df exceed the replicate-level design df (samples − groups) are flagged. Effect sizes are reported as d = LMM β / cell-level pooled SD (arcsinh units), without a confidence interval; forest and volcano plots show β in arcsinh units, the volcano against −log₁₀ of the BH-adjusted p. Distribution shifts are quantified by the 1D Earth Mover's Distance (Wasserstein-1) normalized to the pooled inter-quartile range, following Orlova et al. (PLOS ONE 2016); for replicate-level inference, per-replicate signed EMD relative to the reference group was compared across conditions using a Wilcoxon rank-sum test (two groups) or a Kruskal-Wallis test with pairwise Wilcoxon post-hoc tests (three or more groups). Marker positivity was determined by Gaussian Mixture Model (GMM) thresholding, with the number of components selected by the Bayesian Information Criterion (BIC); fraction-positive was compared at the replicate level using a t-test (two groups) or one-way ANOVA with Tukey HSD post-hoc tests (three or more groups). Diagnostic accuracy was estimated by grouped cross-validation of an LDA classifier holding out whole biological samples (leave-one-sample-out up to 10 samples, grouped 5-fold above), scored as samples called correctly by majority vote with an exact binomial 95% confidence interval. Differential correlation was tested at the replicate level: marker-pair correlations were computed within each replicate, Fisher z-transformed, and compared between groups by a Welch t-test on z (Δz with 95% CI; Δr reported descriptively); correlations were read within strata because mixed populations can produce composition artifacts (Aarts et al. 2014). All p-values were corrected for multiple comparisons using the Benjamini-Hochberg procedure.`;
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:10000;display:flex;align-items:center;justify-content:center;';

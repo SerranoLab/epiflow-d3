@@ -512,7 +512,7 @@ function(session_id, req) {
 
 #* Get data overview statistics
 #* @post /api/data/overview/<session_id>
-#* @serializer json list(auto_unbox = TRUE)
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
 function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
@@ -548,37 +548,32 @@ function(session_id, req) {
     cells %>% dplyr::count(replicate, name = "n") %>% dplyr::arrange(dplyr::desc(n))
   } else { data.frame(replicate = "N/A", n = n_cells) }
 
-  # H3-PTM marker summary stats
+  # F1: marker summaries are quantiles (q05/q25/median/q75/q95) plus mean, n
+  # cells and n replicates; sd/min/max stay for the cards. The box plot the
+  # frontend draws is Q1–Q3 with whiskers at the 5th and 95th percentiles.
+  has_rep <- "replicate" %in% names(data)
   h3_markers <- meta$h3_markers %||% character(0)
   marker_stats <- lapply(h3_markers, function(m) {
-    vals <- data$value[data$H3PTM == m]
-    vals <- vals[!is.na(vals)]
-    list(
-      marker = m,
-      mean = mean(vals),
-      median = median(vals),
-      sd = sd(vals),
-      min = min(vals),
-      max = max(vals),
-      n = length(vals)
-    )
+    sel  <- data$H3PTM == m
+    vals <- data$value[sel]
+    qs <- .quantile_stats(vals, if (has_rep) data$replicate[sel] else NULL)
+    if (is.null(qs)) return(NULL)
+    vals <- vals[is.finite(vals)]
+    c(list(marker = m, is_h3 = TRUE), qs,
+      list(sd = sd(vals), min = min(vals), max = max(vals), n = length(vals)))
   })
+  marker_stats <- Filter(Negate(is.null), marker_stats)
 
   # Phenotypic marker stats
   pheno_markers <- meta$phenotypic_markers %||% character(0)
   pheno_stats <- lapply(pheno_markers, function(m) {
     if (!m %in% names(cells)) return(NULL)
     vals <- cells[[m]]
-    vals <- vals[!is.na(vals)]
-    list(
-      marker = m,
-      mean = mean(vals),
-      median = median(vals),
-      sd = sd(vals),
-      min = min(vals),
-      max = max(vals),
-      n = length(vals)
-    )
+    qs <- .quantile_stats(vals, if (has_rep) cells$replicate else NULL)
+    if (is.null(qs)) return(NULL)
+    vals <- vals[is.finite(vals)]
+    c(list(marker = m, is_h3 = FALSE), qs,
+      list(sd = sd(vals), min = min(vals), max = max(vals), n = length(vals)))
   })
   pheno_stats <- Filter(Negate(is.null), pheno_stats)
 
@@ -614,26 +609,34 @@ function(session_id, req) {
       dplyr::count(.data[[geno_col]], identity, name = "n")
   }
 
-  # Marker stats stratified by condition
-  marker_stats_by_cond <- lapply(h3_markers, function(m) {
-    conds <- sort(unique(data[[geno_col]]))
-    lapply(conds, function(cond) {
-      vals <- data$value[data$H3PTM == m & data[[geno_col]] == cond]
-      vals <- vals[!is.na(vals)]
-      if (length(vals) < 2) return(NULL)
-      list(
-        marker = m,
-        condition = cond,
-        mean = mean(vals),
-        median = median(vals),
-        sd = sd(vals),
-        min = min(vals),
-        max = max(vals),
-        n = length(vals)
-      )
-    })
-  })
-  marker_stats_by_cond <- Filter(Negate(is.null), unlist(marker_stats_by_cond, recursive = FALSE))
+  # F1: marker quantiles within each level of stratify_by — genotype, identity,
+  # cell_cycle, replicate, any detected metadata column, and gate_population /
+  # cluster_identity while a gate or clustering is applied. Both H3 marks and
+  # phenotypic markers; a level with fewer than 2 values is skipped.
+  params <- req$body
+  stratify_by <- params$stratify_by %||% geno_col
+  if (!stratify_by %in% names(data)) {
+    return(list(error = paste0("stratify_by column not found: ", stratify_by,
+      " (gate_population and cluster_identity exist only while a gate or clustering is applied)")))
+  }
+  level_v   <- as.character(data[[stratify_by]])
+  level_c   <- as.character(cells[[stratify_by]])
+  levels_all <- sort(unique(level_v[!is.na(level_v)]))
+  marker_stats_by_level <- c(
+    unlist(lapply(h3_markers, function(m) lapply(levels_all, function(lv) {
+      sel <- data$H3PTM == m & !is.na(level_v) & level_v == lv
+      qs <- .quantile_stats(data$value[sel], if (has_rep) data$replicate[sel] else NULL)
+      if (is.null(qs)) NULL else c(list(marker = m, level = lv, is_h3 = TRUE), qs)
+    })), recursive = FALSE),
+    unlist(lapply(pheno_markers, function(m) {
+      if (!m %in% names(cells)) return(list())
+      lapply(levels_all, function(lv) {
+        sel <- !is.na(level_c) & level_c == lv
+        qs <- .quantile_stats(cells[[m]][sel], if (has_rep) cells$replicate[sel] else NULL)
+        if (is.null(qs)) NULL else c(list(marker = m, level = lv, is_h3 = FALSE), qs)
+      })
+    }), recursive = FALSE))
+  marker_stats_by_level <- Filter(Negate(is.null), marker_stats_by_level)
 
   list(
     n_cells = n_cells,
@@ -656,7 +659,9 @@ function(session_id, req) {
     cond_cycle_tab = cond_cycle_tab,
     replicate_cond_tab = replicate_cond_tab,
     identity_cond_tab = identity_cond_tab,
-    marker_stats_by_cond = safe_I(marker_stats_by_cond),
+    stratify_by = stratify_by,
+    levels = safe_I(levels_all),
+    marker_stats_by_level = safe_I(marker_stats_by_level),
     available_meta = safe_I(avail_meta)
   )
 }

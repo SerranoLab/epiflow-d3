@@ -1067,6 +1067,46 @@ equals that genotype's distinct-cell count, not 5× it.
 
 ---
 
+## F1 — Overview marker summaries: box plots (Q1–Q3; whiskers 5th–95th percentile) split by any metadata column
+Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0 (audit doc "three features", F1)
+
+What changed. `/api/data/overview` takes `stratify_by` (genotype, identity,
+cell_cycle, replicate, any detected metadata column, and gate_population /
+cluster_identity while a gate or clustering is applied) and returns, for
+every H3 mark and phenotypic marker × level, q05 / q25 / median / q75 / q95
+/ mean / n_cells / n_replicates (`.quantile_stats`, `helpers.R`; quantile
+type 7). The all-cells `marker_stats` / `pheno_stats` carry the same
+quantiles (sd / min / max kept for the cards); `marker_stats_by_cond` is
+gone. The endpoint serializes at full precision (R14 rule: statistics
+travel at full precision). `overviewCharts.js` draws one box encoding for
+both charts — box Q1–Q3, solid median line, whiskers with caps at the 5th
+and 95th percentiles, open dot = mean — with a tooltip giving the quantiles,
+n cells and n replicates and an amber "1 replicate" flag; a "Split by"
+select drives the second chart and levels are ordered reference first;
+colours follow the split variable's palette. This retires the L5 mean ± SD
+box and its caveat. Both Methods texts, README and USER_GUIDE describe the
+box the same way.
+
+Naming. The chart is named by its quantiles, never after the 1.5 × IQR
+box-and-whisker convention: these whiskers are the 5th and 95th
+percentiles. `test_labels.R` forbids that author's name for the box plot
+across UI, docs and this file (only "Tukey HSD", the positivity post-hoc
+test, may appear).
+
+Deferred. The audit's "show violins" toggle on the overview — the Violin
+tab's small multiples (F2) cover it.
+
+Verification. `test_overview_quantiles.R`: rows = markers × levels; order
+q05 ≤ q25 ≤ median ≤ q75 ≤ q95; every number equals an in-process
+`quantile(type = 7)` / mean / distinct-cell / distinct-replicate count to
+1e-8; Σ n_cells over levels = metadata n_cells per marker; replicate strata
+report n_replicates = 1; default stratum = genotype; unknown column and an
+absent gate column return naming errors. `test_labels.R`: axis label,
+headings, Split-by select, Methods sentences, report chart list, no
+"mean ± 1 SD", the box-plot naming rule.
+
+---
+
 ## Gate Finder — motivation
 
 Design note (2026-09-30). Supervised population-discovery methods — CellCnn
