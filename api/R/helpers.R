@@ -719,15 +719,27 @@ compute_violin_data <- function(data, markers = NULL, group_by = "genotype",
   if (!length(markers)) return(list(error = "No marker selected"))
   h3_markers <- h3_markers %||% character(0)
 
-  standardization <- NULL
+  standardization <- NULL; shared_axis <- NULL
   if (identical(scale_mode, "robust")) {
     h3_sel <- intersect(markers, h3_markers)
     if (length(h3_sel)) {
       st <- .robust_standardize_long(data, h3_sel); data <- st$data; standardization <- st$stats
     }
-    for (col in intersect(setdiff(markers, h3_sel), names(data))) {
+    ph_sel <- intersect(setdiff(markers, h3_sel), names(data))
+    for (col in ph_sel) {
       st <- .robust_standardize_wide(data, col); data <- st$data
       standardization <- rbind(standardization, st$stats)
+    }
+    # Shared y axis for the small multiples: the 1st–99th percentile of the
+    # standardized values pooled across every selected marker; the tails are
+    # clipped in the plot and the axis label says so.
+    pooled <- c(data$value[data$H3PTM %in% h3_sel],
+                unlist(lapply(ph_sel, function(col) (data %>% dplyr::distinct(cell_id, .keep_all = TRUE))[[col]])))
+    pooled <- pooled[is.finite(pooled)]
+    if (length(pooled) >= 2) {
+      q <- unname(stats::quantile(pooled, c(0.01, 0.99), type = 7))
+      shared_axis <- list(q01 = q[1], q99 = q[2], n_values = length(pooled),
+                          note = "axis truncated at 1st–99th pct of pooled standardized values")
     }
   }
 
@@ -739,7 +751,7 @@ compute_violin_data <- function(data, markers = NULL, group_by = "genotype",
   groups_seen <- unique(unlist(lapply(panels, function(p)
     if (is.null(p$error)) vapply(p$violins, function(v) as.character(v$group), character(1)) else character(0))))
 
-  list(
+  out <- list(
     panels = safe_I(panels),
     markers = safe_I(markers),
     group_by = group_by,
@@ -748,10 +760,14 @@ compute_violin_data <- function(data, markers = NULL, group_by = "genotype",
     # L14 wording: the axis says what scale it is on.
     y_label = if (identical(scale_mode, "robust"))
       "standardized per marker (median / MAD; MAD = median absolute deviation)" else "arcsinh intensity (as imported)",
-    standardization = if (is.null(standardization)) NULL else safe_I(lapply(seq_len(nrow(standardization)), function(i) as.list(standardization[i, ]))),
     group_order = safe_I(sort(groups_seen)),
     multiplicity = "BH within panel; no adjustment across panels"
   )
+  # Keys present only on the standardized scale (a NULL element would serialize as {}).
+  if (!is.null(standardization))
+    out$standardization <- safe_I(lapply(seq_len(nrow(standardization)), function(i) as.list(standardization[i, ])))
+  if (!is.null(shared_axis)) out$shared_axis <- shared_axis
+  out
 }
 
 # ---- PCA computation ----

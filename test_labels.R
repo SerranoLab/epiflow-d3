@@ -231,7 +231,12 @@ check(ver_of("overviewCharts.js") >= "1.3.1" && ver_of("js/app.js") >= "1.3.21",
 # ---- F2: violin small multiples — labels name quantity + scale; BH within panel ----
 cat("\n--- F2 violin small multiples ---\n")
 vp <- "frontend/js/charts/violinPlot.js"
-check(has(vp, "const yUnit = sharedY ? '(standardized, median / MAD)' : '(arcsinh intensity)';") && has(vp, "yLabel: `${p.marker} ${yUnit}`"), "violin y label = marker + scale")
+check(has(vp, "? (sa ? '(standardized, median / MAD; axis truncated at 1st–99th pct)' : '(standardized, median / MAD)')") && has(vp, ": '(arcsinh intensity)';") && has(vp, "yLabel: `${p.marker} ${yUnit}`"), "violin y label = marker + scale, and names the 1st–99th pct truncation on the shared axis")
+# F2 follow-up: shared axis truncation, the median/MAD caveat, grouped n labels, grouped subtitle
+check(has(vp, "sharedDomain = [q01, q99 + r * 0.12];") && has(vp, ".attr('width', width).attr('height', height);", 2), "shared axis uses the pooled 1st–99th pct and both panel clips cut the tails")
+check(has("frontend/index.html", "1st–99th percentile of the pooled standardized values") && has("frontend/index.html", "mostly-negative marker such as Caspase3"), "help text states the truncation and the median/MAD caveat for mostly-negative markers")
+check(has(vp, "n per group = cells per ${geom.colorType || 'colour level'}, in legend order") && has(vp, "`n = ${parts.join(' · ')}`"), "grouped panels: one n label per group plus a legend line (no colliding per-violin labels)")
+check(has(vp, ".attr('class', 'violin-panel-subtitle')") && has(vp, "sigList.forEach(st => {"), "grouped panel renders the BH-within-panel subtitle and the per-group significance brackets")
 check(has(vp, "per group, BH within panel: * p<0.05, ** p<0.01, *** p<0.001") && lacks(vp, "BH across groups"), "grouped subtitle says BH within panel")
 check(has("frontend/index.html", "y: independent per panel (arcsinh intensity)") && has("frontend/index.html", "y: shared, standardized per marker (median / MAD; MAD = median absolute deviation)"), "violin scale select options name both scales")
 check(has("frontend/index.html", 'id="violin-marker-checks"') && lacks("frontend/index.html", 'id="violin-marker"') && has("frontend/index.html", "BH is applied <strong>within the panel</strong>"), "violin checklist present, single select gone, help text says BH within panel")

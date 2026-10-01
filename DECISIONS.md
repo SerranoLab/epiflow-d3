@@ -1127,6 +1127,20 @@ The Violin tab's marker select became a checklist (H3 marks ticked,
 phenotypic markers after a separator) with a y-axis mode select. Export and
 the figure composer take the single SVG unchanged.
 
+Follow-up (2026-10-01, browser check). (1) The shared standardized axis is
+the 1st–99th percentile of the standardized values pooled across the
+selected markers (`shared_axis` in the payload); the plot clips the tails
+and the y label adds "axis truncated at 1st–99th pct". The help text now
+says that median / MAD is the width of whatever population dominates a
+marker — on a mostly-negative marker (Caspase3) the negative population's
+— so standardized values are not comparable across such markers.
+(2) Grouped panels no longer print one n per violin (they collided); each
+group gets one "n = a · b" label in legend order plus a legend line.
+(3) Grouped mode renders the per-group significance rows and the "BH
+within panel" subtitle (and says "not estimable" when a two-level
+comparison has no replicate test); `test_violin_panels.R` asserts the
+rows the frontend draws from.
+
 Multiplicity. BH is applied **within each panel** (across that panel's
 groups, as before); nothing is adjusted across panels in this commit. The
 grouped-mode subtitle says "BH within panel" and both Methods texts state it.

@@ -500,7 +500,7 @@
             <span style="font-size:11px;color:#64748b;font-weight:600;">Markers (one panel each):</span>
             <span id="violin-marker-checks" style="display:flex;flex-wrap:wrap;gap:12px;font-size:12px;"></span>
           </div>
-          <div class="help-panel"><i class="fas fa-info-circle"></i> One violin panel per ticked marker (small multiples), all panels sharing the group order. The y axis is the <strong>arcsinh intensity (as imported)</strong> per panel, or — with the shared option — <strong>standardized per marker (median / MAD; MAD = median absolute deviation)</strong> so every mark sits on one axis. Each panel's test is a Welch t on replicate means; in grouped mode BH is applied <strong>within the panel</strong>, not across panels. Export writes one SVG with lettered panels. <strong>Tip:</strong> Group by Identity, color by Genotype for side-by-side paired comparisons within each cell population.</div>
+          <div class="help-panel"><i class="fas fa-info-circle"></i> One violin panel per ticked marker (small multiples), all panels sharing the group order. The y axis is the <strong>arcsinh intensity (as imported)</strong> per panel, or — with the shared option — <strong>standardized per marker (median / MAD; MAD = median absolute deviation)</strong> so every mark sits on one axis (shown over the 1st–99th percentile of the pooled standardized values; tails are clipped). Caution: median / MAD is the width of whatever population dominates a marker — on a mostly-negative marker such as Caspase3 it is the negative population's width, so standardized values are not comparable across such markers. Each panel's test is a Welch t on replicate means; in grouped mode BH is applied <strong>within the panel</strong>, not across panels. Export writes one SVG with lettered panels. <strong>Tip:</strong> Group by Identity, color by Genotype for side-by-side paired comparisons within each cell population.</div>
           <div class="chart-container" id="violin-chart"></div>
         </div>
 
@@ -1118,7 +1118,7 @@
   <script src="js/api.js?v=1.2.5"></script>
   <script src="js/dataManager.js?v=1.2.2"></script>
   <script src="js/charts/ridgePlot.js?v=1.2.5"></script>
-  <script src="js/charts/violinPlot.js?v=1.3.0"></script>
+  <script src="js/charts/violinPlot.js?v=1.3.1"></script>
   <script src="js/charts/pcaPlot.js?v=1.2.2"></script>
   <script src="js/charts/heatmap.js?v=1.2.3"></script>
   <script src="js/charts/forestPlot.js?v=1.2.8"></script>

@@ -47,7 +47,12 @@ const ViolinPlot = {
     const isGrouped = usable[0].violins[0].color_level !== undefined && usable[0].violins[0].color_level !== null;
     const refLevel = data.ref_level;
     const sharedY = data.scale_mode === 'robust';
-    const yUnit = sharedY ? '(standardized, median / MAD)' : '(arcsinh intensity)';
+    // Shared axis is the 1st–99th percentile of the pooled standardized values
+    // (payload shared_axis); the tails are clipped and the label says so.
+    const sa = sharedY && data.shared_axis && Number.isFinite(Number(data.shared_axis.q01)) ? data.shared_axis : null;
+    const yUnit = sharedY
+      ? (sa ? '(standardized, median / MAD; axis truncated at 1st–99th pct)' : '(standardized, median / MAD)')
+      : '(arcsinh intensity)';
 
     // Shared group order across panels (payload order, reference first)
     const seen = [...new Set(usable.flatMap(p => p.violins.map(v => v.group)))];
@@ -63,9 +68,14 @@ const ViolinPlot = {
     // Shared y domain (standardized scale): global min/max over every violin
     let sharedDomain = null;
     if (sharedY) {
-      const vals = usable.flatMap(p => p.violins.flatMap(v => [Number(v.min), Number(v.max)])).filter(x => !isNaN(x));
-      const r = (d3.max(vals) - d3.min(vals)) || 1;
-      sharedDomain = [d3.min(vals) - r * 0.05, d3.max(vals) + r * 0.12];
+      if (sa) {
+        const q01 = Number(sa.q01), q99 = Number(sa.q99), r = (q99 - q01) || 1;
+        sharedDomain = [q01, q99 + r * 0.12];   // headroom for brackets; tails beyond are clipped
+      } else {
+        const vals = usable.flatMap(p => p.violins.flatMap(v => [Number(v.min), Number(v.max)])).filter(x => !isNaN(x));
+        const r = (d3.max(vals) - d3.min(vals)) || 1;
+        sharedDomain = [d3.min(vals) - r * 0.05, d3.max(vals) + r * 0.12];
+      }
     }
 
     // Layout: one svg, ncol × nrow panels
@@ -106,7 +116,7 @@ const ViolinPlot = {
       }
 
       const geom = {
-        width, height, margin, groups: groupOrder, colorLevels, colorScale, tooltip, defs,
+        width, height, margin, groups: groupOrder, colorLevels, colorScale, colorType, tooltip, defs,
         yLabel: `${p.marker} ${yUnit}`,
         yDomain: sharedDomain,
         clipId: `violin-clip-${containerId}-${i}-${Math.random().toString(36).slice(2, 7)}`
@@ -134,8 +144,10 @@ const ViolinPlot = {
     const { width, height, margin, groups, tooltip } = geom;
     const centerX = (width + margin.left + margin.right) / 2;
 
+    // Clip exactly to the plot area (tails beyond a truncated shared axis are
+    // cut); n labels are drawn in the unclipped panel group.
     geom.defs.append('clipPath').attr('id', geom.clipId)
-      .append('rect').attr('width', width).attr('height', height + 60);
+      .append('rect').attr('width', width).attr('height', height);
     const g = panelG.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
     const plotG = g.append('g').attr('clip-path', `url(#${geom.clipId})`);
 
@@ -175,7 +187,7 @@ const ViolinPlot = {
     data.violins.forEach(v => {
       if (xScale(v.group) === undefined) return;
       this._drawSingleViolin(plotG, v, xScale(v.group) + xScale.bandwidth() / 2,
-        xScale.bandwidth() * 0.8, yScale, geom.colorScale(v.group), height, tooltip);
+        xScale.bandwidth() * 0.8, yScale, geom.colorScale(v.group), height, tooltip, null, g);
     });
   },
 
@@ -186,16 +198,20 @@ const ViolinPlot = {
     const centerX = (width + margin.left + margin.right) / 2;
 
     geom.defs.append('clipPath').attr('id', geom.clipId)
-      .append('rect').attr('width', width).attr('height', height + 70);
+      .append('rect').attr('width', width).attr('height', height);
     const g = panelG.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
     const plotG = g.append('g').attr('clip-path', `url(#${geom.clipId})`);
 
+    // Per-group significance rows come from the payload (one Welch t on
+    // replicate means per group when there are two colour levels), BH across
+    // this panel's groups only.
     const sigList = ensureArray(data.significance || []);
     const hasSig = sigList.length > 0;
     const testName = hasSig ? (sigList[0].test_type || 'replicate-level test') : '';
-    panelG.append('text').attr('x', centerX).attr('y', 33)
+    panelG.append('text').attr('class', 'violin-panel-subtitle').attr('x', centerX).attr('y', 33)
       .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#94a3b8')
-      .text(hasSig ? `${testName} per group, BH within panel: * p<0.05, ** p<0.01, *** p<0.001` : '');
+      .text(hasSig ? `${testName} per group, BH within panel: * p<0.05, ** p<0.01, *** p<0.001`
+                   : (colorLevels.length === 2 ? 'replicate-level test not estimable (fewer than 2 replicates per group)' : ''));
 
     const xOuter = d3.scaleBand().domain(groups).range([0, width]).paddingInner(0.15).paddingOuter(0.05);
     const xInner = d3.scaleBand().domain(colorLevels).range([0, xOuter.bandwidth()]).padding(0.05);
@@ -230,9 +246,25 @@ const ViolinPlot = {
       const outerX = xOuter(v.group);
       const innerX = xInner(v.color_level);
       if (outerX === undefined || innerX === undefined) return;
+      // showN = false: per-violin n labels collide inside a group; one label per group below.
       this._drawSingleViolin(plotG, v, outerX + innerX + xInner.bandwidth() / 2,
-        xInner.bandwidth() * 0.9, yScale, colorScale(v.color_level), height, tooltip, v.color_level);
+        xInner.bandwidth() * 0.9, yScale, colorScale(v.color_level), height, tooltip, v.color_level, g, false);
     });
+
+    // One n label per group: cells per colour level in legend order ("n = 900 · 900").
+    groups.forEach(gr => {
+      const parts = colorLevels.map(cl => {
+        const v = data.violins.find(x => x.group === gr && x.color_level === cl);
+        return v ? Number(v.n).toLocaleString() : '—';
+      });
+      g.append('text')
+        .attr('x', xOuter(gr) + xOuter.bandwidth() / 2).attr('y', height + 65)
+        .attr('text-anchor', 'middle').attr('font-size', '7px').attr('fill', '#94a3b8')
+        .text(`n = ${parts.join(' · ')}`);
+    });
+    g.append('text').attr('x', 0).attr('y', height + 78)
+      .attr('font-size', '7px').attr('fill', '#94a3b8')
+      .text(`n per group = cells per ${geom.colorType || 'colour level'}, in legend order`);
 
     // Significance asterisks (two colour levels per group), BH within this panel
     sigList.forEach(st => {
@@ -254,7 +286,9 @@ const ViolinPlot = {
     });
   },
 
-  _drawSingleViolin(g, rawV, centerX, maxWidth, yScale, color, chartHeight, tooltip, sublabel) {
+  // labelG: unclipped group for the n label (the plot group is clipped to the
+  // axis so truncated tails are cut); showN = false suppresses the label.
+  _drawSingleViolin(g, rawV, centerX, maxWidth, yScale, color, chartHeight, tooltip, sublabel, labelG, showN = true) {
     // Defensive: ensure all numeric fields are numbers (jsonlite may box as arrays)
     const v = {
       ...rawV,
@@ -321,11 +355,13 @@ const ViolinPlot = {
       .attr('y1', yScale(v.q75)).attr('y2', yScale(v.max))
       .attr('stroke', color).attr('stroke-width', 1);
 
-    // N label (below rotated x-axis labels — pushed further down)
-    g.append('text')
-      .attr('x', centerX).attr('y', chartHeight + 65)
-      .attr('text-anchor', 'middle').attr('font-size', '7px').attr('fill', '#94a3b8')
-      .text(`n=${v.n.toLocaleString()}`);
+    // N label (below rotated x-axis labels — pushed further down), unclipped
+    if (showN) {
+      (labelG || g).append('text')
+        .attr('x', centerX).attr('y', chartHeight + 65)
+        .attr('text-anchor', 'middle').attr('font-size', '7px').attr('fill', '#94a3b8')
+        .text(`n=${v.n.toLocaleString()}`);
+    }
 
     // Hover
     g.append('rect')

@@ -88,6 +88,15 @@ check(ok_med, "a group's standardized median = (raw median - center) / scale (1e
 # In-process: the pooled standardized median is exactly 0 per marker.
 std <- .robust_standardize_long(d, h3)$data
 check(all(vapply(h3, function(m) abs(median(std$value[std$H3PTM == m])) < 1e-8, logical(1))), "in-process: pooled standardized median is 0 for every marker")
+# Shared axis = 1st–99th percentile of the standardized values pooled across the selected markers.
+pooled <- std$value[std$H3PTM %in% h3]; qq <- unname(quantile(pooled, c(.01, .99), type = 7))
+check(!is.null(v3$shared_axis) && rel_eq(v3$shared_axis$q01, qq[1]) && rel_eq(v3$shared_axis$q99, qq[2]) && num(v3$shared_axis$n_values) == length(pooled),
+      sprintf("shared_axis q01 / q99 = pooled 1st / 99th pct of standardized values (%.3f, %.3f) over %d values", qq[1], qq[2], length(pooled)))
+check(grepl("truncated at 1st–99th pct", v3$shared_axis$note %||% ""), "shared_axis note says the axis is truncated")
+check(is.null(v1$shared_axis), "raw scale carries no shared_axis")
+# Grouped payload: per-group significance rows exist for the frontend to draw (two colour levels).
+check(all(vapply(v2$panels, function(p) length(p$significance) == 3 && all(vapply(p$significance, function(s) !is.null(s$p_adjusted) && identical(s$test_type, "Welch t (replicate means)"), logical(1))), logical(1))),
+      "grouped panels carry one Welch-t row per identity with p_adjusted (what the BH-within-panel subtitle and brackets render)")
 
 # ---- 4. legacy single marker, errors ----
 cat("\n--- 4. legacy marker param, phenotypic marker, errors ---\n")
@@ -105,7 +114,7 @@ check(is.null(v6$error) && grepl("Marker not found", v6$panels[[1]]$error %||% "
 cat("\n--- 5. static ---\n")
 vp <- readLines("frontend/js/charts/violinPlot.js"); idx <- readLines("frontend/index.html"); hp <- readLines("api/R/helpers.R")
 check(any(grepl("BH within panel", vp, fixed = TRUE)), "violinPlot.js subtitle says BH within panel")
-check(any(grepl("'(standardized, median / MAD)' : '(arcsinh intensity)'", vp, fixed = TRUE)), "violinPlot.js y labels name quantity and scale")
+check(any(grepl("'(standardized, median / MAD; axis truncated at 1st–99th pct)'", vp, fixed = TRUE)) && any(grepl(": '(arcsinh intensity)';", vp, fixed = TRUE)), "violinPlot.js y labels name quantity and scale (and the shared-axis truncation)")
 check(any(grepl('id="violin-marker-checks"', idx, fixed = TRUE)) && !any(grepl('id="violin-marker"', idx, fixed = TRUE)) && any(grepl('id="violin-scale"', idx, fixed = TRUE)), "index.html: checklist + scale select, no single marker select")
 check(any(grepl("^\\.robust_standardize_long <- function", hp)) && sum(grepl(".robust_standardize_long(", hp, fixed = TRUE)) >= 2, "ridge overlay and violin share .robust_standardize_long (one definition, two call sites)")
 
