@@ -155,7 +155,8 @@ const OverviewCharts = {
 
   // F1: shared box-plot encoding — whiskers are the 5th and 95th percentiles,
   // not 1.5 × IQR, so the chart is named by its quantiles everywhere.
-  BOX_AXIS_LABEL: 'arcsinh intensity (box = Q1–Q3, line = median, whiskers = 5th–95th pct, dot = mean)',
+  // Axis names the quantity and scale; the box encoding lives in the legend and the heading.
+  BOX_AXIS_LABEL: 'arcsinh intensity',
 
   _quantileFields(s) {
     return {

@@ -216,7 +216,8 @@ check(lacks("USER_GUIDE.md", "epigenetic landscape") && lacks("USER_GUIDE.md", "
 # ---- F1: overview box plots (Q1–Q3; whiskers 5th–95th percentile) — never "Tukey", never mean ± SD ----
 cat("\n--- F1 overview box-plot labels ---\n")
 oc <- "frontend/js/charts/overviewCharts.js"
-check(has(oc, "BOX_AXIS_LABEL: 'arcsinh intensity (box = Q1–Q3, line = median, whiskers = 5th–95th pct, dot = mean)'"), "overview y-axis label names quantity, scale and encoding")
+check(has(oc, "BOX_AXIS_LABEL: 'arcsinh intensity'"), "overview y-axis label is 'arcsinh intensity' (quantity + scale; the box encoding is in the legend and heading)")
+check(has(oc, ".text('Q1–Q3')") && has(oc, ".text('5th–95th pct')") && has(oc, "['rect', 'Q1–Q3'], ['line', 'Median'], ['whisker', '5th–95th pct'], ['dot', 'Mean']"), "both overview legends spell out the box encoding")
 check(lacks(oc, "mean ± 1 SD") && lacks("frontend/index.html", "mean ± 1 SD") && lacks(oc, "renderMarkerDistByCond"), "no mean ± SD box or by-condition renderer remains")
 check(has("frontend/index.html", "Marker distribution (all cells)") && has("frontend/index.html", 'id="overview-split"') && has("frontend/index.html", "hover for n cells and n replicates"), "overview headings, Split-by select and n-cells/n-replicates hint present")
 # "Tukey HSD" (the positivity post-hoc test) is a real Tukey procedure and may appear; the box plot never may.
@@ -225,7 +226,7 @@ for (f_ in c("frontend/index.html", oc, "README.md", "USER_GUIDE.md", "DECISIONS
   check(no_tukey_box(f_), sprintf("%s never calls the box plot Tukey (only 'Tukey HSD' allowed)", f_))
 check(has(a, "Overview marker summaries are box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean)") && has(a, "Marker summaries are box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean)"), "both Methods texts describe the overview box plots")
 check(has(a, "'overview-marker-dist', 'overview-marker-dist-cond'"), "HTML report includes the split marker-distribution chart")
-check(ver_of("overviewCharts.js") >= "1.3.0" && ver_of("js/app.js") >= "1.3.21", "overviewCharts / app cache-busting bumps")
+check(ver_of("overviewCharts.js") >= "1.3.1" && ver_of("js/app.js") >= "1.3.21", "overviewCharts / app cache-busting bumps")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
