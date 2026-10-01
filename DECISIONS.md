@@ -824,7 +824,36 @@ gives the same k / n as today.
 ---
 
 ## R31 — run_all_markers_lmm fits markers sequentially on one core
-Status: open (2026-09-25); plan with the F1/F2 session
+Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0
+
+Done. `run_all_markers_lmm` maps the per-marker fit through
+`.epiflow_map_markers()`: `parallel::mclapply` across markers with
+`.epiflow_cores()` workers — `EPIFLOW_CORES` if set, else
+`detectCores() − 1`, capped at the number of markers, 1 on Windows
+(no fork). `mc.preschedule = FALSE` so one slow marker does not hold a
+batch; results come back in `markers` order; a fork-level failure becomes
+a zero-row result with its reason like a fit error. There is no stochastic
+step inside a fit (grep: no `set.seed` / `sample` in the LMM path), so the
+parallel run is element-for-element identical to the serial one. BH runs
+after the bind over the same rows in the same order.
+
+Measured (2026-10-01, 16-core Mac): example (5 markers, 3,600 cells)
+serial 0.41 s → 0.15 s with 4 workers; 416k-cell file (5 markers)
+serial 10.3 s → 4.1 s with 4 workers; results identical to 1e-12 both
+times, API payload equal to the in-process serial run.
+
+Production. `docker-compose.yml` pins `EPIFLOW_CORES=1` (current
+behaviour) until per-worker memory is checked on the droplet — each fork
+holds the session's `filtered_data` (copy-on-write, so mostly shared, but
+the fit's own allocations are per worker). Raise it there after a
+`docker stats` run on the 416k file. `LOCAL_DEV.md` documents the variable.
+
+Verification. `test_lmm_parallel.R`: `EPIFLOW_CORES=1` vs `4` identical
+to 1e-12 (plain and stratified runs); failure reasons and positions kept;
+all-failed run identical; API all-markers equals the serial in-process run;
+optional 416k timing block.
+
+(Original entry, 2026-09-25.)
 
 `run_all_markers_lmm` (`statistics.R`) is a `purrr::map` over markers, each
 calling `fit_stratified_lmm` (lmer + emmeans + distribution metrics); on the
