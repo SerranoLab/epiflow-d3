@@ -62,7 +62,7 @@ const ViolinPlot = {
     const colorLevels = isGrouped
       ? orderRefFirst([...new Set(usable.flatMap(p => p.violins.map(v => v.color_level)))].sort(), refLevel)
       : null;
-    const colorType = isGrouped ? (data.color_by || 'genotype') : (data.group_by || 'genotype');
+    const colorType = isGrouped ? (data.color_by || DataManager.getComparisonVar()) : (data.group_by || DataManager.getComparisonVar());   // R34
     const colorScale = getColorScale(colorType, isGrouped ? colorLevels : groupOrder, DataManager.serverPalette);
 
     // Shared y domain (standardized scale): global min/max over every violin

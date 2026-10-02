@@ -67,5 +67,31 @@ r6 <- post(paste0("/api/viz/ridge/", sid), list(marker = h3[1], group_by = "not_
 check(!is.null(r6$error) && grepl("group_by column not found: not_a_column", chr(r6$error), fixed = TRUE), "unknown group_by returns an error naming the key and column")
 check(lacks("frontend/js/app.js", "? 'genotype' : colorBySelect") && lacks("frontend/js/charts/ridgePlot.js", "|| 'genotype'"), "ridge colour fallbacks are the comparison variable, not a genotype literal")
 
+# ================================================================== Violin
+cat("\n--- Violin: /api/viz/violin groups by the requested column and echoes it ---\n")
+v1 <- post(paste0("/api/viz/violin/", sid), list(markers = I(h3[1:2]), group_by = "condition"))
+check(is.null(v1$error) && setequal(chr(v1$group_order), COND) && identical(chr(v1$group_by), "condition"), "group_by = condition: group_order is ctrl / treated, echoed")
+check(all(vapply(v1$panels, function(p) setequal(chr(lapply(p$violins, `[[`, "group")), COND), logical(1))), "every panel's violins are the condition levels")
+v2 <- post(paste0("/api/viz/violin/", sid), list(markers = I(h3[1]), group_by = "identity", color_by = "condition"))
+check(is.null(v2$error) && setequal(unique(chr(lapply(v2$panels[[1]]$violins, `[[`, "color_level"))), COND) && identical(chr(v2$color_by), "condition"),
+      "grouped mode (identity × condition): colour levels are ctrl / treated, echoed")
+v3 <- post(paste0("/api/viz/violin/", sid), list(markers = I(h3[1]), comparison_var = "condition"))
+check(is.null(v3$error) && identical(chr(v3$group_by), "condition") && setequal(chr(v3$group_order), COND), "no group_by: comparison_var in the body is used")
+v4 <- post(paste0("/api/viz/violin/", sid), list(markers = I(h3[1])))
+check(identical(chr(v4$group_by), "genotype"), "no keys: the genotype column, echoed")
+v5 <- post(paste0("/api/viz/violin/", sid), list(markers = I(h3[1]), group_by = "condition", color_by = "not_a_column"))
+check(!is.null(v5$error) && grepl("color_by column not found: not_a_column", chr(v5$error), fixed = TRUE), "unknown color_by returns an error naming it")
+check(lacks("frontend/js/charts/violinPlot.js", "|| 'genotype'"), "violinPlot.js colour fallback is the comparison variable")
+
+# ================================================================== Heatmap
+cat("\n--- Heatmap: /api/viz/heatmap groups by the requested column and echoes it ---\n")
+hm1 <- post(paste0("/api/viz/heatmap/", sid), list(group_by = "condition"))
+check(is.null(hm1$error) && setequal(chr(lapply(hm1$z_scores, `[[`, "group")), COND) && identical(chr(hm1$group_by), "condition"), "group_by = condition: one row per condition level, echoed")
+hm2 <- post(paste0("/api/viz/heatmap/", sid), list(comparison_var = "condition"))
+check(is.null(hm2$error) && identical(chr(hm2$group_by), "condition"), "no group_by: comparison_var in the body is used")
+hm3 <- post(paste0("/api/viz/heatmap/", sid), list())
+check(identical(chr(hm3$group_by), "genotype"), "no keys: the genotype column, echoed (the fixed identity default is gone)")
+check(has("frontend/js/charts/heatmap.js", "options.groupBy || data.group_by || DataManager.getComparisonVar()"), "heatmap.js title names the payload's grouping column")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

@@ -755,12 +755,19 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: group_by from the request (else comparison_var, else the genotype
+  # column); color_by only when it names a column.
+  g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error)
+  color_by <- NULL
+  if (!is.null(params$color_by)) {
+    cb <- .resolve_grouping(params, store, "color_by"); if (!is.null(cb$error)) return(cb$error); color_by <- cb$col
+  }
   # F2: markers vector -> one panel per marker; `marker` (single) still accepted.
   compute_violin_data(
     store$filtered_data,
     markers    = params$markers %||% params$marker %||% store$metadata$h3_markers[1],
-    group_by   = params$group_by %||% "genotype",
-    color_by   = params$color_by,
+    group_by   = g$col,
+    color_by   = color_by,
     h3_markers = store$metadata$h3_markers,
     scale_mode = params$scale_mode %||% "raw"
   )
