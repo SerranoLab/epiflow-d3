@@ -3,8 +3,13 @@ certs/
 .DS_Store
 docker-compose.override.yml
 
-# Large data files (not versioned)
+# Large data files (not versioned): every .rds at the repo root except the
+# committed fixture test_condition.rds; the iPER 416k-cell file; the NPC
+# PAX6/H3K27me3 OmiQ exports (Import-tab validation fixture, R21/R32).
 /*.rds
+!/test_condition.rds
+iPER_*.rds
+npc_*.csv
 # Installer backups
 api/R/*.bak.*
 # Titration installer scaffolding (endpoints now live in plumber.R)
@@ -12,7 +17,6 @@ titration_endpoints_block.R
 install_titration_endpoints.sh
 titration_endpoints.patch
 make_test_condition_rds.R
-test_condition.rds
 # Never commit certs / server-only dirs
 /certs/
 /certbot-webroot/
