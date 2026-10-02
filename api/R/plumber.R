@@ -546,18 +546,11 @@ function(session_id, req) {
   cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
   n_cells <- nrow(cells)
 
-  # Genotype/condition column
-  geno_col <- meta$genotype_col %||% "genotype"
-  if (!geno_col %in% names(cells)) geno_col <- "genotype"
-
   # R33: every count chart and cross-tab groups by the sidebar comparison
   # variable (default: the genotype column), not by genotype regardless.
   params <- req$body
-  comp_var <- params$comparison_var %||% geno_col
-  if (!comp_var %in% names(cells)) {
-    return(list(error = paste0("comparison_var column not found: ", comp_var,
-      " (gate_population and cluster_identity exist only while a gate or clustering is applied)")))
-  }
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34: shared resolver (R33 had its own)
+  comp_var <- g$col
 
   # Cells per level of the comparison variable
   condition_counts <- cells %>%
@@ -1096,7 +1089,7 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   all_markers <- c(store$metadata$h3_markers, store$metadata$phenotypic_markers)
 
   # Apply optional identity/cell cycle filters
@@ -1128,7 +1121,7 @@ function(session_id, req) {
       marker_y = params$marker_y %||% all_markers[min(2, length(all_markers))],
       threshold_x = if (!is.null(params$threshold_x)) as.numeric(params$threshold_x) else NULL,
       threshold_y = if (!is.null(params$threshold_y)) as.numeric(params$threshold_y) else NULL,
-      comparison_var = params$comparison_var %||% geno_col,
+      comparison_var = g$col,
       h3_markers = store$metadata$h3_markers,
       max_points = max_points
     )
@@ -1145,18 +1138,18 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
-    compute_quadrant_detail(
+    .with_grouping(compute_quadrant_detail(
       store$filtered_data,
       marker_x = params$marker_x,
       marker_y = params$marker_y,
       threshold_x = as.numeric(params$threshold_x),
       threshold_y = as.numeric(params$threshold_y),
       quadrant = params$quadrant,
-      comparison_var = params$comparison_var %||% geno_col,
+      comparison_var = g$col,
       h3_markers = store$metadata$h3_markers
-    ),
+    ), comparison_var = g$col),
     error = function(e) list(error = paste("Quadrant detail failed:", e$message))
   )
 }

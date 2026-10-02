@@ -3840,7 +3840,7 @@ const App = {
 
       if (markerX === markerY) throw new Error('Please select two different markers');
 
-      const params = { marker_x: markerX, marker_y: markerY };
+      const params = { marker_x: markerX, marker_y: markerY, comparison_var: DataManager.getComparisonVar() };   // R34: quadrant counts per level of the comparison variable
       if (filterIdentity !== 'All') params.filter_identity = filterIdentity;
       if (filterCycle !== 'All') params.filter_cycle = filterCycle;
       Object.assign(params, overrides);
@@ -3900,12 +3900,12 @@ const App = {
       const data = await EpiFlowAPI.runGatingDetail({
         marker_x: markerX, marker_y: markerY,
         threshold_x: threshX, threshold_y: threshY,
-        quadrant
+        quadrant, comparison_var: DataManager.getComparisonVar()   // R34
       });
       if (data.error) { densEl.innerHTML = `<p style="color:#dc2626;font-size:11px;">${data.error}</p>`; return; }
 
       const groups = ensureArray(data.groups);
-      const palette = DataManager.serverPalette?.genotype || {};
+      const palette = DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()] || {};   // R34
       const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
       const colorScale = d3.scaleOrdinal()
         .domain(groups)

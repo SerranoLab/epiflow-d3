@@ -197,5 +197,27 @@ check(has("frontend/js/app.js", "const circular = isDerivedGrouping(tv)") && lac
       "ML circularity warning covers every feature-derived target; no genotype render fallback")
 check(lacks("api/R/statistics.R", "genotype = wide_df[[target_var]]"), "k-means cross-tab dimension is named by the target, not genotype")
 
+# ================================================================== Gating
+cat("\n--- Gating: /api/phase2/gating and /gating-detail group by comparison_var and echo it ---\n")
+mx <- h3[1]; my <- h3[2]
+ga1 <- post(paste0("/api/phase2/gating/", sid), list(marker_x = mx, marker_y = my, comparison_var = "condition", max_points = 500))
+check(is.null(ga1$error) && setequal(chr(ga1$groups), COND) && identical(chr(ga1$comparison_var), "condition"), "gating: groups are ctrl / treated, comparison_var echoed")
+check(setequal(unique(chr(lapply(ga1$quad_stats, `[[`, "group"))), COND), "gating: quadrant counts are per condition level")
+qn <- vapply(COND, function(l) num(Filter(function(q) chr(q$group) == l, ga1$quad_stats)[[1]]$n), numeric(1))
+check(all(qn == as.integer(table(cells$condition)[COND])), "gating: per-level n equals the condition cell counts (all cells, not the display subsample)")
+ga2 <- post(paste0("/api/phase2/gating/", sid), list(marker_x = mx, marker_y = my, max_points = 500))
+check(identical(chr(ga2$comparison_var), "genotype"), "gating with no key: the genotype column, echoed")
+gd1 <- post(paste0("/api/phase2/gating-detail/", sid), list(marker_x = mx, marker_y = my, threshold_x = ga1$threshold_x, threshold_y = ga1$threshold_y, quadrant = "Q1", comparison_var = "condition"))
+check(is.null(gd1$error) && setequal(chr(gd1$groups), COND) && identical(chr(gd1$comparison_var), "condition"), "gating-detail: per-group densities per condition level, comparison_var echoed")
+gd2 <- post(paste0("/api/phase2/gating-detail/", sid), list(marker_x = mx, marker_y = my, threshold_x = ga1$threshold_x, threshold_y = ga1$threshold_y, quadrant = "Q1", comparison_var = "not_a_column"))
+check(!is.null(gd2$error) && grepl("comparison_var column not found: not_a_column", chr(gd2$error), fixed = TRUE), "gating-detail: unknown column returns the error")
+check(has("frontend/js/app.js", "const params = { marker_x: markerX, marker_y: markerY, comparison_var: DataManager.getComparisonVar() };") &&
+      has("frontend/js/app.js", "quadrant, comparison_var: DataManager.getComparisonVar()") &&
+      has("frontend/js/charts/gatingPlot.js", "DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()]") &&
+      has("frontend/js/charts/gatingPlot.js", "groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n (all cells)</th>") &&
+      lacks("frontend/js/app.js", "serverPalette?.genotype") && lacks("frontend/js/charts/gatingPlot.js", "serverPalette?.genotype"),
+      "frontend sends comparison_var on gating and quadrant detail; palettes and the stats header follow it")
+check(lacks("api/R/plumber.R", 'params$comparison_var %||% geno_col') && lacks("api/R/plumber.R", "geno_col <- "), "no endpoint keeps its own genotype default; all go through .resolve_grouping")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

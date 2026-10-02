@@ -105,7 +105,7 @@ const GatingPlot = {
 
     // Color by group
     const groups = ensureArray(data.groups);
-    const palette = DataManager.serverPalette?.genotype || {};
+    const palette = DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()] || {};   // R34: groups are levels of the payload's comparison_var
     const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const colorScale = d3.scaleOrdinal()
       .domain(groups)
@@ -241,7 +241,7 @@ const GatingPlot = {
       if (!statsContainer) return;
 
       let html = '<table class="stats-table" style="font-size:12px;width:100%;max-width:700px;">';
-      html += `<thead><tr><th>Group</th><th>n (all cells)</th>
+      html += `<thead><tr><th>${groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n (all cells)</th>
         <th>Q1 (${data.marker_x}+ / ${data.marker_y}+)</th>
         <th>Q2 (${data.marker_x}− / ${data.marker_y}+)</th>
         <th>Q3 (${data.marker_x}− / ${data.marker_y}−)</th>
