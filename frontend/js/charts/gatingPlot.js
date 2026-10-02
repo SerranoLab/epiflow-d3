@@ -27,12 +27,28 @@ const GatingPlot = {
 
     this._currentData = data;
 
+    // F3: the colour dimension is independent of the statistics dimension.
+    const colorBy = data.color_by || data.comparison_var || DataManager.getComparisonVar();
+    const isClusterRun = colorBy === '__cluster_run__';
+    const colorLabel = isClusterRun ? 'cluster run (unapplied)' : groupingLabel(colorBy);
+    const colorLevels = ensureArray(data.color_levels).map(String);
+    // Legend sits to the right of the plot (ridge / violin layout), inside the
+    // SVG so it travels with the export; capped at 12 entries, the rest are in
+    // the level × quadrant table. The SVG widens by the legend; the plot keeps
+    // its size.
+    const LEGEND_MAX = 12;
+    const legendLevels = colorLevels.slice(0, LEGEND_MAX);
+    const legendMore = colorLevels.length - legendLevels.length;
+    const legendLines = [`colour: ${colorLabel}`, ...legendLevels, ...(legendMore > 0 ? [`+ ${legendMore} more (see table)`] : [])];
+    const legendW = Math.max(120, 30 + 6.2 * d3.max(legendLines.map(l => l.length)));
+
     // top: title (y 18), subtitle (34), drag hint (47), then the X-threshold
     // value label sits 4px above the plot area — 70 keeps them from touching.
     const margin = { top: 70, right: 30, bottom: 55, left: 65 };
-    const size = Math.min(Math.max(100, container.clientWidth - margin.left - margin.right), 550);
-    const totalW = size + margin.left + margin.right;
+    const size = Math.min(Math.max(100, container.clientWidth - margin.left - margin.right - legendW), 550);
+    const totalW = size + margin.left + margin.right + legendW;
     const totalH = size + margin.top + margin.bottom;
+    const plotCx = margin.left + size / 2;   // titles centre over the plot, not the SVG
 
     const svg = d3.select(`#${containerId}`)
       .append('svg')
@@ -49,25 +65,20 @@ const GatingPlot = {
 
     // Title
     svg.append('text').attr('class', 'chart-title')
-      .attr('x', totalW / 2).attr('y', 18).attr('text-anchor', 'middle')
+      .attr('x', plotCx).attr('y', 18).attr('text-anchor', 'middle')
       .text(`Quadrant Gating — ${data.marker_x} vs ${data.marker_y}`);
     // R1: n_cells is every cell behind the statistics; n_displayed is the
     // stratified display subsample. State the filters the endpoint applied.
     const fa = data.filters_applied || {};
     const shownStr = data.subsampled
       ? ` · ${Number(data.n_displayed).toLocaleString()} shown (display subsample)` : '';
-    // F3: the colour dimension is independent of the statistics dimension.
-    const colorBy = data.color_by || data.comparison_var || DataManager.getComparisonVar();
-    const isClusterRun = colorBy === '__cluster_run__';
-    const colorLabel = isClusterRun ? 'cluster run (unapplied)' : groupingLabel(colorBy);
-    const colorLevels = ensureArray(data.color_levels).map(String);
     svg.append('text')
-      .attr('x', totalW / 2).attr('y', 34).attr('text-anchor', 'middle')
+      .attr('x', plotCx).attr('y', 34).attr('text-anchor', 'middle')
       .attr('font-size', '11px').attr('fill', '#64748b')
       .text(`n = ${Number(data.n_cells).toLocaleString()} analyzed${shownStr} · colour = ${colorLabel} · filters: identity = ${fa.identity ?? 'All'}, cycle = ${fa.cell_cycle ?? 'All'}`);
     svg.append('text')
       .attr('class', 'ui-hint')   // interaction hint; stripped from the HTML report
-      .attr('x', totalW / 2).attr('y', 47).attr('text-anchor', 'middle')
+      .attr('x', plotCx).attr('y', 47).attr('text-anchor', 'middle')
       .attr('font-size', '10px').attr('fill', '#94a3b8')
       .text('Drag blue lines to adjust thresholds — statistics recompute on all cells when released');
 
@@ -150,20 +161,23 @@ const GatingPlot = {
       this._densityBuilt = true;
     }
 
-    // Quadrant labels (will be updated by drag)
+    // Quadrant labels pinned to the plot corners (F3 follow-up): Q2 top-left,
+    // Q1 top-right, Q3 bottom-left, Q4 bottom-right — they never sit on the
+    // populated core and do not move with the thresholds.
     const quadLabels = {};
+    const PAD = 6;
     const labelPositions = {
-      Q1: [size * 0.75, size * 0.15],
-      Q2: [size * 0.15, size * 0.15],
-      Q3: [size * 0.15, size * 0.85],
-      Q4: [size * 0.75, size * 0.85]
+      Q1: [size - PAD, 18, 'end'],
+      Q2: [PAD, 18, 'start'],
+      Q3: [PAD, size - PAD, 'start'],
+      Q4: [size - PAD, size - PAD, 'end']
     };
     const quadNames = { Q1: '++', Q2: '−+', Q3: '−−', Q4: '+−' };
 
     ['Q1', 'Q2', 'Q3', 'Q4'].forEach(q => {
       quadLabels[q] = g.append('text')
         .attr('x', labelPositions[q][0]).attr('y', labelPositions[q][1])
-        .attr('text-anchor', 'middle').attr('font-size', '20px')
+        .attr('text-anchor', labelPositions[q][2]).attr('font-size', '20px')
         .attr('font-weight', '700').attr('fill', '#cbd5e1').attr('opacity', 0.7)
         // White halo so the percentages stay legible over dense clusters.
         .attr('paint-order', 'stroke').attr('stroke', '#fff').attr('stroke-width', 3)
@@ -226,15 +240,12 @@ const GatingPlot = {
     const quadOrder = ['Q1', 'Q2', 'Q3', 'Q4'];
     const quadStats = ensureArray(data.quad_stats);
 
+    // Corner labels are fixed; percentages use a smaller face than the symbols.
     const positionQuadLabels = () => {
-      const tx = xScale(threshX);
-      const ty = yScale(threshY);
-      labelPositions.Q1 = [(tx + size) / 2, ty / 2];
-      labelPositions.Q2 = [tx / 2, ty / 2];
-      labelPositions.Q3 = [tx / 2, (ty + size) / 2];
-      labelPositions.Q4 = [(tx + size) / 2, (ty + size) / 2];
       quadOrder.forEach(q => {
-        quadLabels[q].attr('x', labelPositions[q][0]).attr('y', labelPositions[q][1]);
+        const isPct = quadLabels[q].text().includes('%');
+        quadLabels[q].attr('x', labelPositions[q][0]).attr('y', labelPositions[q][1])
+          .attr('font-size', isPct ? '13px' : '20px');
       });
     };
 
@@ -402,7 +413,7 @@ const GatingPlot = {
                 quadRects[qq].attr('fill', qq === selectedQuadrant ? '#3b82f6' : 'transparent')
                   .attr('fill-opacity', qq === selectedQuadrant ? 0.08 : 0);
                 quadLabels[qq].attr('fill', qq === selectedQuadrant ? '#3b82f6' : '#cbd5e1')
-                  .attr('font-size', qq === selectedQuadrant ? '22px' : '20px');
+                  .attr('font-weight', qq === selectedQuadrant ? '800' : '700');
               });
               if (options.onQuadrantClick) options.onQuadrantClick(selectedQuadrant, threshX, threshY);
             });
@@ -455,27 +466,27 @@ const GatingPlot = {
     hHandle.call(dragH);
     hLine.call(dragH);
 
-    // Legend
+    // Legend: the colour dimension, to the right of the plot (ridge / violin
+    // layout), inside the SVG so it exports with it; at most LEGEND_MAX entries.
     const legendG = svg.append('g')
-      .attr('transform', `translate(${margin.left + 8}, ${margin.top + 8})`);
-
-    // F3: the legend is the colour dimension (titled), not the statistics groups.
-    const legendW = Math.max(110, 30 + 6.2 * d3.max([colorLabel.length + 8, ...colorLevels.map(l => l.length)]));
-    legendG.append('rect')
-      .attr('width', legendW).attr('height', colorLevels.length * 18 + 22)
-      .attr('fill', '#fff').attr('fill-opacity', 0.85)
-      .attr('stroke', '#e2e8f0').attr('rx', 4);
+      .attr('class', 'gate-legend')
+      .attr('transform', `translate(${margin.left + size + 20}, ${margin.top})`);
     legendG.append('text')
-      .attr('x', 8).attr('y', 14).attr('font-size', '10px').attr('font-weight', '600').attr('fill', '#475569')
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#64748b')
       .text(`colour: ${colorLabel}`);
-    colorLevels.forEach((lv, i) => {
-      legendG.append('circle')
-        .attr('cx', 12).attr('cy', 28 + i * 18).attr('r', 4)
-        .attr('fill', colorScale(lv));
-      legendG.append('text')
-        .attr('x', 22).attr('y', 31 + i * 18)
-        .attr('font-size', '10px').attr('fill', '#1a202c').text(lv);
+    legendLevels.forEach((lv, i) => {
+      const lg = legendG.append('g').attr('transform', `translate(0, ${18 + i * 20})`);
+      lg.append('rect').attr('width', 14).attr('height', 14).attr('rx', 2)
+        .attr('fill', colorScale(lv)).attr('fill-opacity', 0.85);
+      lg.append('text').attr('x', 20).attr('y', 11)
+        .attr('font-size', '11px').attr('fill', '#1a202c').text(lv);
     });
+    if (legendMore > 0) {
+      legendG.append('text')
+        .attr('x', 0).attr('y', 18 + legendLevels.length * 20 + 11)
+        .attr('font-size', '10px').attr('fill', '#64748b')
+        .text(`+ ${legendMore} more (see table)`);
+    }
   },
 
   // B. Build per-group 2D density contours in pixel space. Coordinates are

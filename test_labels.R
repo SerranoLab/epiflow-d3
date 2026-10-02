@@ -265,6 +265,13 @@ check(has(gp, "% of level (row) · % of quadrant = purity (column)") && has(gp, 
 check(has(gp, "if (colorStats.length && colorStats.length <= 3) {"), "on-plot percentages only up to 3 colour levels")
 check(has("frontend/index.html", "% of quadrant, the purity a sorter would see") && has("USER_GUIDE.md", "% of quadrant (purity)"), "help text and USER_GUIDE describe purity")
 check(ver_of("gatingPlot.js") >= "1.3.8" && ver_of("js/app.js") >= "1.3.34", "gatingPlot / app cache-busting bumps")
+# F3 follow-up: legend outside the plot (right, inside the SVG), capped at 12; quadrant labels in the corners
+check(has(gp, ".attr('class', 'gate-legend')") && has(gp, ".attr('transform', `translate(${margin.left + size + 20}, ${margin.top})`);") && has(gp, "const totalW = size + margin.left + margin.right + legendW;"),
+      "gating legend is a gate-legend group to the right of the plot; the SVG widens by the legend")
+check(has(gp, "const LEGEND_MAX = 12;") && has(gp, ".text(`+ ${legendMore} more (see table)`);"), "legend capped at 12 entries with '+ n more (see table)'")
+check(has(gp, "Q1: [size - PAD, 18, 'end'],") && has(gp, "Q2: [PAD, 18, 'start'],") && has(gp, "Q3: [PAD, size - PAD, 'start'],") && has(gp, "Q4: [size - PAD, size - PAD, 'end']"),
+      "quadrant labels pinned to the four plot corners")
+check(ver_of("gatingPlot.js") >= "1.3.9", "gatingPlot.js cache-busting bump (>= 1.3.9)")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
