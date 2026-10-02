@@ -386,7 +386,7 @@
           <!-- Cells per group charts -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
             <div class="overview-section">
-              <h3>Cells per Condition <button class="btn btn-sm" id="ov-cond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <h3>Cells per <span class="overview-comp-label">genotype</span> <button class="btn btn-sm" id="ov-cond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
               <div class="chart-container" id="overview-condition-chart" style="min-height:200px;"></div>
             </div>
             <div class="overview-section">
@@ -398,22 +398,22 @@
           <!-- Stratified breakdown charts -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
             <div class="overview-section">
-              <h3>Cells per Identity <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by condition)</span> <button class="btn btn-sm" id="ov-identity-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <h3>Cells per Identity <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by <span class="overview-comp-label">genotype</span>)</span> <button class="btn btn-sm" id="ov-identity-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
               <div class="chart-container" id="overview-identity-chart" style="min-height:350px;"></div>
             </div>
             <div class="overview-section">
-              <h3>Cells per Cell Cycle Phase <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by condition)</span> <button class="btn btn-sm" id="ov-cycle-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <h3>Cells per Cell Cycle Phase <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by <span class="overview-comp-label">genotype</span>)</span> <button class="btn btn-sm" id="ov-cycle-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
               <div class="chart-container" id="overview-cycle-chart" style="min-height:300px;"></div>
             </div>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
             <div class="overview-section">
-              <h3>Cells per Replicate <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by condition)</span> <button class="btn btn-sm" id="ov-repcond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <h3>Cells per Replicate <span style="font-size:11px;color:#94a3b8;font-weight:400;">(by <span class="overview-comp-label">genotype</span>)</span> <button class="btn btn-sm" id="ov-repcond-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
               <div class="chart-container" id="overview-replicate-cond-chart" style="min-height:250px;"></div>
             </div>
             <div class="overview-section">
-              <h3>Condition × Cell Cycle Distribution <button class="btn btn-sm" id="ov-condcycle-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
+              <h3><span class="overview-comp-label" style="text-transform:capitalize;">genotype</span> × Cell Cycle Distribution <button class="btn btn-sm" id="ov-condcycle-export-svg" style="font-size:9px;padding:1px 6px;margin-left:6px;"><i class="fas fa-download"></i> SVG</button></h3>
               <div class="chart-container" id="overview-cond-cycle-chart" style="min-height:250px;"></div>
             </div>
           </div>
@@ -1128,10 +1128,10 @@
   <script src="js/charts/gatingPlot.js?v=1.3.6"></script>
   <script src="js/charts/cellCyclePlot.js?v=1.2.2"></script>
   <script src="js/charts/correlationPlot.js?v=1.2.3"></script>
-  <script src="js/charts/overviewCharts.js?v=1.3.1"></script>
+  <script src="js/charts/overviewCharts.js?v=1.3.2"></script>
   <script src="js/charts/scatter3D.js?v=1.2.2"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.4"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.22"></script>
+  <script src="js/app.js?v=1.3.23"></script>
 </body>
 </html>

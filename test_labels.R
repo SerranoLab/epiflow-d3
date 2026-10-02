@@ -244,5 +244,17 @@ check(has(a, "BH correction is applied within each panel, not across panels") &&
 check(lacks(a, "'violin-marker'") && has(a, "#violin-marker-checks input:checked"), "app.js reads the violin checklist")
 check(ver_of("violinPlot.js") >= "1.3.0" && ver_of("js/app.js") >= "1.3.22", "violinPlot / app cache-busting bumps")
 
+# ---- R33: overview count charts group by, and are labelled with, the sidebar comparison variable ----
+cat("\n--- R33 overview count charts follow the comparison variable ---\n")
+ix <- "frontend/index.html"
+check(has(ix, 'class="overview-comp-label"', 5), "five overview headings carry the comparison-variable span")
+check(lacks(ix, "Cells per Condition") && lacks(ix, "(by condition)") && lacks(ix, "Condition × Cell Cycle"), "no fixed 'Condition' wording remains in the overview headings")
+check(has(a, "EpiFlowAPI.getOverview({ comparison_var: compVar, stratify_by: stratifyBy })"), "loadOverview sends the sidebar comparison variable")
+check(has(a, "`Cells per ${condLabel}`") && has(a, "document.querySelectorAll('.overview-comp-label')"), "bar-chart title and heading spans name the variable")
+check(has("api/R/plumber.R", 'comp_var <- params$comparison_var %||% geno_col') && has("api/R/plumber.R", 'dplyr::count(.data[[comp_var]]', 5) && lacks("api/R/plumber.R", 'dplyr::count(.data[[geno_col]]'), "overview endpoint groups every count by comparison_var")
+check(has(oc, "getColorScale(condCol || 'genotype', conditions") && has(oc, "`${compLabel} levels`"), "grouped bars coloured by the comparison variable; the levels card names it")
+check(has("USER_GUIDE.md", "Cell counts by the comparison variable") && has("README.md", "cell counts by the comparison variable"), "USER_GUIDE and README say 'by the comparison variable'")
+check(ver_of("overviewCharts.js") >= "1.3.2" && ver_of("js/app.js") >= "1.3.23", "overviewCharts / app cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

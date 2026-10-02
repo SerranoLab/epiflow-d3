@@ -94,8 +94,8 @@ Click **Apply Filters** after adjusting. The filtered cell count updates in the 
 ### Overview
 
 Bird's-eye view of your dataset:
-- Cell counts by genotype, identity, replicate
-- Cell cycle distribution per genotype
+- Cell counts by the comparison variable (the sidebar "Comparison variable"; genotype by default), identity, replicate
+- Cell cycle distribution per level of the comparison variable
 - Marker summaries for each H3-PTM and phenotypic marker as box plots (box = Q1–Q3, line = median, whiskers = 5th–95th percentile, dot = mean), for all cells and split by any metadata column ("Split by": genotype, identity, cell cycle, replicate, a gate population or a cluster). Hover a box for its quantiles, n cells and n replicates — a level built from a single replicate is flagged.
 
 Check here first for data quality: unbalanced replicates, unexpected cell cycle distributions, or outlier markers.

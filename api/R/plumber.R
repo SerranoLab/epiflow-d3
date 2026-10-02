@@ -11,7 +11,7 @@ library(jsonlite)
 # R10: single source of the app version. /api/health returns it, /api/metadata
 # echoes it, and the frontend fills its badge, footers and report from it —
 # no version literal lives in index.html or app.js. Bump here at deploy.
-EPIFLOW_VERSION <- "1.5.0"
+EPIFLOW_VERSION <- "1.5.1"
 
 # Source helper functions
 # NOTE: plumber::plumb() evaluates this file from its own directory (R/),
@@ -528,9 +528,18 @@ function(session_id, req) {
   geno_col <- meta$genotype_col %||% "genotype"
   if (!geno_col %in% names(cells)) geno_col <- "genotype"
 
-  # Cells per condition
+  # R33: every count chart and cross-tab groups by the sidebar comparison
+  # variable (default: the genotype column), not by genotype regardless.
+  params <- req$body
+  comp_var <- params$comparison_var %||% geno_col
+  if (!comp_var %in% names(cells)) {
+    return(list(error = paste0("comparison_var column not found: ", comp_var,
+      " (gate_population and cluster_identity exist only while a gate or clustering is applied)")))
+  }
+
+  # Cells per level of the comparison variable
   condition_counts <- cells %>%
-    dplyr::count(.data[[geno_col]], name = "n") %>%
+    dplyr::count(.data[[comp_var]], name = "n") %>%
     dplyr::arrange(dplyr::desc(n))
 
   # Cells per identity
@@ -577,44 +586,44 @@ function(session_id, req) {
   })
   pheno_stats <- Filter(Negate(is.null), pheno_stats)
 
-  # Cross-tab: condition × identity
+  # Cross-tab: comparison variable × identity
   cross_tab <- NULL
   if ("identity" %in% names(cells)) {
     cross_tab <- cells %>%
-      dplyr::count(.data[[geno_col]], identity, name = "n") %>%
+      dplyr::count(.data[[comp_var]], identity, name = "n") %>%
       tidyr::pivot_wider(names_from = identity, values_from = n, values_fill = 0)
   }
 
   # Available metadata columns
   avail_meta <- meta$available_meta %||% character(0)
 
-  # Condition × cell cycle cross-tab
+  # Comparison variable × cell cycle cross-tab
   cond_cycle_tab <- NULL
   if ("cell_cycle" %in% names(cells)) {
     cond_cycle_tab <- cells %>%
-      dplyr::count(.data[[geno_col]], cell_cycle, name = "n")
+      dplyr::count(.data[[comp_var]], cell_cycle, name = "n")
   }
 
-  # Replicate × condition cross-tab
+  # Replicate × comparison variable cross-tab
   replicate_cond_tab <- NULL
   if ("replicate" %in% names(cells)) {
     replicate_cond_tab <- cells %>%
-      dplyr::count(.data[[geno_col]], replicate, name = "n")
+      dplyr::count(.data[[comp_var]], replicate, name = "n")
   }
 
-  # Identity × condition cross-tab (long form for grouped bar)
+  # Identity × comparison variable cross-tab (long form for grouped bar)
   identity_cond_tab <- NULL
   if ("identity" %in% names(cells)) {
     identity_cond_tab <- cells %>%
-      dplyr::count(.data[[geno_col]], identity, name = "n")
+      dplyr::count(.data[[comp_var]], identity, name = "n")
   }
 
-  # F1: marker quantiles within each level of stratify_by — genotype, identity,
-  # cell_cycle, replicate, any detected metadata column, and gate_population /
-  # cluster_identity while a gate or clustering is applied. Both H3 marks and
-  # phenotypic markers; a level with fewer than 2 values is skipped.
-  params <- req$body
-  stratify_by <- params$stratify_by %||% geno_col
+  # F1: marker quantiles within each level of stratify_by — the comparison
+  # variable (default), identity, cell_cycle, replicate, any detected metadata
+  # column, and gate_population / cluster_identity while a gate or clustering
+  # is applied. Both H3 marks and phenotypic markers; a level with fewer than
+  # 2 values is skipped.
+  stratify_by <- params$stratify_by %||% comp_var
   if (!stratify_by %in% names(data)) {
     return(list(error = paste0("stratify_by column not found: ", stratify_by,
       " (gate_population and cluster_identity exist only while a gate or clustering is applied)")))
@@ -642,11 +651,12 @@ function(session_id, req) {
     n_cells = n_cells,
     n_h3_markers = length(h3_markers),
     n_pheno_markers = length(pheno_markers),
-    n_conditions = dplyr::n_distinct(cells[[geno_col]]),
+    n_conditions = dplyr::n_distinct(cells[[comp_var]]),
     n_identities = if ("identity" %in% names(cells)) dplyr::n_distinct(cells$identity) else 0,
     n_replicates = if ("replicate" %in% names(cells)) dplyr::n_distinct(cells$replicate) else 0,
     n_cycles = if ("cell_cycle" %in% names(cells)) dplyr::n_distinct(cells$cell_cycle) else 0,
-    condition_col = geno_col,
+    comparison_var = comp_var,   # R33
+    condition_col = comp_var,    # the key the frontend charts read
     condition_counts = condition_counts,
     identity_counts = identity_counts,
     cycle_counts = cycle_counts,

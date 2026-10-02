@@ -871,6 +871,39 @@ wall time recorded in the entry; memory per worker checked on the droplet
 
 ---
 
+## R33 — Overview count charts grouped by genotype regardless of the sidebar comparison variable
+Status: done (2026-10-01); branch `fix/overview-comparison-var`; v1.5.1
+
+What was wrong. `/api/data/overview` grouped "Cells per Condition", the
+identity / cell-cycle / replicate "(by condition)" charts, the cross table
+and `n_conditions` by the genotype column; it never read `comparison_var`.
+A user who set the sidebar comparison variable to `condition` (or any other
+metadata column) saw every statistics tab grouped by that column while the
+Overview still counted by genotype, under headings that said "condition".
+The F1 split default inherited the same column.
+
+What changes. The endpoint reads `comparison_var` (default: the genotype
+column; unknown column → error naming it) and groups every count, every
+cross-tab and `n_conditions` by it; `stratify_by` defaults to it; the payload
+carries `comparison_var` and `condition_col` (same value, the key the charts
+read). The frontend sends the sidebar value, the five headings and the
+"levels" card name the variable ("Cells per condition", "(by condition)",
+"Condition × Cell Cycle Distribution"), grouped bars are coloured by it, the
+Split-by select follows it until the user picks a split, and a change of the
+comparison variable reloads the Overview when it is open. USER_GUIDE and
+README say "by the comparison variable", not "by genotype".
+
+Test. `test_overview_comparison_var.R`: example data plus a `condition`
+column that crosses genotype (replicates 1–2 "ctrl", replicate 3 "treated"
+within each genotype), uploaded; with `comparison_var = "condition"` the
+counts, the three cross-tabs and `n_conditions` are keyed by `condition`,
+equal the in-process counts and sum to `n_cells`; `stratify_by` defaults to
+`condition`; the default call still groups by genotype; an unknown column
+returns the error. `test_labels.R`: heading spans present, no literal
+"Cells per Condition" / "(by condition)", `comparison_var` sent.
+
+---
+
 ## R32 — Per-channel arcsinh cofactors are set by eye in OmiQ; the Import tab should suggest, stamp and stress-test them
 Status: open (2026-10-01); Import tab (with R21)
 
