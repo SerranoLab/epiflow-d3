@@ -73,7 +73,7 @@ const PositivityPlot = {
       .text('Density');
 
     // Per-group densities
-    const palette = DataManager.serverPalette?.genotype || {};
+    const palette = DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()] || {};   // R34: groups are levels of the payload's comparison_var
     const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const groups = orderRefFirst(ensureArray(data.groups), data.ref_level);
     const colorScale = d3.scaleOrdinal()

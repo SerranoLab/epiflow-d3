@@ -133,5 +133,20 @@ check(has("frontend/js/app.js", "comparison_var: DataManager.getComparisonVar() 
       lacks("frontend/js/app.js", "data.group_by || 'genotype'") && lacks("frontend/js/charts/correlationPlot.js", "|| 'genotype'"),
       "frontend sends comparison_var on the global correlation; no genotype literal in subtitle or colour fallback")
 
+# ================================================================== Positivity
+cat("\n--- Positivity: /api/phase2/positivity groups by comparison_var and echoes it ---\n")
+po1 <- post(paste0("/api/phase2/positivity/", sid), list(marker = h3[1], comparison_var = "condition"))
+check(is.null(po1$error) && setequal(chr(po1$groups), COND) && identical(chr(po1$comparison_var), "condition"), "comparison_var = condition: groups are ctrl / treated, echoed")
+gs_n <- vapply(po1$group_stats, function(g) num(g$n_total), numeric(1)); names(gs_n) <- chr(lapply(po1$group_stats, `[[`, "group"))
+check(all(gs_n[COND] == as.integer(table(cells$condition)[COND])), "per-group n_total equals the condition cell counts")
+po2 <- post(paste0("/api/phase2/positivity/", sid), list(marker = h3[1]))
+check(identical(chr(po2$comparison_var), "genotype"), "no key: the genotype column, echoed")
+po3 <- post(paste0("/api/phase2/positivity/", sid), list(marker = h3[1], comparison_var = "not_a_column"))
+check(!is.null(po3$error) && grepl("comparison_var column not found: not_a_column", chr(po3$error), fixed = TRUE), "unknown column returns the error naming it")
+check(has("frontend/js/app.js", "const params = { marker, comparison_var: DataManager.getComparisonVar() };") &&
+      has("frontend/js/charts/positivityPlot.js", "DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()]") &&
+      has("frontend/js/app.js", "groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n</th><th>Fraction Positive"),
+      "frontend sends comparison_var, colours by it and names it in the table header")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

@@ -3394,7 +3394,7 @@ const App = {
     try {
       const marker = document.getElementById('pos-marker').value;
       const threshInput = document.getElementById('pos-threshold').value;
-      const params = { marker };
+      const params = { marker, comparison_var: DataManager.getComparisonVar() };   // R34: groups are the comparison variable's levels
       if (threshInput) params.threshold = parseFloat(threshInput);
 
       const data = await EpiFlowAPI.runPositivity(params);
@@ -3418,7 +3418,7 @@ const App = {
       const stats = document.getElementById('positivity-stats');
       const groupStats = ensureArray(data.group_stats);
       let html = '<table class="stats-table" style="font-size:12px;max-width:600px;">';
-      html += '<thead><tr><th>Group</th><th>n</th><th>Fraction Positive</th><th>Mean</th><th>Median</th></tr></thead><tbody>';
+      html += `<thead><tr><th>${groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n</th><th>Fraction Positive</th><th>Mean</th><th>Median</th></tr></thead><tbody>`;   // R34: header names the grouping column
       groupStats.forEach(gs => {
         const gr = Array.isArray(gs.group) ? gs.group[0] : String(gs.group || '');
         html += `<tr><td>${gr}</td><td>${Number(gs.n_total).toLocaleString()}</td>

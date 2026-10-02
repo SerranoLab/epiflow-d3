@@ -1026,12 +1026,12 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34; the helper echoes comparison_var
   tryCatch(
     compute_positivity(
       store$filtered_data,
       marker = params$marker,
-      comparison_var = params$comparison_var %||% geno_col,
+      comparison_var = g$col,
       h3_markers = store$metadata$h3_markers,
       manual_threshold = if (!is.null(params$threshold)) as.numeric(params$threshold) else NULL
     ),
