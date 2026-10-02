@@ -1237,6 +1237,43 @@ equals that genotype's distinct-cell count, not 5× it.
 
 ---
 
+## F3 — Gating plot coloured by any label, contours per level, level × quadrant purity table
+Status: done (2026-10-02), branch features/gating-color, toward v1.6.1 (audit doc "three features", F3)
+
+What changed. `compute_gating` (`phase2.R`) takes `color_by` — any categorical
+column (resolved like every grouping column, R34) or `"__cluster_run__"`
+with the session's last clustering assignments — independent of
+`comparison_var`, which stays the statistics dimension (replicate tests,
+chi-square, quadrant detail). Points carry `color`; the payload carries
+`color_by`, `color_levels`, `color_stats` and `quadrant_totals`.
+`color_stats` is one row per colour level with, per quadrant, `n`,
+`pct_of_level` (rows sum to 100: the level's yield in that gate) and
+`pct_of_quadrant` (columns sum to 100: the purity a sorter would see). It is
+computed on every analyzed cell, never on the display subsample (R1). The
+clustering endpoint stores its run's `cell_assignments` in the session so
+the gating plot can be coloured by an unapplied run server-side; the audit
+doc's alternative (cell_id per point, colouring client-side) was not taken
+because the table would then be a subsample recount and the points payload
+would grow. gatingPlot.js colours points, legend (titled "colour: …") and
+density contours by the colour levels; cluster runs use the cluster palette
+(Okabe-Ito + Tol, L9), any other label its server palette; on-plot
+percentages are `pct_of_level` per colour level for up to 3 levels, else
+the quadrant symbol only; a second table "<level> × quadrant" sits under
+the comparison-variable table. New `gate-color` select (shared list, R34,
+plus "Cluster run (unapplied)"); a colour change re-gates at the current
+thresholds. Help text and USER_GUIDE describe yield vs purity.
+
+Tests. `test_gating_color.R`: `color_by = identity` on the example preset →
+every point coloured, three `color_stats` rows, rows sum to 100 by
+`pct_of_level`, columns to 100 by `pct_of_quadrant`, counts sum to
+`n_cells`, identical `color_stats` with `max_points = 200`; no `color_by` →
+colour = comparison variable and `color_stats` mirrors `quad_stats`; after
+a clustering run `__cluster_run__` gives one level per cluster; a fresh
+session without a run and an unknown column return errors.
+`test_labels.R`: the select, the table heading, the purity / yield wording.
+
+---
+
 ## F2 — Violin small multiples: one panel per marker, shared group order, optional standardized shared axis, one SVG
 Status: done (2026-10-01), branch features/overview-violin, toward v1.5.0 (audit doc "three features", F2)
 

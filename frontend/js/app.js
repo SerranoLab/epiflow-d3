@@ -411,6 +411,8 @@ const App = {
     'umap-color':       { prefix: 'Color:' },   // keeps its marker <optgroup>
     'cluster-color':    { prefix: 'Color:', extra: [{ value: 'cluster', label: 'Color: Cluster', first: true }], default: 'cluster' },
     'cluster-compare-color': { prefix: '', none: '— select —', noneValue: 'none', extra: [{ value: 'cluster', label: 'Cluster' }], default: 'none' },
+    // F3: gating colour dimension; the cluster-run entry needs a clustering run in this session.
+    'gate-color':       { prefix: 'Color:', extra: [{ value: '__cluster_run__', label: 'Color: Cluster run (unapplied)' }] },
   },
 
   groupingOptions() {
@@ -1059,6 +1061,10 @@ const App = {
     if (densityToggle) {
       densityToggle.addEventListener('change', (e) => GatingPlot.setDensity(e.target.checked));
     }
+    // F3: the level × quadrant table is server-side (all cells), so a colour change re-gates.
+    document.getElementById('gate-color')?.addEventListener('change', () => {
+      if (this._gatingData) this.runGating({ threshold_x: this._gatingData.threshold_x, threshold_y: this._gatingData.threshold_y });
+    });
 
     // About toggle
     const aboutToggle = document.getElementById('about-toggle');
@@ -3884,6 +3890,12 @@ const App = {
       if (markerX === markerY) throw new Error('Please select two different markers');
 
       const params = { marker_x: markerX, marker_y: markerY, comparison_var: DataManager.getComparisonVar() };   // R34: quadrant counts per level of the comparison variable
+      // F3: colour dimension (independent of the statistics dimension above).
+      const colorBy = document.getElementById('gate-color')?.value;
+      if (colorBy === '__cluster_run__' && !this._clusterData) {
+        throw new Error('Colour by cluster run: run Clustering first (the plot can then be coloured by the run before you name or apply it).');
+      }
+      if (colorBy) params.color_by = colorBy;
       if (filterIdentity !== 'All') params.filter_identity = filterIdentity;
       if (filterCycle !== 'All') params.filter_cycle = filterCycle;
       Object.assign(params, overrides);

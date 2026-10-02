@@ -1114,6 +1114,16 @@ function(session_id, req) {
     cell_cycle = if (!is.null(params$filter_cycle)) as.character(params$filter_cycle) else "All"
   )
 
+  # F3: colour dimension — a column (resolved like any grouping column), the
+  # session's last clustering run ("__cluster_run__"), or absent = comparison_var.
+  color_by <- NULL; color_assign <- NULL
+  if (identical(params$color_by, "__cluster_run__")) {
+    color_by <- "__cluster_run__"
+    color_assign <- store$last_clustering$cell_assignments
+  } else if (!is.null(params$color_by)) {
+    cb <- .resolve_grouping(params, store, "color_by"); if (!is.null(cb$error)) return(cb$error); color_by <- cb$col
+  }
+
   tryCatch({
     res <- compute_gating(
       filt_data,
@@ -1123,7 +1133,9 @@ function(session_id, req) {
       threshold_y = if (!is.null(params$threshold_y)) as.numeric(params$threshold_y) else NULL,
       comparison_var = g$col,
       h3_markers = store$metadata$h3_markers,
-      max_points = max_points
+      max_points = max_points,
+      color_by = color_by,
+      color_assignments = color_assign
     )
     if (is.null(res$error)) res$filters_applied <- filters_applied
     res
@@ -1229,7 +1241,7 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
   params <- req$body
   g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
-  tryCatch(
+  res <- tryCatch(
     run_advanced_clustering(
       store$filtered_data,
       h3_markers          = store$metadata$h3_markers,
@@ -1245,6 +1257,15 @@ function(session_id, req) {
     ),
     error = function(e) list(error = paste("Clustering failed:", e$message))
   )
+  # F3: keep the run's cell -> cluster assignments so the gating plot can be
+  # coloured by an unapplied clustering (color_by = "__cluster_run__") with
+  # its level × quadrant table computed on all cells server-side.
+  if (is.list(res) && is.null(res$error) && length(res$cell_assignments)) {
+    data_store[[sanitize_session_id(session_id)]]$last_clustering <- list(
+      cell_assignments = res$cell_assignments,
+      method = res$method, n_clusters = res$n_clusters, at = Sys.time())
+  }
+  res
 }
 
 #* Elbow / silhouette scan for optimal k
