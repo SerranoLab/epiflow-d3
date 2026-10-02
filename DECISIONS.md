@@ -872,7 +872,7 @@ wall time recorded in the entry; memory per worker checked on the droplet
 ---
 
 ## R34 — Grouping, colour-by, stratify-by, split-by and ML-target controls do not follow the sidebar comparison variable
-Status: in progress (2026-10-02); branch `fix/comparison-var-everywhere`; one commit per tab; v1.6.0
+Status: done (2026-10-02); branch `fix/comparison-var-everywhere`; one commit per tab (13 commits); v1.6.0
 
 What was wrong (audit 2026-10-01). Only Overview (R33), Statistics, Forest,
 Cell Cycle and differential correlation sent the sidebar comparison
