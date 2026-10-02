@@ -256,5 +256,15 @@ check(has(oc, "getColorScale(condCol || 'genotype', conditions") && has(oc, "`${
 check(has("USER_GUIDE.md", "Cell counts by the comparison variable") && has("README.md", "cell counts by the comparison variable"), "USER_GUIDE and README say 'by the comparison variable'")
 check(ver_of("overviewCharts.js") >= "1.3.2" && ver_of("js/app.js") >= "1.3.23", "overviewCharts / app cache-busting bumps")
 
+# ---- F3: gating colour dimension, contours per level, level × quadrant purity table ----
+cat("\n--- F3 gating colour labels ---\n")
+gp <- "frontend/js/charts/gatingPlot.js"
+check(has("frontend/index.html", 'id="gate-color"') && has("frontend/js/app.js", "'gate-color':       { prefix: 'Color:'"), "gating has a Color-by select built from the shared list")
+check(has(gp, ".text(`colour: ${colorLabel}`)") && has(gp, "· colour = ${colorLabel} ·"), "legend is titled with the colour variable and the subtitle names it")
+check(has(gp, "% of level (row) · % of quadrant = purity (column)") && has(gp, "% of quadrant is the purity of that level in that gate; % of level is its yield from that level."), "level × quadrant table heading and note say yield vs purity")
+check(has(gp, "if (colorStats.length && colorStats.length <= 3) {"), "on-plot percentages only up to 3 colour levels")
+check(has("frontend/index.html", "% of quadrant, the purity a sorter would see") && has("USER_GUIDE.md", "% of quadrant (purity)"), "help text and USER_GUIDE describe purity")
+check(ver_of("gatingPlot.js") >= "1.3.8" && ver_of("js/app.js") >= "1.3.34", "gatingPlot / app cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

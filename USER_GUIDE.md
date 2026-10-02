@@ -181,6 +181,7 @@ Biaxial gating on two markers:
 2. Adjust thresholds
 3. Label quadrants (e.g., H3K27ac+ H3K4me1+)
 4. **Apply as Metacolumn** — populations become available as a filter and grouping variable across all tabs
+5. **Color by** any label (the comparison variable by default, a metadata column, a gate population, a named cluster identity, or the last unapplied clustering run). Density contours are drawn per colour level, and the level × quadrant table reports % of level (yield) and % of quadrant (purity) for every level, computed on all cells. On-plot percentages appear for up to 3 colour levels; the replicate-level tests stay on the comparison variable.
 
 ### PCA
 

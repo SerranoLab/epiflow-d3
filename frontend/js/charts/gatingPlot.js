@@ -56,10 +56,15 @@ const GatingPlot = {
     const fa = data.filters_applied || {};
     const shownStr = data.subsampled
       ? ` · ${Number(data.n_displayed).toLocaleString()} shown (display subsample)` : '';
+    // F3: the colour dimension is independent of the statistics dimension.
+    const colorBy = data.color_by || data.comparison_var || DataManager.getComparisonVar();
+    const isClusterRun = colorBy === '__cluster_run__';
+    const colorLabel = isClusterRun ? 'cluster run (unapplied)' : groupingLabel(colorBy);
+    const colorLevels = ensureArray(data.color_levels).map(String);
     svg.append('text')
       .attr('x', totalW / 2).attr('y', 34).attr('text-anchor', 'middle')
       .attr('font-size', '11px').attr('fill', '#64748b')
-      .text(`n = ${Number(data.n_cells).toLocaleString()} analyzed${shownStr} · filters: identity = ${fa.identity ?? 'All'}, cycle = ${fa.cell_cycle ?? 'All'}`);
+      .text(`n = ${Number(data.n_cells).toLocaleString()} analyzed${shownStr} · colour = ${colorLabel} · filters: identity = ${fa.identity ?? 'All'}, cycle = ${fa.cell_cycle ?? 'All'}`);
     svg.append('text')
       .attr('class', 'ui-hint')   // interaction hint; stripped from the HTML report
       .attr('x', totalW / 2).attr('y', 47).attr('text-anchor', 'middle')
@@ -103,13 +108,16 @@ const GatingPlot = {
       .attr('text-anchor', 'middle').attr('font-size', '12px').attr('fill', '#475569')
       .text(data.marker_y);
 
-    // Color by group
-    const groups = ensureArray(data.groups);
-    const palette = DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()] || {};   // R34: groups are levels of the payload's comparison_var
+    // Colour by the colour dimension (F3): cluster runs use the cluster palette
+    // (L9: Okabe-Ito + Tol); any other label uses its server palette, else Okabe-Ito.
+    const groups = ensureArray(data.groups);   // statistics dimension (comparison_var)
+    const palette = isClusterRun ? {} : (DataManager.serverPalette?.[colorBy] || {});
     const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
+    const levelColors = isClusterRun ? CLUSTER_PALETTE_20 : defaultColors;   // L9: cluster palette for cluster runs
     const colorScale = d3.scaleOrdinal()
-      .domain(groups)
-      .range(groups.map((gr, i) => palette[gr] || defaultColors[i % defaultColors.length]));
+      .domain(colorLevels)
+      .range(colorLevels.map((lv, i) => palette[lv] || levelColors[i % levelColors.length]));
+    const pointColor = d => String(d.color ?? d.group);
 
     // Scatter points
     const plotG = g.append('g').attr('clip-path', 'url(#gate-clip)');
@@ -120,7 +128,7 @@ const GatingPlot = {
       .attr('cx', d => xScale(Number(d.x)))
       .attr('cy', d => yScale(Number(d.y)))
       .attr('r', 1.5)
-      .attr('fill', d => colorScale(String(d.group)))
+      .attr('fill', d => colorScale(pointColor(d)))
       .attr('fill-opacity', this._showDensity ? this._pointOpacityOn : this._pointOpacityOff);
     this._scatterSel = scatterSel;
 
@@ -136,9 +144,9 @@ const GatingPlot = {
       .style('display', this._showDensity ? null : 'none');
     this._densityG = densityG;
     this._densityBuilt = false;
-    this._densityArgs = { points, groups, colorScale, xScale, yScale, size };
+    this._densityArgs = { points, groups: colorLevels, colorScale, xScale, yScale, size };   // F3: one contour set per colour level
     if (this._showDensity) {
-      this._buildDensity(densityG, points, groups, colorScale, xScale, yScale, size);
+      this._buildDensity(densityG, points, colorLevels, colorScale, xScale, yScale, size);
       this._densityBuilt = true;
     }
 
@@ -232,10 +240,17 @@ const GatingPlot = {
 
     // R1: the table is the server's quad_stats, computed on every analyzed
     // cell. It is never a client-side recount of the display subsample.
+    const colorStats = ensureArray(data.color_stats);
     const renderStats = () => {
+      // F3: on-plot percentages are the colour levels' share per quadrant
+      // (pct_of_level), shown for up to 3 levels; beyond that the quadrant
+      // keeps its symbol and the table below carries the numbers.
       quadOrder.forEach(q => {
-        const pcts = quadStats.map(s => `${Number(s[q]?.pct ?? 0).toFixed(1)}%`);
-        quadLabels[q].text(pcts.join(' / '));
+        if (colorStats.length && colorStats.length <= 3) {
+          quadLabels[q].text(colorStats.map(s => `${Number(s[q]?.pct_of_level ?? 0).toFixed(1)}%`).join(' / '));
+        } else {
+          quadLabels[q].text(quadNames[q]);
+        }
       });
       positionQuadLabels();
       if (!statsContainer) return;
@@ -249,8 +264,10 @@ const GatingPlot = {
       </tr></thead><tbody>`;
       quadStats.forEach(s => {
         const gr = String(s.group);
+        // The swatch is meaningful only when the colour dimension is the comparison variable.
+        const swatch = colorBy === data.comparison_var ? colorScale(gr) : '#cbd5e1';
         html += `<tr>
-          <td><span style="display:inline-block;width:10px;height:10px;background:${colorScale(gr)};border-radius:2px;margin-right:4px;"></span>${gr}</td>
+          <td><span style="display:inline-block;width:10px;height:10px;background:${swatch};border-radius:2px;margin-right:4px;"></span>${gr}</td>
           <td>${Number(s.n).toLocaleString()}</td>`;
         quadOrder.forEach(q => {
           html += `<td><strong>${Number(s[q]?.pct ?? 0).toFixed(1)}%</strong> <span style="color:#94a3b8">(${Number(s[q]?.n ?? 0)})</span></td>`;
@@ -258,6 +275,33 @@ const GatingPlot = {
         html += '</tr>';
       });
       html += '</tbody></table>';
+
+      // F3: level × quadrant table for the colour dimension (all cells, R1).
+      // "% of level": of this level's cells, the share in the quadrant (rows sum
+      // to 100). "% of quadrant": of the quadrant's cells, the share that is
+      // this level — the purity a sorter would see for that level in that gate.
+      if (colorStats.length) {
+        const qt = data.quadrant_totals || {};
+        html += `<h4 style="font-size:12px;margin:12px 0 4px;color:#1a202c;">
+          ${colorLabel.charAt(0).toUpperCase() + colorLabel.slice(1)} × quadrant — % of level (row) · % of quadrant = purity (column)
+        </h4>`;
+        html += '<table class="stats-table gate-purity-table" style="font-size:12px;width:100%;max-width:760px;">';
+        html += `<thead><tr><th>${colorLabel}</th><th>n (all cells)</th>`;
+        quadOrder.forEach(q => { html += `<th>${q} (n = ${Number(qt[q] ?? 0).toLocaleString()})</th>`; });
+        html += '</tr></thead><tbody>';
+        colorStats.forEach(s => {
+          const lv = String(s.level);
+          html += `<tr><td><span style="display:inline-block;width:10px;height:10px;background:${colorScale(lv)};border-radius:2px;margin-right:4px;"></span>${lv}</td>
+            <td>${Number(s.n).toLocaleString()}</td>`;
+          quadOrder.forEach(q => {
+            html += `<td><strong>${Number(s[q]?.pct_of_level ?? 0).toFixed(1)}%</strong> of level
+              <span style="color:#64748b">· ${Number(s[q]?.pct_of_quadrant ?? 0).toFixed(1)}% of quadrant</span></td>`;
+          });
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += `<p style="font-size:11px;color:#94a3b8;margin-top:4px;">Computed on all ${Number(data.n_cells).toLocaleString()} analyzed cells. % of quadrant is the purity of that level in that gate; % of level is its yield from that level.</p>`;
+      }
 
       // R2: the replicate-level test is the primary result. Effect size is
       // Δ percentage points (g2 − g1) with its Welch 95% CI; Cohen's d and
@@ -415,18 +459,22 @@ const GatingPlot = {
     const legendG = svg.append('g')
       .attr('transform', `translate(${margin.left + 8}, ${margin.top + 8})`);
 
+    // F3: the legend is the colour dimension (titled), not the statistics groups.
+    const legendW = Math.max(110, 30 + 6.2 * d3.max([colorLabel.length + 8, ...colorLevels.map(l => l.length)]));
     legendG.append('rect')
-      .attr('width', 110).attr('height', groups.length * 18 + 8)
+      .attr('width', legendW).attr('height', colorLevels.length * 18 + 22)
       .attr('fill', '#fff').attr('fill-opacity', 0.85)
       .attr('stroke', '#e2e8f0').attr('rx', 4);
-
-    groups.forEach((gr, i) => {
+    legendG.append('text')
+      .attr('x', 8).attr('y', 14).attr('font-size', '10px').attr('font-weight', '600').attr('fill', '#475569')
+      .text(`colour: ${colorLabel}`);
+    colorLevels.forEach((lv, i) => {
       legendG.append('circle')
-        .attr('cx', 12).attr('cy', 14 + i * 18).attr('r', 4)
-        .attr('fill', colorScale(gr));
+        .attr('cx', 12).attr('cy', 28 + i * 18).attr('r', 4)
+        .attr('fill', colorScale(lv));
       legendG.append('text')
-        .attr('x', 22).attr('y', 17 + i * 18)
-        .attr('font-size', '10px').attr('fill', '#1a202c').text(gr);
+        .attr('x', 22).attr('y', 31 + i * 18)
+        .attr('font-size', '10px').attr('fill', '#1a202c').text(lv);
     });
   },
 
@@ -434,7 +482,7 @@ const GatingPlot = {
   // already screen pixels, so d3.geoPath() needs no projection. Each group is
   // contoured independently (self-scaled thresholds), drawn as colour-matched
   // lines with inner contours rendered heavier — this keeps populations
-  // separable when several genotypes overlap, unlike a single pooled fill.
+  // separable when several levels overlap, unlike a single pooled fill.
   _buildDensity(densityG, points, groups, colorScale, xScale, yScale, size) {
     densityG.selectAll('*').remove();
     // Defensive: contourDensity/geoPath live in the full d3 bundle. If a slimmer
@@ -446,7 +494,7 @@ const GatingPlot = {
     const path = d3.geoPath();
 
     groups.forEach(gr => {
-      const pts = points.filter(p => String(p.group) === String(gr));
+      const pts = points.filter(p => String(p.color ?? p.group) === String(gr));   // F3: contours per colour level
       if (pts.length < 10) return;
 
       const contours = d3.contourDensity()

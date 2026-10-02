@@ -213,7 +213,7 @@ gd2 <- post(paste0("/api/phase2/gating-detail/", sid), list(marker_x = mx, marke
 check(!is.null(gd2$error) && grepl("comparison_var column not found: not_a_column", chr(gd2$error), fixed = TRUE), "gating-detail: unknown column returns the error")
 check(has("frontend/js/app.js", "const params = { marker_x: markerX, marker_y: markerY, comparison_var: DataManager.getComparisonVar() };") &&
       has("frontend/js/app.js", "quadrant, comparison_var: DataManager.getComparisonVar()") &&
-      has("frontend/js/charts/gatingPlot.js", "DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()]") &&
+      has("frontend/js/charts/gatingPlot.js", "DataManager.serverPalette?.[colorBy]") && has("frontend/js/charts/gatingPlot.js", "const colorBy = data.color_by || data.comparison_var || DataManager.getComparisonVar();") &&
       has("frontend/js/charts/gatingPlot.js", "groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n (all cells)</th>") &&
       lacks("frontend/js/app.js", "serverPalette?.genotype") && lacks("frontend/js/charts/gatingPlot.js", "serverPalette?.genotype"),
       "frontend sends comparison_var on gating and quadrant detail; palettes and the stats header follow it")

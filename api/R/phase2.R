@@ -787,9 +787,25 @@ compute_gating <- function(data, marker_x, marker_y,
                            threshold_x = NULL, threshold_y = NULL,
                            comparison_var = "genotype",
                            h3_markers = NULL,
-                           max_points = 0L) {
-
+                           max_points = 0L,
+                           color_by = NULL, color_assignments = NULL) {
+  # F3: `color_by` is the colour dimension of the plot — any categorical
+  # column, or "__cluster_run__" with `color_assignments` (a cell_id -> cluster
+  # vector from the session's last clustering run; cells outside it are
+  # "Unassigned"). It is independent of `comparison_var`, which stays the
+  # statistics dimension (replicate tests, chi-square, quadrant detail).
+  # Absent -> colour = comparison_var. The level × quadrant table
+  # (`color_stats`) is computed on every analyzed cell, never on the display
+  # subsample (R1).
   cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
+  cluster_run <- identical(color_by, "__cluster_run__")
+  if (is.null(color_by)) color_by <- comparison_var
+  if (!cluster_run && !color_by %in% names(cells)) {
+    return(list(error = paste0("color_by column not found: ", color_by)))
+  }
+  if (cluster_run && (is.null(color_assignments) || !length(color_assignments))) {
+    return(list(error = "color_by = cluster run: no clustering run is stored for this session — run Clustering first"))
+  }
 
   # Extract X values
   is_h3_x <- !is.null(h3_markers) && marker_x %in% h3_markers
@@ -817,11 +833,17 @@ compute_gating <- function(data, marker_x, marker_y,
     return(list(error = paste("Marker not found:", marker_y)))
   }
 
-  # Join — include replicate for proper statistical testing
+  # Join — include replicate for proper statistical testing, and the colour column
   meta_keep <- comparison_var
   if ("replicate" %in% names(cells)) meta_keep <- c(meta_keep, "replicate")
+  if (!cluster_run) meta_keep <- unique(c(meta_keep, color_by))
   scatter <- dplyr::inner_join(x_df, y_df, by = "cell_id") %>%
     dplyr::left_join(cells %>% dplyr::select(cell_id, dplyr::all_of(meta_keep)), by = "cell_id")
+  if (cluster_run) {
+    ca <- setNames(as.character(unlist(color_assignments)), names(color_assignments))
+    scatter[["__cluster_run__"]] <- unname(ca[as.character(scatter$cell_id)])
+    scatter[["__cluster_run__"]][is.na(scatter[["__cluster_run__"]])] <- "Unassigned"
+  }
 
   if (nrow(scatter) < 10) return(list(error = "Too few cells for gating"))
 
@@ -872,6 +894,32 @@ compute_gating <- function(data, marker_x, marker_y,
                 label = paste0(marker_x, "+ / ", marker_y, "-"))
     )
   })
+
+  # F3: level × quadrant table for the colour dimension, on all cells.
+  # pct_of_level: of this level's cells, the share in each quadrant (rows sum
+  # to 100). pct_of_quadrant: of the cells in a quadrant, the share that is
+  # this level — the purity a sorter cares about (columns sum to 100).
+  col_v <- as.character(scatter[[color_by]])
+  col_v[is.na(col_v)] <- "NA"
+  color_levels <- unique(col_v)
+  color_levels <- if (cluster_run && !any(is.na(suppressWarnings(as.numeric(setdiff(color_levels, "Unassigned")))))) {
+    c(as.character(sort(as.numeric(setdiff(color_levels, "Unassigned")))), intersect("Unassigned", color_levels))
+  } else sort(color_levels)
+  quad_all <- c("Q1", "Q2", "Q3", "Q4")
+  quad_tot <- vapply(quad_all, function(q) sum(scatter$quadrant == q, na.rm = TRUE), numeric(1))
+  color_stats <- lapply(color_levels, function(lv) {
+    sel <- col_v == lv
+    n_lv <- sum(sel)
+    per_q <- lapply(quad_all, function(q) {
+      nq <- sum(sel & scatter$quadrant == q, na.rm = TRUE)
+      list(n = as.integer(nq),
+           pct_of_level = if (n_lv > 0) round(100 * nq / n_lv, 1) else 0,
+           pct_of_quadrant = if (quad_tot[[q]] > 0) round(100 * nq / quad_tot[[q]], 1) else 0)
+    })
+    names(per_q) <- quad_all
+    c(list(level = lv, n = as.integer(n_lv)), per_q)
+  })
+  quadrant_totals <- as.list(as.integer(quad_tot)); names(quadrant_totals) <- quad_all
 
   # Chi-square on quadrant distributions (cell-level — exploratory)
   chi_test <- NULL
@@ -985,8 +1033,10 @@ compute_gating <- function(data, marker_x, marker_y,
     dplyr::transmute(
       x = x_val, y = y_val,
       group = .data[[comparison_var]],
+      color = .data[[color_by]],     # F3: the colour dimension
       q = quadrant
     ) %>% as.data.frame()
+  points$color[is.na(points$color)] <- "NA"
 
   list(
     marker_x = marker_x,
@@ -1001,7 +1051,11 @@ compute_gating <- function(data, marker_x, marker_y,
     quad_stats = safe_I(quad_stats),
     chi_test = chi_test,
     groups = safe_I(as.character(groups)),
-    comparison_var = comparison_var
+    comparison_var = comparison_var,
+    color_by = color_by,                       # F3
+    color_levels = safe_I(color_levels),
+    color_stats = safe_I(color_stats),
+    quadrant_totals = quadrant_totals
   )
 }
 
