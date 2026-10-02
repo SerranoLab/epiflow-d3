@@ -148,5 +148,29 @@ check(has("frontend/js/app.js", "const params = { marker, comparison_var: DataMa
       has("frontend/js/app.js", "groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n</th><th>Fraction Positive"),
       "frontend sends comparison_var, colours by it and names it in the table header")
 
+# ================================================================== Statistics / Forest / Diagnostic
+cat("\n--- Statistics: LMM, all-markers (Forest / Volcano source) and marker-detail take comparison_var and echo it ---\n")
+st1 <- post(paste0("/api/stats/lmm/", sid), list(marker = h3[1], comparison_var = "condition"))
+check(is.null(st1$error) && identical(chr(st1$comparison_var), "condition") && setequal(unique(chr(lapply(st1$results, `[[`, "comparison_var"))), "condition"),
+      "lmm: fitted on condition; comparison_var echoed on the payload and every row")
+check(setequal(unique(c(chr(lapply(st1$results, `[[`, "ref_level")), chr(lapply(st1$results, `[[`, "contrast_level")))), COND),
+      "lmm: reference and contrast levels are ctrl / treated")
+am1 <- post(paste0("/api/stats/all-markers/", sid), list(comparison_var = "condition"))
+check(is.null(am1$error) && identical(chr(am1$comparison_var), "condition") && length(am1$results) >= length(h3) &&
+      setequal(unique(c(chr(lapply(am1$results, `[[`, "ref_level")), chr(lapply(am1$results, `[[`, "contrast_level")))), COND),
+      "all-markers: every marker contrasted treated vs ctrl, comparison_var echoed (Forest and Volcano draw this payload)")
+am2 <- post(paste0("/api/stats/all-markers/", sid), list())
+check(identical(chr(am2$comparison_var), "genotype"), "all-markers with no key: the genotype column, echoed")
+am3 <- post(paste0("/api/stats/all-markers/", sid), list(comparison_var = "condition", stratify_by = "condition"))
+check(!is.null(am3$error) && grepl("same ('condition')", chr(am3$error), fixed = TRUE), "stratifying by the comparison variable itself is refused with the R18 message naming condition")
+am4 <- post(paste0("/api/stats/all-markers/", sid), list(comparison_var = "condition", stratify_by = "identity"))
+check(is.null(am4$error) && setequal(unique(c(chr(lapply(am4$results, `[[`, "ref_level")), chr(lapply(am4$results, `[[`, "contrast_level")))), COND),
+      "all-markers stratified by identity still contrasts the condition levels")
+md1 <- post(paste0("/api/stats/marker-detail/", sid), list(marker = h3[1], comparison_var = "condition"))
+check(is.null(md1$error) && identical(chr(md1$comparison_var), "condition") && length(md1$pairwise) >= 1, "marker-detail: pairwise contrasts on condition, echoed")
+md2 <- post(paste0("/api/stats/marker-detail/", sid), list(marker = h3[1], comparison_var = "not_a_column"))
+check(!is.null(md2$error) && grepl("comparison_var column not found", chr(md2$error), fixed = TRUE), "marker-detail: unknown column returns the error")
+check(lacks("api/R/plumber.R", 'params$comparison_var %||% "genotype"'), "no statistics endpoint defaults comparison_var to a genotype literal outside .resolve_grouping")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

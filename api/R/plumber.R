@@ -846,15 +846,16 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   # R18: stratifying by the comparison variable can never be fit; say so plainly.
-  same_var <- .lmm_same_var_error(params$stratify_by, params$comparison_var %||% "genotype")
+  same_var <- .lmm_same_var_error(params$stratify_by, g$col)
   if (!is.null(same_var)) return(same_var)
   result <- fit_stratified_lmm(
     store$filtered_data,
     marker          = params$marker,
     stratify_by     = params$stratify_by,
     ref_level       = params$ref_level,
-    comparison_var  = params$comparison_var %||% "genotype",
+    comparison_var  = g$col,
     h3_marks        = store$metadata$h3_markers,
     use_cells_as_replicates = isTRUE(params$use_cells_as_replicates)
   )
@@ -862,7 +863,7 @@ function(session_id, req) {
   # R17: a zero-row result carries the reason in attr(, "reason"); say why.
   if (is.null(result) || nrow(result) == 0)
     return(list(error = paste0("Model could not be fit: ", .lmm_reason(result) %||% "no reason recorded")))
-  list(results = result)
+  list(results = result, comparison_var = g$col)
 }
 
 #* Run LMM across all selected markers
@@ -873,8 +874,10 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
+  comp_var <- g$col
   # R18: stratifying by the comparison variable can never be fit; say so plainly.
-  same_var <- .lmm_same_var_error(params$stratify_by, params$comparison_var %||% "genotype")
+  same_var <- .lmm_same_var_error(params$stratify_by, comp_var)
   if (!is.null(same_var)) return(same_var)
   # Use selected markers from frontend, fall back to all H3-PTMs
   markers <- params$markers %||% store$metadata$h3_markers
@@ -883,7 +886,6 @@ function(session_id, req) {
   # Replicate-awareness: mixed-model inference needs >= 2 biological replicates
   # per group. With one replicate the random effect is unidentifiable, so return
   # a clear message instead of an opaque "no models could be fit".
-  comp_var <- params$comparison_var %||% "genotype"
   if (!isTRUE(params$use_cells_as_replicates) &&
       "replicate" %in% names(store$filtered_data) &&
       comp_var %in% names(store$filtered_data)) {
@@ -907,7 +909,7 @@ function(session_id, req) {
     run_all_markers_lmm(
       store$filtered_data,
       markers         = markers,
-      comparison_var  = params$comparison_var %||% "genotype",
+      comparison_var  = comp_var,
       stratify_by     = params$stratify_by,
       ref_level       = params$ref_level,
       h3_markers      = store$metadata$h3_markers,
@@ -927,7 +929,7 @@ function(session_id, req) {
   result <- tryCatch(
     add_distribution_metrics(
       result, store$filtered_data,
-      comparison_var = params$comparison_var %||% "genotype",
+      comparison_var = comp_var,
       stratify_by    = params$stratify_by,
       h3_markers     = store$metadata$h3_markers
     ),
@@ -954,7 +956,7 @@ function(session_id, req) {
   # gone \u2014 no interval on d is computed anywhere; the only interval shown is
   # the LMM beta's t interval on the forest plot (replicate-aware).
 
-  list(results = result, caution_notes = caution_notes)
+  list(results = result, caution_notes = caution_notes, comparison_var = comp_var)
 }
 
 #* All-pairwise LMM contrasts + replicate-level EMD test for ONE marker.
@@ -969,7 +971,8 @@ function(session_id, req) {
   params <- req$body
   marker <- params$marker
   if (is.null(marker)) return(list(error = "No marker specified"))
-  comp  <- params$comparison_var %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
+  comp  <- g$col
   ref   <- params$ref_level
   strat <- if (!is.null(params$stratify_by) && params$stratify_by != "None") params$stratify_by else NULL
 
