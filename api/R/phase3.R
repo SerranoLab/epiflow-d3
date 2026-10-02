@@ -201,30 +201,31 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
                                     linkage = "ward.D2", resolution = 1.0,
                                     include_phenotypic = FALSE,
                                     umap_coords = NULL,
-                                    seed = 42) {
+                                    seed = 42,
+                                    comparison_var = "genotype", meta_cols = NULL) {
   # Set when an algorithm substitution happens (e.g. Leiden unavailable), so
   # the UI can say which method actually ran.
   method_note <- NULL
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+  # R34: metadata carried into the visualization = the columns the colour
+  # controls can show, always including the comparison variable (the
+  # composition cross-tab is cluster × comparison_var).
+  meta_all <- unique(c(.dimred_meta_cols(data, meta_cols), intersect(comparison_var, names(data))))
 
   if (.epiflow_phenotype_only(data)) {
     if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for clustering"))
     wide <- data %>%
       dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
-                                     "identity", "cell_cycle")),
+      dplyr::select(dplyr::any_of(meta_all),
                     dplyr::any_of(pheno_cols)) %>%
       tidyr::drop_na(dplyr::all_of(pheno_cols))
     h3_cols <- character(0)
   } else {
     wide <- data %>%
-      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
-                                     "identity", "cell_cycle")),
+      dplyr::select(dplyr::any_of(meta_all),
                     dplyr::any_of(pheno_cols),
                     H3PTM, value) %>%
-      dplyr::group_by(dplyr::across(dplyr::any_of(c("cell_id", "genotype", "replicate",
-                                                      "identity", "cell_cycle",
-                                                      pheno_cols))),
+      dplyr::group_by(dplyr::across(dplyr::any_of(c(meta_all, pheno_cols))),
                       H3PTM) %>%
       dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
       tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
@@ -448,12 +449,12 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
       .groups = "drop"
     )
 
-  # Cross-tabs: cluster × genotype, cluster × identity
-  cross_geno <- NULL
-  if ("genotype" %in% names(wide)) {
-    cross_geno <- wide %>%
-      dplyr::count(cluster, genotype) %>%
-      tidyr::pivot_wider(names_from = genotype, values_from = n, values_fill = 0)
+  # Cross-tabs: cluster × comparison variable (R34), cluster × identity
+  cross_comp <- NULL
+  if (comparison_var %in% names(wide)) {
+    cross_comp <- wide %>%
+      dplyr::count(cluster, .data[[comparison_var]]) %>%
+      tidyr::pivot_wider(names_from = dplyr::all_of(comparison_var), values_from = n, values_fill = 0)
   }
   cross_identity <- NULL
   if ("identity" %in% names(wide)) {
@@ -479,9 +480,8 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
   # UMAP embedding for scatter plot (preferred over PCA for clustering viz)
   viz <- data.frame(cluster = wide$cluster)
   if ("cell_id" %in% names(wide)) viz$cell_id <- wide$cell_id
-  if ("genotype" %in% names(wide)) viz$genotype <- wide$genotype
-  if ("identity" %in% names(wide)) viz$identity <- wide$identity
-  if ("cell_cycle" %in% names(wide)) viz$cell_cycle <- wide$cell_cycle
+  meta_out <- setdiff(intersect(meta_all, names(wide)), "cell_id")   # R34: every carried column, echoed as meta_cols
+  for (mc in meta_out) viz[[mc]] <- wide[[mc]]
 
   # Compute UMAP for visualization
   umap_ok <- FALSE
@@ -529,7 +529,10 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     centers = centers,
     summaries = summaries,
     cluster_signatures = cluster_sigs,
-    cross_genotype = cross_geno,
+    cross_comparison = cross_comp,   # R34: cluster × comparison_var
+    cross_genotype = cross_comp,     # alias for one release (removal logged in DECISIONS open items)
+    comparison_var = comparison_var,
+    meta_cols = safe_I(meta_out),
     cross_identity = cross_identity,
     n_clusters = n_clusters,
     method = method,

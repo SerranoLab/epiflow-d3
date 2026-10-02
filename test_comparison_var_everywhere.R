@@ -252,5 +252,27 @@ check(has("frontend/js/app.js", "'umap-color':       { prefix: 'Color:' },") && 
       "umap-color is a managed select; split panels use the comparison variable; no genotype literal")
 check(has("frontend/index.html", 'Split by <span id="umap-split-label">') && lacks("frontend/index.html", "compare genotypes side-by-side"), "split checkbox and help name the comparison variable")
 
+# ================================================================== Clustering
+cat("\n--- Clustering: /api/phase3/clustering cross-tabs cluster × comparison_var, carries meta_cols, echoes both ---\n")
+cl1 <- post(paste0("/api/phase3/clustering/", sid), list(method = "kmeans", n_clusters = 3, max_cells = 2000, comparison_var = "condition", meta_cols = I(c("condition", "genotype"))))
+check(is.null(cl1$error) && identical(chr(cl1$comparison_var), "condition") && setequal(chr(cl1$meta_cols), c("condition", "genotype")), "comparison_var and meta_cols echoed")
+check(setequal(setdiff(names(cl1$cross_comparison[[1]]), "cluster"), COND), "cross_comparison columns are the condition levels (ctrl / treated)")
+check(identical(cl1$cross_genotype, cl1$cross_comparison), "cross_genotype is an alias of cross_comparison (one release)")
+check(sum(vapply(cl1$cross_comparison, function(r) sum(num(r[COND])), numeric(1))) == num(cl1$n_cells), "cross-tab counts sum to the clustered cells")
+check(all(c("condition", "genotype", "cluster") %in% names(cl1$visualization[[1]])) && !"identity" %in% names(cl1$visualization[[1]]),
+      "visualization rows carry the requested columns only")
+cl2 <- post(paste0("/api/phase3/clustering/", sid), list(method = "kmeans", n_clusters = 3, max_cells = 2000))
+check(is.null(cl2$error) && identical(chr(cl2$comparison_var), "genotype") && setequal(setdiff(names(cl2$cross_comparison[[1]]), "cluster"), sort(unique(cells$genotype))),
+      "no keys: cluster × genotype, echoed")
+cl3 <- post(paste0("/api/phase3/clustering/", sid), list(method = "kmeans", n_clusters = 3, max_cells = 2000, comparison_var = "not_a_column"))
+check(!is.null(cl3$error) && grepl("comparison_var column not found: not_a_column", chr(cl3$error), fixed = TRUE), "unknown comparison_var returns the error")
+check(has("frontend/js/app.js", "'cluster-color':    { prefix: 'Color:', extra: [{ value: 'cluster', label: 'Color: Cluster', first: true }], default: 'cluster' },") &&
+      has("frontend/js/app.js", "'cluster-compare-color': { prefix: '', none: '— select —', noneValue: 'none'") &&
+      has("frontend/js/app.js", "comparison_var: DataManager.getComparisonVar(), meta_cols: this.groupingOptions() };") &&
+      has("frontend/js/app.js", "const crossComp = data.cross_comparison || data.cross_genotype;") && lacks("frontend/js/app.js", "ensureArray(data.cross_genotype), 'Genotype')"),
+      "both cluster colour selects are managed; the run sends comparison_var + meta_cols; the cross-tab is labelled by the comparison variable")
+check(lacks("api/R/phase3.R", 'dplyr::count(cluster, genotype)') && lacks("api/R/phase3.R", '"cell_id", "genotype", "replicate", "cell_cycle", "identity"'),
+      "phase3.R has no hard-coded genotype grouping or metadata set left")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

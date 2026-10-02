@@ -1228,6 +1228,7 @@ function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_advanced_clustering(
       store$filtered_data,
@@ -1238,7 +1239,9 @@ function(session_id, req) {
       linkage             = params$linkage %||% "ward.D2",
       resolution          = params$resolution %||% 1.0,
       include_phenotypic  = isTRUE(params$include_phenotypic),
-      max_cells           = params$max_cells %||% 50000
+      max_cells           = params$max_cells %||% 50000,
+      comparison_var      = g$col,              # R34: composition cross-tab is cluster × this
+      meta_cols           = params$meta_cols    # R34: the columns the colour controls can show
     ),
     error = function(e) list(error = paste("Clustering failed:", e$message))
   )

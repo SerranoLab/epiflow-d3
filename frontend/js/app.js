@@ -409,6 +409,8 @@ const App = {
     'ml-target':        { prefix: 'Target:' },
     'pca-color':        { prefix: 'Color:' },
     'umap-color':       { prefix: 'Color:' },   // keeps its marker <optgroup>
+    'cluster-color':    { prefix: 'Color:', extra: [{ value: 'cluster', label: 'Color: Cluster', first: true }], default: 'cluster' },
+    'cluster-compare-color': { prefix: '', none: '— select —', noneValue: 'none', extra: [{ value: 'cluster', label: 'Cluster' }], default: 'none' },
   },
 
   groupingOptions() {
@@ -427,7 +429,7 @@ const App = {
     const keep = sel.value;
     const optHtml = (value, label) => `<option value="${value}">${label}</option>`;
     let html = '';
-    if (cfg.none) html += optHtml('None', cfg.none);
+    if (cfg.none) html += optHtml(cfg.noneValue || 'None', cfg.none);
     extra.filter(e => e.first).forEach(e => { html += optHtml(e.value, e.label); });
     opts.forEach(col => { html += optHtml(col, `${cfg.prefix} ${groupingLabel(col)}`.trim()); });
     extra.filter(e => !e.first).forEach(e => { html += optHtml(e.value, e.label); });
@@ -1419,7 +1421,10 @@ const App = {
     const colorBy = document.getElementById('cluster-color').value;
     const isGraph = method === 'louvain' || method === 'leiden';
     const inclPheno = document.getElementById('cluster-pheno').checked;
-    const params = { method: method, include_phenotypic: inclPheno };
+    // R34: the composition table is cluster × the comparison variable; the
+    // visualization carries only the columns the colour controls can show.
+    const params = { method: method, include_phenotypic: inclPheno,
+                     comparison_var: DataManager.getComparisonVar(), meta_cols: this.groupingOptions() };
     if (!isGraph) {
       params.n_clusters = parseInt(document.getElementById('cluster-k').value) || 5;
     } else {
@@ -1446,7 +1451,8 @@ const App = {
       if (sigs.length && allMarkers.length) {
         ClusterPlot.renderSignatures('cluster-signatures-chart', sigs, allMarkers, clusters);
       }
-      if (data.cross_genotype) ClusterPlot.renderCrossTab('cluster-cross-genotype', ensureArray(data.cross_genotype), 'Genotype');
+      const crossComp = data.cross_comparison || data.cross_genotype;   // R34 (cross_genotype: alias for one release)
+      if (crossComp) ClusterPlot.renderCrossTab('cluster-cross-genotype', ensureArray(crossComp), groupingLabel(data.comparison_var || DataManager.getComparisonVar()));
       if (data.cross_identity) ClusterPlot.renderCrossTab('cluster-cross-identity', ensureArray(data.cross_identity), 'Identity');
       this._showIdentityHelper(clusters);
       // Render comparison UMAP if selected
@@ -1465,6 +1471,9 @@ const App = {
     if (!data) return;
     const viz = ensureArray(data.visualization);
     if (!viz.length) return;
+    // R34: a colour column the cached run does not carry falls back to the first carried one.
+    const carried = ensureArray(data.meta_cols);
+    if (colorBy !== 'cluster' && carried.length && !carried.includes(colorBy)) colorBy = carried[0];
     const targetId = containerId || 'cluster-scatter-chart';
     const container = document.getElementById(targetId);
     container.innerHTML = '';
