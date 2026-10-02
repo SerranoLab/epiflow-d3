@@ -1280,10 +1280,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_random_forest(
       store$filtered_data,
-      target_var         = params$target_var %||% "genotype",
+      target_var         = g$col,
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
       selected_features  = params$selected_features,
@@ -1324,10 +1325,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_gbm(
       store$filtered_data,
-      target_var         = params$target_var %||% "genotype",
+      target_var         = g$col,
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
       selected_features  = params$selected_features,
@@ -1355,10 +1357,11 @@ function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_diagnostic_cv(
       store$filtered_data,
-      target_var         = params$target_var %||% "genotype",
+      target_var         = g$col,
       method             = params$method %||% "rf",
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
@@ -1378,10 +1381,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     compute_signatures(
       store$filtered_data,
-      target_var = params$target_var %||% "genotype",
+      target_var = g$col,
       h3_markers = params$selected_markers %||% store$metadata$h3_markers
     ),
     error = function(e) list(error = paste("Signatures failed:", e$message))
@@ -1396,10 +1400,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     compute_signatures_diagnostic(
       store$filtered_data,
-      target_var = params$target_var %||% "genotype",
+      target_var = g$col,
       h3_markers = params$selected_markers %||% store$metadata$h3_markers,
       stratify_by = if (!is.null(params$stratify_by) && params$stratify_by != "None") params$stratify_by else NULL,
       n_clusters = if (!is.null(params$n_clusters)) as.integer(params$n_clusters) else NULL

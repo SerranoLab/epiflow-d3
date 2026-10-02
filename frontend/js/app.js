@@ -2286,9 +2286,10 @@ const App = {
     const baseline = (100 / n).toFixed(1);
     // Circularity guardrail: classifying identity from the markers that defined
     // it is tautological, so near-perfect accuracy is not evidence of anything.
-    const circular = String(tv).toLowerCase() === 'identity'
+    // R34: any target derived from the features (identity, cell_cycle, gate_population, cluster_identity).
+    const circular = isDerivedGrouping(tv)
       ? `<div style="margin-top:6px;padding:6px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;font-size:11px;color:#9a3412;">
-      <strong>⚠ Circularity:</strong> if this identity was gated from these same markers, high accuracy is expected and not a finding. For a meaningful test, classify genotype or condition instead.</div>`
+      <strong>⚠ Circularity:</strong> ${groupingLabel(tv)} was derived from these same markers (gated, clustered or assigned on them), so high accuracy is expected and not a finding. For a meaningful test, classify the comparison variable (e.g. genotype or condition) instead.</div>`
       : '';
     return `<div style="margin-bottom:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e3a5f;">
       <strong>Classifying ${tv}</strong> — ${n} classes${classes.length ? ` (${classes.join(', ')})` : ''}
@@ -2737,7 +2738,7 @@ const App = {
           html += '</tr>';
         });
         html += '</tbody></table></div>';
-        const targetVar = document.getElementById('ml-target')?.value || 'genotype';
+        const targetVar = data.target_var || document.getElementById('ml-target')?.value || DataManager.getComparisonVar();   // R34
         const groups = ensureArray(data.groups);
         // In LMM: marker ~ genotype, estimate is for non-reference vs reference
         // R uses alphabetical reference by default, or user's selected reference
@@ -3064,7 +3065,7 @@ const App = {
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
     // Title
-    const targetVar = document.getElementById('ml-target')?.value || 'genotype';
+    const targetVar = document.getElementById('ml-target')?.value || DataManager.getComparisonVar();   // R34 (groups are the target's levels)
     svg.append('text')
       .attr('class', 'chart-title')
       .attr('x', totalW / 2).attr('y', 18)
