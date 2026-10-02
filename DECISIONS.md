@@ -1273,6 +1273,85 @@ equals that genotype's distinct-cell count, not 5× it.
 
 ---
 
+## F4 — OmiQ Import tab: replaces the Shiny converter (closes R21; delivers R32 (1) and (2))
+Status: in progress (2026-10-02); branch `features/import`; one commit per step; v1.7.0
+
+Why. EpiFlow only read `.rds` files written by the external Shiny converter
+(v5.1), which never transforms marker channels (it assumes OmiQ's scaled
+export), applies one global cofactor to the DNA channel only, parses
+genotype / replicate from `[bracket]` / `Well_` filename patterns the NPC
+exports do not have, has no sample sheet, and stamps a single attribute
+(`epiflow_mode`). R21's validation showed OmiQ's scaled export is exactly
+`asinh(raw / cofactor)` with per-channel cofactors from the Scaling CSV
+matched on `Primary___Secondary`. R33's lesson: every grouping column is an
+explicit, validated, echoed request parameter.
+
+Fixtures (commit 0, rebuilt 2026-10-02 as a fixtures follow-up). The full
+exports are not tracked: they live in `OMIQ/` at the repo root (git-ignored;
+`$EPIFLOW_OMIQ_FIXTURES`, default `OMIQ`): `npc_raw/` + `npc_scaled/`
+(tasks 38 / 39, 8 stained files) and `npc_raw_blank/` + `npc_scaled_blank/`
+(tasks 42 / 43, + `14-Blank.fcs`) of OmiQ workflow 183012389097095, plus
+`Scaling PAX6 1000-183012389097095-29.csv` (Pax6 PE cofactor 1000). An
+earlier set (tasks 27 / 28 with Scaling task 17, Pax6 PE cofactor 9900) was
+superseded the same day: the larger cofactor hid the PE negatives' spread
+(see the R32 help-text note; Roederer 2001, Parks 2006).
+`tools/make_omiq_fixtures.R` (seed 42)
+writes 2,000-row subsamples, stratified by `OmiqFileIndex` and matched
+raw / scaled on the key `(OmiqFileIndex, Orig_Row_Number)` (the blank pair
+keeps 500 blank rows), to `tests/fixtures/omiq/` with the Scaling CSV whole
+and a sample sheet; `tests/fixtures/omiq/README.md` quotes each export's
+`_OMIQ-context.txt`. On the subsample every channel matches
+`asinh(raw / cofactor)` to 9e-5. Reader: base `read.csv` reads the 24 MB
+export in under a second, so no new package is added to the image.
+
+Data contract (commit 1, R21). See the R21 entry: attributes read before any
+dplyr step, legacy files warn, `n_cells_source / n_cells_kept / ingest_seed`.
+
+F4a (commit 2) — upload + inspect. `api/R/import.R`: `omiq_channels()` (roles
+h3 / phenotypic / dna / ph3 / filter / file / row / meta from the converter's
+regexes; EpiFlow names `FxCycle`, `phH3`, `Pax6_PE`, `H3K27me3`),
+`omiq_scaling()` (key = literal `Primary___Secondary`; bare primary when the
+secondary is empty), `omiq_sample_sheet()` (required `file, condition,
+genotype, replicate`; optional `identity` — a value or an export filter
+column name — and `role = blank`; every export file mapped exactly once;
+group preview = samples per condition × genotype with `single_replicate`),
+`omiq_scale_check()` (a declared-raw export whose channels all stay below 50
+is refused as already transformed), `omiq_cofactor_table()` (OmiQ value by
+exact key; suggestion = `stats::mad` (1.4826 × MAD) of the blank's raw values,
+rule `blank_mad`, DNA excluded; without a blank, MAD of the stained values
+below the lowest mode, rule `negative_mode`, `weaker = TRUE`), and the
+density helpers `omiq_density_peaks / omiq_find_mode / omiq_find_valley`
+ported from the Shiny app with the debris guard (values below the 1st
+percentile ignored; the two TALLEST prominent peaks, ordered by position;
+one prominent peak → 90th percentile, fewer than 50 values → 75th, each
+named in `rule`). Endpoints `POST /api/import/upload` (multipart raw /
+scaling / sample_sheet, `declared_scale`) and
+`POST /api/import/inspect/<import_id>`; import entries live in `data_store`
+(kind = "import") and are pruned with sessions. Declared-scaled exports
+(user rule, 2026-10-02): with a Scaling CSV, `omiq_back_transform()` gives
+raw = c × sinh(x) per channel and the identical path follows (cofactor panel,
+suggestions, transform, stamps) with `source_scale = "scaled"`; channels
+absent from the Scaling CSV stay on the scaled axis and are listed. Without a
+Scaling CSV (optional only for a scaled export) the values are kept as they
+are, every channel's rule is `unknown` and a warning is returned; such a file
+is legacy-like for cofactor-dependent features. A raw export declared scaled,
+or a scaled export declared raw, is refused by the scale check.
+Finding (2026-10-02): the first export set (tasks 27 / 28, Scaling task 17)
+carried a Pax6 PE cofactor of 9900; it reproduced the scaled export but hid
+the PE negatives' spread, so the set was re-exported with 1000 (tasks 38 /
+39 / 42 / 43, Scaling task 29), which the fixtures and tests now use.
+
+Import (commits F4b–F4c, to follow). Per-channel arcsinh from the chosen
+cofactors; DNA at the chosen cofactor, gating at `dna_gating_cofactor`
+(default = the chosen DNA cofactor); cell-cycle gating ported from the Shiny
+app (mode-aligned G0/G1 per sample, valley G2/M threshold, data-driven phH3
+threshold, optional S phase, `s_rule = "fraction_of_g2_threshold"`); per-sample
+QC (G1-mode CV, G2−G1 spacing vs ln 2 ≈ 0.69, flagged outside 0.55–0.85);
+blank excluded from groups; a one-replicate group blocks export unless
+confirmed; run / progress / result endpoints; the Import tab UI.
+
+---
+
 ## F3 — Gating plot coloured by any label, contours per level, level × quadrant purity table
 Status: done (2026-10-02), branch features/gating-color, toward v1.6.1 (audit doc "three features", F3)
 

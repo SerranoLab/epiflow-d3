@@ -22,6 +22,7 @@ source("phase2.R")
 source("phase3.R")
 source("separation.R")
 source("interpret.R")
+source("import.R")       # F4: OmiQ Import tab
 
 # In-memory data store (per-session; keyed by upload ID)
 # In production, consider Redis or file-based caching
@@ -1503,6 +1504,91 @@ prune_idle_sessions <- function(ttl_min = NULL) {
     cat(sprintf("Pruned %d idle session(s) (idle > %g min).\n", length(stale), ttl_min))
   }
   invisible(NULL)
+}
+
+# ============================================================================
+# F4: OmiQ IMPORT  (uses import.R)
+# ============================================================================
+
+# Save one multipart part (raw bytes, temp path, or a list with datapath /
+# value / content) to `path`; same shapes as /api/upload. Returns NULL or an
+# error string.
+.save_upload_part <- function(part, path) {
+  if (is.null(part)) return("missing")
+  if (is.raw(part)) { writeBin(part, path); return(NULL) }
+  if (is.character(part) && length(part) == 1 && file.exists(part)) { file.copy(part, path, overwrite = TRUE); return(NULL) }
+  if (is.list(part)) {
+    if (!is.null(part$datapath) && file.exists(part$datapath)) { file.copy(part$datapath, path, overwrite = TRUE); return(NULL) }
+    for (k in c("value", "content")) if (!is.null(part[[k]]) && is.raw(part[[k]])) { writeBin(part[[k]], path); return(NULL) }
+    raw_elem <- Filter(is.raw, part)
+    if (length(raw_elem)) { writeBin(raw_elem[[1]], path); return(NULL) }
+  }
+  paste("unrecognized upload part:", class(part)[1])
+}
+
+# A multipart TEXT field arrives as raw bytes, a character, or a list with
+# value / content depending on the plumber parser; return it as one string.
+.form_text <- function(part, default = "") {
+  if (is.null(part)) return(default)
+  if (is.raw(part)) return(trimws(rawToChar(part)))
+  if (is.character(part)) return(trimws(part[1]))
+  if (is.list(part)) {
+    for (k in c("value", "content")) if (!is.null(part[[k]])) return(.form_text(part[[k]], default))
+    raw_elem <- Filter(is.raw, part); if (length(raw_elem)) return(trimws(rawToChar(raw_elem[[1]])))
+    chr_elem <- Filter(is.character, part); if (length(chr_elem)) return(trimws(chr_elem[[1]][1]))
+  }
+  default
+}
+
+get_import <- function(import_id) {
+  import_id <- sanitize_session_id(import_id)
+  if (!nzchar(import_id) || !exists(import_id, envir = data_store)) return(NULL)
+  s <- data_store[[import_id]]
+  if (!identical(s$kind, "import")) return(NULL)
+  data_store[[import_id]]$last_access <- Sys.time()
+  data_store[[import_id]]
+}
+
+#* Upload the three import files (multipart: raw, scaling, sample_sheet).
+#* declared_scale: "raw" (default) or "scaled" — what the export is claimed to be.
+#* @post /api/import/upload
+#* @parser multi
+#* @parser octet
+#* @serializer json list(auto_unbox = TRUE)
+function(req, res) {
+  body <- req$body
+  dir <- tempfile("epiflow_import_"); dir.create(dir)
+  paths <- list(raw = file.path(dir, "raw.csv"), scaling = file.path(dir, "scaling.csv"), sample_sheet = file.path(dir, "sample_sheet.csv"))
+  declared <- if (identical(tolower(.form_text(body$declared_scale, "raw")), "scaled")) "scaled" else "raw"
+  for (k in names(paths)) {
+    err <- .save_upload_part(body[[k]], paths[[k]])
+    # The Scaling CSV is optional only for a declared-scaled export (values are then kept, cofactor unknown).
+    if (!is.null(err) && k == "scaling" && declared == "scaled") { paths$scaling <- NULL; next }
+    if (!is.null(err)) { res$status <- 400; return(list(error = paste0("Form field '", k, "': ", err, ". Upload the OmiQ export, the Scaling CSV and the sample sheet."))) }
+  }
+  import_id <- generate_session_id("imp_")
+  data_store[[import_id]] <- list(kind = "import", dir = dir, paths = paths, declared_scale = declared,
+                                  created = Sys.time(), last_access = Sys.time())
+  prune_data_store(); prune_idle_sessions()
+  list(import_id = import_id, declared_scale = data_store[[import_id]]$declared_scale,
+       files = list(raw = file.size(paths$raw), scaling = if (is.null(paths$scaling)) NA else file.size(paths$scaling), sample_sheet = file.size(paths$sample_sheet)))
+}
+
+#* Inspect an import: channels, files, sample-sheet validation, group preview,
+#* cofactor table with suggestions, scale check.
+#* @post /api/import/inspect/<import_id>
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
+function(import_id, req) {
+  imp <- get_import(import_id)
+  if (is.null(imp)) return(list(error = "Import not found (upload the three files first)."))
+  res <- tryCatch(omiq_inspect(imp$paths$raw, imp$paths$scaling, imp$paths$sample_sheet, declared = imp$declared_scale),
+                  error = function(e) list(error = paste("Inspect failed:", e$message)))
+  if (is.null(res$error)) {
+    res$import_id <- import_id
+    res$sheet_template <- omiq_sheet_template(res$files$file)
+    data_store[[sanitize_session_id(import_id)]]$inspect <- res[setdiff(names(res), "sheet_template")]
+  }
+  res
 }
 
 # ============================================================================
