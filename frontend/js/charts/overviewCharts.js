@@ -4,11 +4,12 @@
 
 const OverviewCharts = {
 
-  renderCards(containerId, data) {
+  renderCards(containerId, data, compLabel) {
     const el = document.getElementById(containerId);
+    const levelsLabel = compLabel ? `${compLabel} levels` : 'Conditions';   // R33: card names the comparison variable
     el.innerHTML = `
       <div class="ov-card"><div class="ov-card-value">${Number(data.n_cells).toLocaleString()}</div><div class="ov-card-label">Total Cells</div></div>
-      <div class="ov-card"><div class="ov-card-value">${data.n_conditions}</div><div class="ov-card-label">Conditions</div></div>
+      <div class="ov-card"><div class="ov-card-value">${data.n_conditions}</div><div class="ov-card-label" style="text-transform:capitalize;">${levelsLabel}</div></div>
       <div class="ov-card"><div class="ov-card-value">${data.n_identities}</div><div class="ov-card-label">Identities</div></div>
       <div class="ov-card"><div class="ov-card-value">${data.n_replicates}</div><div class="ov-card-label">Replicates</div></div>
       <div class="ov-card"><div class="ov-card-value">${data.n_h3_markers}</div><div class="ov-card-label">H3-PTM Markers</div></div>
@@ -417,7 +418,7 @@ const OverviewCharts = {
       colorScale = conditionColorScale;
     } else {
       try {
-        colorScale = getColorScale('genotype', conditions, DataManager.serverPalette);
+        colorScale = getColorScale(condCol || 'genotype', conditions, DataManager.serverPalette);   // R33: colour by the comparison variable
       } catch (e) {
         colorScale = d3.scaleOrdinal().domain(conditions).range(d3.schemeTableau10);
       }

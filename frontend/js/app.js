@@ -284,7 +284,9 @@ const App = {
       const opts = [...new Set([...uniqueGroupOpts, 'replicate'])];
       splitSel.innerHTML = opts.map(col =>
         `<option value="${col}">Split by ${col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>`).join('');
+      // R33: the default follows the comparison variable (loadOverview sets it until the user picks a split).
       splitSel.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
+      delete splitSel.dataset.userSet;
     }
 
     // Populate comparison variable dropdown
@@ -382,6 +384,7 @@ const App = {
         this.populateCustomColors(compSelect.value);
         this.syncStratifyOptions();   // R18
         this.markStatsStale();        // results were computed with the old comparison variable
+        if (this.currentTab === 'overview') this.loadOverview();   // R33: count charts follow the comparison variable
       });
     }
     // Clear quadrant gate filter
@@ -682,21 +685,27 @@ const App = {
 
   async loadOverview() {
     try {
-      // F1: the marker summaries split by whichever column the Split-by select names.
+      // R33: every count chart groups by the sidebar comparison variable.
+      const compVar = DataManager.getComparisonVar() || 'genotype';
+      // F1: the marker summaries split by whichever column the Split-by select
+      // names; until the user picks one, the split follows the comparison variable.
       const splitSel = document.getElementById('overview-split');
-      const stratifyBy = (splitSel && splitSel.value) ? splitSel.value : DataManager.getComparisonVar();
-      const data = await EpiFlowAPI.getOverview({ stratify_by: stratifyBy });
+      if (splitSel && !splitSel.dataset.userSet && [...splitSel.options].some(o => o.value === compVar)) splitSel.value = compVar;
+      const stratifyBy = (splitSel && splitSel.value) ? splitSel.value : compVar;
+      const data = await EpiFlowAPI.getOverview({ comparison_var: compVar, stratify_by: stratifyBy });
       if (data.error) { this.showInlineMessage('overview-message', data.error, 'error'); return; }
-      OverviewCharts.renderCards('overview-cards', data);
+      const condCol = data.condition_col || compVar;
+      const condLabel = condCol.replace(/_/g, ' ');
+      document.querySelectorAll('.overview-comp-label').forEach(el => { el.textContent = condLabel; });
+      OverviewCharts.renderCards('overview-cards', data, condLabel);
 
       // Bar charts for cell counts
       const condCounts = ensureArray(data.condition_counts);
       const idCounts = ensureArray(data.identity_counts);
       const cycleCounts = ensureArray(data.cycle_counts);
       const repCounts = ensureArray(data.replicate_counts);
-      const condCol = data.condition_col || 'genotype';
 
-      OverviewCharts.renderBarChart('overview-condition-chart', condCounts, condCol, 'n', 'Cells per Condition');
+      OverviewCharts.renderBarChart('overview-condition-chart', condCounts, condCol, 'n', `Cells per ${condLabel}`);
       OverviewCharts.renderBarChart('overview-replicate-chart', repCounts, 'replicate', 'n', 'Replicates');
 
       // Stratified grouped bar charts (identity/cycle/replicate by condition)
@@ -1062,7 +1071,7 @@ const App = {
     document.getElementById('run-all-ml-btn').addEventListener('click', () => this.runAllML());
     document.getElementById('run-diagnostic-btn').addEventListener('click', () => this.runDiagnostic());
     document.getElementById('refresh-overview-btn').addEventListener('click', () => this.loadOverview());
-    document.getElementById('overview-split')?.addEventListener('change', () => { if (this.currentTab === 'overview') this.loadOverview(); });
+    document.getElementById('overview-split')?.addEventListener('change', (e) => { e.target.dataset.userSet = '1'; if (this.currentTab === 'overview') this.loadOverview(); });
     document.getElementById('run-forest-btn').addEventListener('click', () => this.runForestDirect());
     document.getElementById('forest-marker-filter').addEventListener('change', () => { if (this.currentTab === 'forest') this.loadForest(); });
     document.getElementById('forest-stratify').addEventListener('change', () => { /* user clicks Generate to apply */ });

@@ -3,6 +3,13 @@
 Earlier release notes: `CHANGELOG_v1.2.0.md`. Finding IDs (R1 …, L1 …) refer to
 the September 2026 publication audit; each has an entry in `DECISIONS.md`.
 
+## EpiFlow D3 v1.5.1 — 2026-10-01
+
+- **R33** — Overview count charts, cross table, "levels" card and the default
+  marker-distribution split group by the sidebar comparison variable
+  (`comparison_var` on `/api/data/overview`; headings name the variable); they
+  grouped by genotype regardless.
+
 ## EpiFlow D3 v1.5.0 — 2026-10-01
 
 The first feature release after the audit (branch `features/overview-violin`):
