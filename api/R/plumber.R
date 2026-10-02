@@ -1002,13 +1002,15 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   compute_correlations(
     store$filtered_data,
     h3_markers = store$metadata$h3_markers,
     method = params$method %||% "pearson",
     include_phenotypic = isTRUE(params$include_phenotypic),
     phenotypic_markers = store$metadata$phenotypic_markers,
-    selected_markers = params$selected_markers
+    selected_markers = params$selected_markers,
+    comparison_var = g$col
   )
 }
 
@@ -1049,14 +1051,14 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     compute_per_group_correlation(
       store$filtered_data,
       h3_markers = store$metadata$h3_markers,
       # R4: the frontend sends the active comparison variable as group_by;
       # the test is replicate-level, so there is no cells-as-N option here.
-      group_by = params$group_by %||% params$comparison_var %||% geno_col,
+      group_by = g$col,
       method = params$method %||% "pearson",
       include_phenotypic = isTRUE(params$include_phenotypic),
       phenotypic_markers = store$metadata$phenotypic_markers

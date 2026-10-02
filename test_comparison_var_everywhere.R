@@ -37,6 +37,9 @@ rep_idx <- as.integer(factor(ex_df$replicate, levels = unique(ex_df$replicate)))
 rep_within <- ave(rep_idx, ex_df$genotype, FUN = function(i) as.integer(factor(i)))
 ex_df$condition <- ifelse(rep_within <= 2, "ctrl", "treated")
 stopifnot(length(unique(paste(ex_df$genotype, ex_df$condition))) == 4)
+# `treatment` varies WITHIN a replicate (two wells per donor): replicate × treatment is the unit for a treatment contrast.
+cell_no <- as.integer(factor(ex_df$cell_id, levels = unique(ex_df$cell_id)))
+ex_df$treatment <- ifelse(cell_no %% 2 == 0, "A", "B")
 tmp <- tempfile(fileext = ".rds"); saveRDS(ex_df, tmp)
 cells <- ex_df %>% distinct(cell_id, .keep_all = TRUE)
 up <- fromJSON(content(POST(paste0(BASE, "/api/upload"), body = list(file = upload_file(tmp)), encode = "multipart", timeout(300)), as = "text", encoding = "UTF-8"), simplifyVector = FALSE)
@@ -110,6 +113,25 @@ cm2 <- post(paste0("/api/viz/cellcycle-markers/", sid), list(phase = "all", comp
 check(!is.null(cm2$error) && grepl("comparison_var column not found", chr(cm2$error), fixed = TRUE), "cellcycle-markers: unknown column returns the error")
 check(has("frontend/js/app.js", "DataManager.serverPalette?.[DataManager.getComparisonVar()] || {};   // R34: groups are levels of the comparison variable"),
       "cell-cycle marker chart palette is keyed by the comparison variable, not genotype")
+
+# ================================================================== Correlation
+cat("\n--- Correlation: replicate-level block aggregates to replicate × comparison_var; differential correlation groups by it ---\n")
+n_rep <- dplyr::n_distinct(cells$replicate)
+co1 <- post(paste0("/api/stats/correlation/", sid), list(method = "pearson", comparison_var = "condition"))
+check(is.null(co1$error) && identical(chr(co1$comparison_var), "condition") && num(co1$n_replicates) == n_rep,
+      sprintf("comparison_var = condition (one level per replicate): %d replicate rows, column echoed", n_rep))
+co2 <- post(paste0("/api/stats/correlation/", sid), list(method = "pearson", comparison_var = "treatment"))
+check(is.null(co2$error) && identical(chr(co2$comparison_var), "treatment") && num(co2$n_replicates) == 2 * n_rep,
+      sprintf("comparison_var = treatment (two levels within each replicate): %d replicate × treatment rows", 2 * n_rep))
+co3 <- post(paste0("/api/stats/correlation/", sid), list(method = "pearson"))
+check(identical(chr(co3$comparison_var), "genotype") && num(co3$n_replicates) == n_rep, "no key: the genotype column, echoed")
+cd1 <- post(paste0("/api/phase2/correlation-diff/", sid), list(method = "pearson", group_by = "condition"))
+check(is.null(cd1$error) && setequal(chr(cd1$groups), COND) && identical(chr(cd1$group_by), "condition"), "correlation-diff: per-group matrices per condition level, group_by echoed")
+cd2 <- post(paste0("/api/phase2/correlation-diff/", sid), list(method = "pearson", comparison_var = "condition"))
+check(is.null(cd2$error) && identical(chr(cd2$group_by), "condition"), "correlation-diff: comparison_var in the body is used when group_by is absent")
+check(has("frontend/js/app.js", "comparison_var: DataManager.getComparisonVar() });   // R34: replicate-level block") &&
+      lacks("frontend/js/app.js", "data.group_by || 'genotype'") && lacks("frontend/js/charts/correlationPlot.js", "|| 'genotype'"),
+      "frontend sends comparison_var on the global correlation; no genotype literal in subtitle or colour fallback")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

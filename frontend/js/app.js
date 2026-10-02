@@ -2267,7 +2267,7 @@ const App = {
     try {
       const method = document.getElementById('corr-method').value;
       const includePheno = document.getElementById('corr-include-pheno').checked;
-      const data = await EpiFlowAPI.runCorrelation({ method, include_phenotypic: includePheno });
+      const data = await EpiFlowAPI.runCorrelation({ method, include_phenotypic: includePheno, comparison_var: DataManager.getComparisonVar() });   // R34: replicate-level block is replicate × comparison variable
       // Hide diff results when showing global
       document.getElementById('corr-diff-results').style.display = 'none';
       CorrelationPlot.render('correlation-chart', data, {
@@ -3596,7 +3596,7 @@ const App = {
           method: data.method
         }, {
           title: `${gr} (n=${Number(pg.n_cells).toLocaleString()})`,
-          subtitle: `${data.method} correlation · ${data.group_by || 'genotype'}-stratified${pg.n_replicates ? ' · ' + pg.n_replicates + ' replicates' : ''}`
+          subtitle: `${data.method} correlation · ${data.group_by || DataManager.getComparisonVar()}-stratified${pg.n_replicates ? ' · ' + pg.n_replicates + ' replicates' : ''}`
         });
       });
 
