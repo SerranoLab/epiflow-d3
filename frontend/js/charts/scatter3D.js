@@ -15,7 +15,7 @@ const Scatter3D = {
     this.dispose(containerId);
     container.innerHTML = '';
 
-    const colorBy = options.colorBy || 'genotype';
+    const colorBy = options.colorBy || DataManager.getComparisonVar();   // R34
     const axisLabels = options.axisLabels || ['X', 'Y', 'Z'];
     const title = options.title || '';
     const pointSize = options.pointSize || 2.5;

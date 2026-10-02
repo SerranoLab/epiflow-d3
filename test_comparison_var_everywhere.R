@@ -235,5 +235,22 @@ check(has("frontend/js/app.js", "'pca-color':        { prefix: 'Color:' },") && 
       "pca-color is a managed grouping select; the run sends the shared list as meta_cols; the chart has no genotype fallback")
 check(lacks("frontend/index.html", "replicates of the same genotype should cluster together"), "PCA help text no longer says genotype")
 
+# ================================================================== UMAP
+cat("\n--- UMAP: /api/phase3/umap carries the requested metadata columns (meta_cols) and echoes them ---\n")
+um1 <- post(paste0("/api/phase3/umap/", sid), list(n_neighbors = 15, min_dist = 0.1, max_cells = 2000, meta_cols = I(c("condition", "genotype"))))
+if (!is.null(um1$error) && grepl("uwot", chr(um1$error))) cat("  [SKIP] uwot not installed\n") else {
+  check(is.null(um1$error) && setequal(chr(um1$meta_cols), c("condition", "genotype")), "meta_cols echoed as requested")
+  check(all(c("condition", "genotype", "UMAP1") %in% names(um1$embedding[[1]])) && setequal(unique(chr(lapply(um1$embedding, `[[`, "condition"))), COND),
+        "every embedding row carries condition (ctrl / treated): the split-by panels can use it")
+  check(!"identity" %in% names(um1$embedding[[1]]), "a column not requested is not carried")
+  um2 <- post(paste0("/api/phase3/umap/", sid), list(n_neighbors = 15, min_dist = 0.1, max_cells = 2000))
+  check(is.null(um2$error) && all(c("genotype", "replicate", "cell_cycle", "identity", "condition") %in% chr(um2$meta_cols)), "no meta_cols: the historical column set is carried")
+}
+check(has("frontend/js/app.js", "'umap-color':       { prefix: 'Color:' },") && has("frontend/js/app.js", "const splitVar = this._umapSplitVar(data);") &&
+      has("frontend/js/app.js", "const subset = emb.filter(d => d[splitVar] === gName);") && lacks("frontend/js/app.js", "emb.map(d => d.genotype)") &&
+      lacks("frontend/js/charts/scatter3D.js", "|| 'genotype'"),
+      "umap-color is a managed select; split panels use the comparison variable; no genotype literal")
+check(has("frontend/index.html", 'Split by <span id="umap-split-label">') && lacks("frontend/index.html", "compare genotypes side-by-side"), "split checkbox and help name the comparison variable")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

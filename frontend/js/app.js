@@ -408,6 +408,7 @@ const App = {
     'diag-stratify':    { prefix: 'By', none: 'No stratification', default: 'None' },
     'ml-target':        { prefix: 'Target:' },
     'pca-color':        { prefix: 'Color:' },
+    'umap-color':       { prefix: 'Color:' },   // keeps its marker <optgroup>
   },
 
   groupingOptions() {
@@ -441,6 +442,8 @@ const App = {
 
   refreshGroupingSelects() {
     Object.entries(this.GROUPING_SELECTS).forEach(([selId, cfg]) => this.fillGroupingSelect(selId, cfg));
+    const lab = document.getElementById('umap-split-label');   // R34: "Split by <comparison variable>"
+    if (lab) lab.textContent = groupingLabel(DataManager.getComparisonVar());
   },
 
   bindGroupingSelects() {
@@ -1219,7 +1222,8 @@ const App = {
       const data = await EpiFlowAPI.runUMAPPhase3({
         n_neighbors: nNeighbors,
         min_dist: minDist,
-        include_phenotypic: inclPheno
+        include_phenotypic: inclPheno,
+        meta_cols: this.groupingOptions()   // R34: only the columns the colour / split controls can show
       });
       if (data.error) throw new Error(data.error);
       this._umapData = data;
@@ -1240,6 +1244,18 @@ const App = {
     finally { this.hideLoading(); }
   },
 
+  // R34: split panels follow the comparison variable; if the cached embedding
+  // does not carry it (changed after the run), fall back to the first carried
+  // column so the panels still mean something, and say which in the label.
+  _umapSplitVar(data) {
+    const want = DataManager.getComparisonVar();
+    const carried = ensureArray(data && data.meta_cols);
+    const v = (!carried.length || carried.includes(want)) ? want : carried[0];
+    const lab = document.getElementById('umap-split-label');
+    if (lab) lab.textContent = groupingLabel(v);
+    return v;
+  },
+
   /** Render UMAP from cached data (no re-run needed for color/size/split changes) */
   _renderUMAP() {
     const data = this._umapData;
@@ -1251,10 +1267,12 @@ const App = {
     if (!emb.length) return;
 
     const isMarker = colorSel.startsWith('marker:');
-    const colorBy = isMarker ? colorSel.replace('marker:', '') : colorSel;
+    const colorBy = isMarker ? colorSel.replace('marker:', '') : this._dimredColorBy('umap-color', data);
+    // R34: the split is by the sidebar comparison variable, whatever column that is.
+    const splitVar = this._umapSplitVar(data);
 
     if (isSplit) {
-      const genotypes = [...new Set(emb.map(d => d.genotype))].sort();
+      const genotypes = [...new Set(emb.map(d => d[splitVar]).filter(v => v !== undefined && v !== null))].sort();
       const grid = document.getElementById('umap-split-grid');
       grid.innerHTML = '';
       if (!genotypes.length) {
@@ -1274,8 +1292,8 @@ const App = {
           panel.id = cid;
           panel.style.minHeight = panelMinH;
           grid.appendChild(panel);
-          const subset = emb.filter(d => d.genotype === gName);
-          this._renderUMAPScatter(cid, subset, colorBy, isMarker, dotSize, gName, emb);
+          const subset = emb.filter(d => d[splitVar] === gName);
+          this._renderUMAPScatter(cid, subset, colorBy, isMarker, dotSize, `${groupingLabel(splitVar)}: ${gName}`, emb);
         });
       }
     } else {

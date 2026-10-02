@@ -1195,7 +1195,8 @@ function(session_id, req) {
       n_neighbors         = params$n_neighbors %||% 15,
       min_dist            = params$min_dist %||% 0.1,
       include_phenotypic  = isTRUE(params$include_phenotypic),
-      max_cells           = params$max_cells %||% 80000
+      max_cells           = params$max_cells %||% 80000,
+      meta_cols           = params$meta_cols   # R34: the columns the colour / split controls can show
     ),
     error = function(e) list(error = paste("UMAP failed:", e$message))
   )

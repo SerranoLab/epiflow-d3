@@ -19,14 +19,12 @@
 compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
                          n_neighbors = 15, min_dist = 0.1,
                          include_phenotypic = FALSE,
-                         max_cells = 80000, seed = 42) {
+                         max_cells = 80000, seed = 42, meta_cols = NULL) {
   if (!requireNamespace("uwot", quietly = TRUE)) {
     return(list(error = "uwot package not installed. Run: install.packages('uwot')"))
   }
 
-  meta_base <- c("cell_id", "genotype", "replicate", "cell_cycle", "identity")
-  meta_extra <- intersect(c("timepoint", "cell_type", "condition"), names(data))
-  meta_all <- c(meta_base, meta_extra)
+  meta_all <- .dimred_meta_cols(data, meta_cols)   # R34: columns the colour / split controls can show
 
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
 
@@ -82,6 +80,7 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
   # Include metadata
   meta_present <- intersect(meta_all, names(wide))
   result_df <- dplyr::bind_cols(result_df, wide[, meta_present])
+  meta_out <- setdiff(meta_present, "cell_id")   # R34: echoed as meta_cols
 
   # Include ALL marker intensities (for FeaturePlot re-coloring without re-running)
   all_intensity_cols <- intersect(c(h3_cols, pheno_cols), names(wide))
@@ -108,7 +107,8 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
     min_dist = as.numeric(min_dist),
     markers_used = h3_cols,
     phenotypic_markers = pheno_cols,
-    all_markers = all_intensity_cols
+    all_markers = all_intensity_cols,
+    meta_cols = safe_I(meta_out)    # R34: the metadata columns each embedding row carries
   )
 }
 
