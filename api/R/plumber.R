@@ -11,7 +11,7 @@ library(jsonlite)
 # R10: single source of the app version. /api/health returns it, /api/metadata
 # echoes it, and the frontend fills its badge, footers and report from it —
 # no version literal lives in index.html or app.js. Bump here at deploy.
-EPIFLOW_VERSION <- "1.5.1"
+EPIFLOW_VERSION <- "1.6.0"
 
 # Source helper functions
 # NOTE: plumber::plumb() evaluates this file from its own directory (R/),
@@ -26,6 +26,28 @@ source("interpret.R")
 # In-memory data store (per-session; keyed by upload ID)
 # In production, consider Redis or file-based caching
 data_store <- new.env(parent = emptyenv())
+
+# ---- R34: grouping column from the request ----
+# Every endpoint that groups cells takes the column from the request: the
+# endpoint's own key (group_by / target_var / comparison_var), else
+# comparison_var in the same body, else the genotype column. The column must
+# exist in the session's filtered data (gate_population / cluster_identity are
+# there only while a gate or clustering is applied), and the payload echoes
+# the column used — nothing defaults to genotype silently.
+.resolve_grouping <- function(params, store, key = "comparison_var") {
+  col <- params[[key]] %||% params$comparison_var %||% store$metadata$genotype_col %||% "genotype"
+  col <- as.character(col)[1]
+  if (!col %in% names(store$filtered_data)) {
+    return(list(col = col, error = list(error = paste0(key, " column not found: ", col,
+      " (gate_population and cluster_identity exist only while a gate or clustering is applied)"))))
+  }
+  list(col = col, error = NULL)
+}
+.with_grouping <- function(res, ...) {
+  extra <- list(...)
+  if (is.list(res) && is.null(res$error)) for (nm in names(extra)) res[[nm]] <- extra[[nm]]
+  res
+}
 
 # ---- CORS configuration ----
 # EPIFLOW_CORS_ORIGIN: a comma-separated allowlist of exact origins. The
@@ -524,18 +546,11 @@ function(session_id, req) {
   cells <- data %>% dplyr::distinct(cell_id, .keep_all = TRUE)
   n_cells <- nrow(cells)
 
-  # Genotype/condition column
-  geno_col <- meta$genotype_col %||% "genotype"
-  if (!geno_col %in% names(cells)) geno_col <- "genotype"
-
   # R33: every count chart and cross-tab groups by the sidebar comparison
   # variable (default: the genotype column), not by genotype regardless.
   params <- req$body
-  comp_var <- params$comparison_var %||% geno_col
-  if (!comp_var %in% names(cells)) {
-    return(list(error = paste0("comparison_var column not found: ", comp_var,
-      " (gate_population and cluster_identity exist only while a gate or clustering is applied)")))
-  }
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34: shared resolver (R33 had its own)
+  comp_var <- g$col
 
   # Cells per level of the comparison variable
   condition_counts <- cells %>%
@@ -688,13 +703,24 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: group_by / color_by come from the request (else comparison_var, else
+  # the genotype column); "marker" is the overlay mode, not a column.
+  group_by <- if (identical(params$group_by, "marker")) "marker" else {
+    g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error); g$col
+  }
+  color_by <- if (identical(params$color_by, "marker")) "marker" else if (is.null(params$color_by)) {
+    if (!is.null(params$comparison_var)) { cb <- .resolve_grouping(params, store, "comparison_var"); if (!is.null(cb$error)) return(cb$error); cb$col }
+    else if (identical(group_by, "marker")) "marker" else group_by
+  } else {
+    cb <- .resolve_grouping(params, store, "color_by"); if (!is.null(cb$error)) return(cb$error); cb$col
+  }
   tryCatch(
-    if (identical(params$group_by, "marker") || identical(params$color_by, "marker")) {
+    if (identical(group_by, "marker") || identical(color_by, "marker")) {
       compute_ridge_overlay(
         store$filtered_data,
         markers    = params$markers,
-        group_by   = params$group_by %||% "genotype",
-        color_by   = params$color_by %||% "marker",
+        group_by   = group_by,
+        color_by   = color_by,
         h3_markers = store$metadata$h3_markers,
         phenotypic_markers = store$metadata$phenotypic_markers,
         bw         = params$bandwidth %||% "auto",
@@ -704,8 +730,8 @@ function(session_id, req) {
       compute_ridge_data(
         store$filtered_data,
         marker     = params$marker %||% store$metadata$h3_markers[1],
-        group_by   = params$group_by %||% "genotype",
-        color_by   = params$color_by %||% "genotype",
+        group_by   = group_by,
+        color_by   = color_by,
         bw         = params$bandwidth %||% "auto",
         h3_markers = store$metadata$h3_markers
       )
@@ -722,12 +748,19 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: group_by from the request (else comparison_var, else the genotype
+  # column); color_by only when it names a column.
+  g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error)
+  color_by <- NULL
+  if (!is.null(params$color_by)) {
+    cb <- .resolve_grouping(params, store, "color_by"); if (!is.null(cb$error)) return(cb$error); color_by <- cb$col
+  }
   # F2: markers vector -> one panel per marker; `marker` (single) still accepted.
   compute_violin_data(
     store$filtered_data,
     markers    = params$markers %||% params$marker %||% store$metadata$h3_markers[1],
-    group_by   = params$group_by %||% "genotype",
-    color_by   = params$color_by,
+    group_by   = g$col,
+    color_by   = color_by,
     h3_markers = store$metadata$h3_markers,
     scale_mode = params$scale_mode %||% "raw"
   )
@@ -741,9 +774,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: group_by from the request (else comparison_var, else the genotype column), echoed by the helper.
+  g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error)
   compute_identity_heatmap(
     store$filtered_data,
-    group_by = params$group_by %||% "identity",
+    group_by = g$col,
     include_phenotypic = isTRUE(params$include_phenotypic),
     phenotypic_markers = store$metadata$phenotypic_markers
   )
@@ -757,9 +792,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: comparison_var from the request (else the genotype column); the helper echoes it.
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)
   compute_cycle_distribution(
     store$filtered_data,
-    comparison_var = params$comparison_var %||% "genotype"
+    comparison_var = g$col
   )
 }
 
@@ -771,12 +808,14 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
-  compute_cycle_marker_analysis(
-    store$filtered_data,
-    phase = params$phase %||% "all",
-    comparison_var = params$comparison_var %||% geno_col
-  )
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
+  .with_grouping(
+    compute_cycle_marker_analysis(
+      store$filtered_data,
+      phase = params$phase %||% "all",
+      comparison_var = g$col
+    ),
+    comparison_var = g$col)
 }
 
 # ===========================================================================
@@ -800,15 +839,16 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   # R18: stratifying by the comparison variable can never be fit; say so plainly.
-  same_var <- .lmm_same_var_error(params$stratify_by, params$comparison_var %||% "genotype")
+  same_var <- .lmm_same_var_error(params$stratify_by, g$col)
   if (!is.null(same_var)) return(same_var)
   result <- fit_stratified_lmm(
     store$filtered_data,
     marker          = params$marker,
     stratify_by     = params$stratify_by,
     ref_level       = params$ref_level,
-    comparison_var  = params$comparison_var %||% "genotype",
+    comparison_var  = g$col,
     h3_marks        = store$metadata$h3_markers,
     use_cells_as_replicates = isTRUE(params$use_cells_as_replicates)
   )
@@ -816,7 +856,7 @@ function(session_id, req) {
   # R17: a zero-row result carries the reason in attr(, "reason"); say why.
   if (is.null(result) || nrow(result) == 0)
     return(list(error = paste0("Model could not be fit: ", .lmm_reason(result) %||% "no reason recorded")))
-  list(results = result)
+  list(results = result, comparison_var = g$col)
 }
 
 #* Run LMM across all selected markers
@@ -827,8 +867,10 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
+  comp_var <- g$col
   # R18: stratifying by the comparison variable can never be fit; say so plainly.
-  same_var <- .lmm_same_var_error(params$stratify_by, params$comparison_var %||% "genotype")
+  same_var <- .lmm_same_var_error(params$stratify_by, comp_var)
   if (!is.null(same_var)) return(same_var)
   # Use selected markers from frontend, fall back to all H3-PTMs
   markers <- params$markers %||% store$metadata$h3_markers
@@ -837,7 +879,6 @@ function(session_id, req) {
   # Replicate-awareness: mixed-model inference needs >= 2 biological replicates
   # per group. With one replicate the random effect is unidentifiable, so return
   # a clear message instead of an opaque "no models could be fit".
-  comp_var <- params$comparison_var %||% "genotype"
   if (!isTRUE(params$use_cells_as_replicates) &&
       "replicate" %in% names(store$filtered_data) &&
       comp_var %in% names(store$filtered_data)) {
@@ -861,7 +902,7 @@ function(session_id, req) {
     run_all_markers_lmm(
       store$filtered_data,
       markers         = markers,
-      comparison_var  = params$comparison_var %||% "genotype",
+      comparison_var  = comp_var,
       stratify_by     = params$stratify_by,
       ref_level       = params$ref_level,
       h3_markers      = store$metadata$h3_markers,
@@ -881,7 +922,7 @@ function(session_id, req) {
   result <- tryCatch(
     add_distribution_metrics(
       result, store$filtered_data,
-      comparison_var = params$comparison_var %||% "genotype",
+      comparison_var = comp_var,
       stratify_by    = params$stratify_by,
       h3_markers     = store$metadata$h3_markers
     ),
@@ -908,7 +949,7 @@ function(session_id, req) {
   # gone \u2014 no interval on d is computed anywhere; the only interval shown is
   # the LMM beta's t interval on the forest plot (replicate-aware).
 
-  list(results = result, caution_notes = caution_notes)
+  list(results = result, caution_notes = caution_notes, comparison_var = comp_var)
 }
 
 #* All-pairwise LMM contrasts + replicate-level EMD test for ONE marker.
@@ -923,7 +964,8 @@ function(session_id, req) {
   params <- req$body
   marker <- params$marker
   if (is.null(marker)) return(list(error = "No marker specified"))
-  comp  <- params$comparison_var %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
+  comp  <- g$col
   ref   <- params$ref_level
   strat <- if (!is.null(params$stratify_by) && params$stratify_by != "None") params$stratify_by else NULL
 
@@ -956,13 +998,15 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   compute_correlations(
     store$filtered_data,
     h3_markers = store$metadata$h3_markers,
     method = params$method %||% "pearson",
     include_phenotypic = isTRUE(params$include_phenotypic),
     phenotypic_markers = store$metadata$phenotypic_markers,
-    selected_markers = params$selected_markers
+    selected_markers = params$selected_markers,
+    comparison_var = g$col
   )
 }
 
@@ -978,12 +1022,12 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34; the helper echoes comparison_var
   tryCatch(
     compute_positivity(
       store$filtered_data,
       marker = params$marker,
-      comparison_var = params$comparison_var %||% geno_col,
+      comparison_var = g$col,
       h3_markers = store$metadata$h3_markers,
       manual_threshold = if (!is.null(params$threshold)) as.numeric(params$threshold) else NULL
     ),
@@ -1003,14 +1047,14 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     compute_per_group_correlation(
       store$filtered_data,
       h3_markers = store$metadata$h3_markers,
       # R4: the frontend sends the active comparison variable as group_by;
       # the test is replicate-level, so there is no cells-as-N option here.
-      group_by = params$group_by %||% params$comparison_var %||% geno_col,
+      group_by = g$col,
       method = params$method %||% "pearson",
       include_phenotypic = isTRUE(params$include_phenotypic),
       phenotypic_markers = store$metadata$phenotypic_markers
@@ -1045,7 +1089,7 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   all_markers <- c(store$metadata$h3_markers, store$metadata$phenotypic_markers)
 
   # Apply optional identity/cell cycle filters
@@ -1077,7 +1121,7 @@ function(session_id, req) {
       marker_y = params$marker_y %||% all_markers[min(2, length(all_markers))],
       threshold_x = if (!is.null(params$threshold_x)) as.numeric(params$threshold_x) else NULL,
       threshold_y = if (!is.null(params$threshold_y)) as.numeric(params$threshold_y) else NULL,
-      comparison_var = params$comparison_var %||% geno_col,
+      comparison_var = g$col,
       h3_markers = store$metadata$h3_markers,
       max_points = max_points
     )
@@ -1094,18 +1138,18 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
-    compute_quadrant_detail(
+    .with_grouping(compute_quadrant_detail(
       store$filtered_data,
       marker_x = params$marker_x,
       marker_y = params$marker_y,
       threshold_x = as.numeric(params$threshold_x),
       threshold_y = as.numeric(params$threshold_y),
       quadrant = params$quadrant,
-      comparison_var = params$comparison_var %||% geno_col,
+      comparison_var = g$col,
       h3_markers = store$metadata$h3_markers
-    ),
+    ), comparison_var = g$col),
     error = function(e) list(error = paste("Quadrant detail failed:", e$message))
   )
 }
@@ -1151,7 +1195,8 @@ function(session_id, req) {
       n_neighbors         = params$n_neighbors %||% 15,
       min_dist            = params$min_dist %||% 0.1,
       include_phenotypic  = isTRUE(params$include_phenotypic),
-      max_cells           = params$max_cells %||% 80000
+      max_cells           = params$max_cells %||% 80000,
+      meta_cols           = params$meta_cols   # R34: the columns the colour / split controls can show
     ),
     error = function(e) list(error = paste("UMAP failed:", e$message))
   )
@@ -1169,7 +1214,8 @@ function(session_id, req) {
       store$filtered_data,
       include_phenotypic = isTRUE(params$include_phenotypic),
       phenotypic_markers = store$metadata$phenotypic_markers,
-      n_components       = params$n_components %||% 5
+      n_components       = params$n_components %||% 5,
+      meta_cols          = params$meta_cols   # R34: the columns the colour control can show
     ),
     error = function(e) list(error = paste("PCA failed:", e$message))
   )
@@ -1182,6 +1228,7 @@ function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
   params <- req$body
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_advanced_clustering(
       store$filtered_data,
@@ -1192,7 +1239,9 @@ function(session_id, req) {
       linkage             = params$linkage %||% "ward.D2",
       resolution          = params$resolution %||% 1.0,
       include_phenotypic  = isTRUE(params$include_phenotypic),
-      max_cells           = params$max_cells %||% 50000
+      max_cells           = params$max_cells %||% 50000,
+      comparison_var      = g$col,              # R34: composition cross-tab is cluster × this
+      meta_cols           = params$meta_cols    # R34: the columns the colour controls can show
     ),
     error = function(e) list(error = paste("Clustering failed:", e$message))
   )
@@ -1229,10 +1278,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_random_forest(
       store$filtered_data,
-      target_var         = params$target_var %||% "genotype",
+      target_var         = g$col,
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
       selected_features  = params$selected_features,
@@ -1273,10 +1323,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_gbm(
       store$filtered_data,
-      target_var         = params$target_var %||% "genotype",
+      target_var         = g$col,
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
       selected_features  = params$selected_features,
@@ -1304,10 +1355,11 @@ function(session_id, req) {
   store <- get_session(session_id)
   if (is.null(store)) return(list(error = "Session not found"))
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     run_diagnostic_cv(
       store$filtered_data,
-      target_var         = params$target_var %||% "genotype",
+      target_var         = g$col,
       method             = params$method %||% "rf",
       h3_markers         = store$metadata$h3_markers,
       phenotypic_markers = store$metadata$phenotypic_markers,
@@ -1327,10 +1379,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     compute_signatures(
       store$filtered_data,
-      target_var = params$target_var %||% "genotype",
+      target_var = g$col,
       h3_markers = params$selected_markers %||% store$metadata$h3_markers
     ),
     error = function(e) list(error = paste("Signatures failed:", e$message))
@@ -1345,10 +1398,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  g <- .resolve_grouping(params, store, "target_var"); if (!is.null(g$error)) return(g$error)   # R34
   tryCatch(
     compute_signatures_diagnostic(
       store$filtered_data,
-      target_var = params$target_var %||% "genotype",
+      target_var = g$col,
       h3_markers = params$selected_markers %||% store$metadata$h3_markers,
       stratify_by = if (!is.null(params$stratify_by) && params$stratify_by != "None") params$stratify_by else NULL,
       n_clusters = if (!is.null(params$n_clusters)) as.integer(params$n_clusters) else NULL

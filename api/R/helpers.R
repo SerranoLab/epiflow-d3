@@ -994,7 +994,11 @@ compute_cycle_distribution <- function(data, comparison_var = "genotype") {
 compute_correlations <- function(data, h3_markers, method = "pearson",
                                 include_phenotypic = FALSE,
                                 phenotypic_markers = NULL,
-                                selected_markers = NULL) {
+                                selected_markers = NULL,
+                                comparison_var = "genotype") {
+  # R34: the replicate-level block aggregates to replicate × comparison_var
+  # means (a replicate that carries several levels of the comparison variable
+  # contributes one row per level); the payload echoes the column.
   # Phenotype-only: correlate phenotypic wide columns directly (no H3 value).
   pheno_only <- .epiflow_phenotype_only(data)
   if (pheno_only) {
@@ -1062,12 +1066,13 @@ compute_correlations <- function(data, h3_markers, method = "pearson",
 
   # ---- REPLICATE-LEVEL correlations (primary inference) ----
   # Aggregate each marker to replicate-level means, then correlate
-  if (!pheno_only && "replicate" %in% names(data) && "genotype" %in% names(data)) {
+  result$comparison_var <- comparison_var
+  if (!pheno_only && "replicate" %in% names(data) && comparison_var %in% names(data)) {
     tryCatch({
       # Build replicate-level means for H3 markers
       rep_wide_h3 <- data %>%
         dplyr::filter(H3PTM %in% h3_markers) %>%
-        dplyr::group_by(replicate, genotype, H3PTM) %>%
+        dplyr::group_by(replicate, .data[[comparison_var]], H3PTM) %>%
         dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
         tidyr::pivot_wider(names_from = H3PTM, values_from = value)
 
@@ -1077,12 +1082,12 @@ compute_correlations <- function(data, h3_markers, method = "pearson",
         if (length(pheno_cols_avail) > 0) {
           rep_pheno <- data %>%
             dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-            dplyr::group_by(replicate, genotype) %>%
+            dplyr::group_by(replicate, .data[[comparison_var]]) %>%
             dplyr::summarise(dplyr::across(dplyr::all_of(pheno_cols_avail),
                                            ~ mean(.x, na.rm = TRUE)),
                              .groups = "drop")
           rep_wide_h3 <- dplyr::left_join(rep_wide_h3, rep_pheno,
-                                           by = c("replicate", "genotype"))
+                                           by = c("replicate", comparison_var))
         }
       }
 

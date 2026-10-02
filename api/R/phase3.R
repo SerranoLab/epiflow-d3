@@ -3,18 +3,28 @@
 # Serrano Lab | Boston University
 # ============================================================================
 
+# ---- R34: metadata columns carried into dim-red / clustering payloads ----
+# `meta_cols` is the list of columns the frontend's colour / split controls can
+# show (comparison variable first, then genotype, identity, cell_cycle,
+# replicate, the metadata columns, gate_population / cluster_identity while
+# applied). Only columns present in the data are kept; the historical set is
+# the fallback when the request names none.
+.dimred_meta_cols <- function(data, meta_cols = NULL) {
+  default <- c("genotype", "replicate", "cell_cycle", "identity", "timepoint", "cell_type", "condition")
+  want <- if (is.null(meta_cols) || !length(meta_cols)) default else as.character(unlist(meta_cols))
+  unique(c("cell_id", intersect(want, names(data))))
+}
+
 # ---- UMAP with marker intensities for FeaturePlot ----
 compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
                          n_neighbors = 15, min_dist = 0.1,
                          include_phenotypic = FALSE,
-                         max_cells = 80000, seed = 42) {
+                         max_cells = 80000, seed = 42, meta_cols = NULL) {
   if (!requireNamespace("uwot", quietly = TRUE)) {
     return(list(error = "uwot package not installed. Run: install.packages('uwot')"))
   }
 
-  meta_base <- c("cell_id", "genotype", "replicate", "cell_cycle", "identity")
-  meta_extra <- intersect(c("timepoint", "cell_type", "condition"), names(data))
-  meta_all <- c(meta_base, meta_extra)
+  meta_all <- .dimred_meta_cols(data, meta_cols)   # R34: columns the colour / split controls can show
 
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
 
@@ -70,6 +80,7 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
   # Include metadata
   meta_present <- intersect(meta_all, names(wide))
   result_df <- dplyr::bind_cols(result_df, wide[, meta_present])
+  meta_out <- setdiff(meta_present, "cell_id")   # R34: echoed as meta_cols
 
   # Include ALL marker intensities (for FeaturePlot re-coloring without re-running)
   all_intensity_cols <- intersect(c(h3_cols, pheno_cols), names(wide))
@@ -96,17 +107,19 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
     min_dist = as.numeric(min_dist),
     markers_used = h3_cols,
     phenotypic_markers = pheno_cols,
-    all_markers = all_intensity_cols
+    all_markers = all_intensity_cols,
+    meta_cols = safe_I(meta_out)    # R34: the metadata columns each embedding row carries
   )
 }
 
 # ---- Enhanced PCA with 3+ components ----
 compute_pca_3d <- function(data, include_phenotypic = FALSE,
                            phenotypic_markers = character(0),
-                           n_components = 5) {
-  meta_base <- c("cell_id", "genotype", "replicate", "cell_cycle", "identity")
-  meta_extra <- intersect(c("timepoint", "cell_type", "condition"), names(data))
-  meta_all <- c(meta_base, meta_extra)
+                           n_components = 5, meta_cols = NULL) {
+  # R34: the metadata columns carried into `scores` are the ones the colour
+  # control can show (`meta_cols` from the request); absent -> the historical
+  # set. Columns not in the data are dropped and the payload echoes what went.
+  meta_all <- .dimred_meta_cols(data, meta_cols)
 
   if (.epiflow_phenotype_only(data)) {
     pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
@@ -151,6 +164,7 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
   scores_df <- as.data.frame(pca_result$x[, 1:n_comp])
   meta_present <- intersect(meta_all, names(complete_data))
   scores_df <- dplyr::bind_cols(scores_df, complete_data[, meta_present])
+  meta_out <- setdiff(meta_present, "cell_id")   # R34: echoed as meta_cols
 
   # Subsample for rendering only (PCA itself was computed on all complete cases
   # above). One SVG <circle> per point is the bottleneck; see UMAP note.
@@ -175,7 +189,8 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
     n_analyzed = nrow(complete_data),# cells the PCA was computed on
     n_features = length(feature_cols),
     feature_label = feature_label,
-    n_components = n_comp
+    n_components = n_comp,
+    meta_cols = safe_I(meta_out)    # R34: the metadata columns each score row carries
   )
 }
 
@@ -186,30 +201,31 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
                                     linkage = "ward.D2", resolution = 1.0,
                                     include_phenotypic = FALSE,
                                     umap_coords = NULL,
-                                    seed = 42) {
+                                    seed = 42,
+                                    comparison_var = "genotype", meta_cols = NULL) {
   # Set when an algorithm substitution happens (e.g. Leiden unavailable), so
   # the UI can say which method actually ran.
   method_note <- NULL
   pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
+  # R34: metadata carried into the visualization = the columns the colour
+  # controls can show, always including the comparison variable (the
+  # composition cross-tab is cluster × comparison_var).
+  meta_all <- unique(c(.dimred_meta_cols(data, meta_cols), intersect(comparison_var, names(data))))
 
   if (.epiflow_phenotype_only(data)) {
     if (length(pheno_cols) < 2) return(list(error = "Need at least 2 phenotypic markers for clustering"))
     wide <- data %>%
       dplyr::distinct(cell_id, .keep_all = TRUE) %>%
-      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
-                                     "identity", "cell_cycle")),
+      dplyr::select(dplyr::any_of(meta_all),
                     dplyr::any_of(pheno_cols)) %>%
       tidyr::drop_na(dplyr::all_of(pheno_cols))
     h3_cols <- character(0)
   } else {
     wide <- data %>%
-      dplyr::select(dplyr::any_of(c("cell_id", "genotype", "replicate",
-                                     "identity", "cell_cycle")),
+      dplyr::select(dplyr::any_of(meta_all),
                     dplyr::any_of(pheno_cols),
                     H3PTM, value) %>%
-      dplyr::group_by(dplyr::across(dplyr::any_of(c("cell_id", "genotype", "replicate",
-                                                      "identity", "cell_cycle",
-                                                      pheno_cols))),
+      dplyr::group_by(dplyr::across(dplyr::any_of(c(meta_all, pheno_cols))),
                       H3PTM) %>%
       dplyr::summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
       tidyr::pivot_wider(names_from = H3PTM, values_from = value) %>%
@@ -433,12 +449,12 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
       .groups = "drop"
     )
 
-  # Cross-tabs: cluster × genotype, cluster × identity
-  cross_geno <- NULL
-  if ("genotype" %in% names(wide)) {
-    cross_geno <- wide %>%
-      dplyr::count(cluster, genotype) %>%
-      tidyr::pivot_wider(names_from = genotype, values_from = n, values_fill = 0)
+  # Cross-tabs: cluster × comparison variable (R34), cluster × identity
+  cross_comp <- NULL
+  if (comparison_var %in% names(wide)) {
+    cross_comp <- wide %>%
+      dplyr::count(cluster, .data[[comparison_var]]) %>%
+      tidyr::pivot_wider(names_from = dplyr::all_of(comparison_var), values_from = n, values_fill = 0)
   }
   cross_identity <- NULL
   if ("identity" %in% names(wide)) {
@@ -464,9 +480,8 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
   # UMAP embedding for scatter plot (preferred over PCA for clustering viz)
   viz <- data.frame(cluster = wide$cluster)
   if ("cell_id" %in% names(wide)) viz$cell_id <- wide$cell_id
-  if ("genotype" %in% names(wide)) viz$genotype <- wide$genotype
-  if ("identity" %in% names(wide)) viz$identity <- wide$identity
-  if ("cell_cycle" %in% names(wide)) viz$cell_cycle <- wide$cell_cycle
+  meta_out <- setdiff(intersect(meta_all, names(wide)), "cell_id")   # R34: every carried column, echoed as meta_cols
+  for (mc in meta_out) viz[[mc]] <- wide[[mc]]
 
   # Compute UMAP for visualization
   umap_ok <- FALSE
@@ -514,7 +529,10 @@ run_advanced_clustering <- function(data, h3_markers, phenotypic_markers = chara
     centers = centers,
     summaries = summaries,
     cluster_signatures = cluster_sigs,
-    cross_genotype = cross_geno,
+    cross_comparison = cross_comp,   # R34: cluster × comparison_var
+    cross_genotype = cross_comp,     # alias for one release (removal logged in DECISIONS open items)
+    comparison_var = comparison_var,
+    meta_cols = safe_I(meta_out),
     cross_identity = cross_identity,
     n_clusters = n_clusters,
     method = method,

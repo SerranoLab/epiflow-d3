@@ -216,11 +216,6 @@ const App = {
       }
     });
 
-    // Dynamic group-by and color-by dropdowns
-    const groupBySelects = ['ridge-groupby', 'violin-groupby', 'heatmap-groupby'];
-    const colorBySelects = ['ridge-colorby', 'violin-colorby'];
-    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify'];
-
     // Populate gating filter dropdowns
     const gateIdSel = document.getElementById('gate-filter-identity');
     if (gateIdSel) {
@@ -237,82 +232,22 @@ const App = {
       });
     }
 
-    // Add all categorical columns (including available_meta) to group-by/color-by
-    const allGroupOpts = ['identity', 'genotype', 'cell_cycle', ...availMeta];
-    const uniqueGroupOpts = [...new Set(allGroupOpts)];
-
-    groupBySelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-      // Keep first option (default), remove dynamically added ones
-      const existingVals = new Set(Array.from(sel.options).map(o => o.value));
-      uniqueGroupOpts.forEach(col => {
-        if (!existingVals.has(col)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          sel.insertAdjacentHTML('beforeend', `<option value="${col}">Group by ${label}</option>`);
-        }
-      });
-    });
-
-    colorBySelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-      const existingVals = new Set(Array.from(sel.options).map(o => o.value));
-      uniqueGroupOpts.forEach(col => {
-        if (!existingVals.has(col)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          sel.insertAdjacentHTML('beforeend', `<option value="${col}">Color by ${label}</option>`);
-        }
-      });
-    });
-
-    // Populate stratification dropdowns dynamically
-    stratifySelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-      sel.innerHTML = '<option value="None">No stratification</option>';
-      uniqueGroupOpts.forEach(col => {
-        const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        sel.insertAdjacentHTML('beforeend', `<option value="${col}">By ${label}</option>`);
-      });
-    });
-
-    // F1: Overview "Split by" — every categorical column plus replicate; no "None".
-    const splitSel = document.getElementById('overview-split');
-    if (splitSel) {
-      const keep = splitSel.value;
-      const opts = [...new Set([...uniqueGroupOpts, 'replicate'])];
-      splitSel.innerHTML = opts.map(col =>
-        `<option value="${col}">Split by ${col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>`).join('');
-      // R33: the default follows the comparison variable (loadOverview sets it until the user picks a split).
-      splitSel.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
-      delete splitSel.dataset.userSet;
-    }
-
-    // Populate comparison variable dropdown
+    // R34: the comparison variable select offers the shared list (genotype,
+    // identity, cell_cycle, replicate, every metadata column, gate / cluster
+    // while applied); it defaults to genotype on a fresh load. Every other
+    // grouping control is rebuilt from that list, comparison variable first,
+    // by refreshGroupingSelects().
+    DataManager.extraGrouping = [];
     const compSelect = document.getElementById('filter-comparison-var');
     if (compSelect) {
-      compSelect.innerHTML = '';
-      uniqueGroupOpts.forEach(opt => {
-        const el = document.createElement('option');
-        el.value = opt;
-        el.textContent = opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        compSelect.appendChild(el);
-      });
-      // Default to genotype if available
-      if (uniqueGroupOpts.includes('genotype')) compSelect.value = 'genotype';
+      const keep = compSelect.value;
+      const opts = buildGroupingOptions({ comparisonVar: null, availableMeta: availMeta, extraGrouping: [] });
+      compSelect.innerHTML = opts.map(col => `<option value="${col}">${groupingLabel(col)}</option>`).join('');
+      compSelect.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
     }
+    Object.keys(this.GROUPING_SELECTS).forEach(id => { const s = document.getElementById(id); if (s) delete s.dataset.userSet; });
+    this.refreshGroupingSelects();
     this.syncStratifyOptions();   // R18: comparison variable is never a stratum
-
-    // Populate ML target dropdown dynamically
-    const mlTarget = document.getElementById('ml-target');
-    if (mlTarget) {
-      mlTarget.innerHTML = '';
-      uniqueGroupOpts.forEach(opt => {
-        const label = opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        mlTarget.insertAdjacentHTML('beforeend', `<option value="${opt}">Target: ${label}</option>`);
-      });
-    }
 
     // The reference-level dropdown is kept in sync with the comparison variable
     // by a single handler bound once in bindFilters() (avoids stacking listeners
@@ -382,9 +317,11 @@ const App = {
       compSelect.addEventListener('change', () => {
         this.populateRefLevel(this._getLevelsForVar(compSelect.value));
         this.populateCustomColors(compSelect.value);
+        this.refreshGroupingSelects();   // R34: every grouping control lists the comparison variable first
         this.syncStratifyOptions();   // R18
         this.markStatsStale();        // results were computed with the old comparison variable
-        if (this.currentTab === 'overview') this.loadOverview();   // R33: count charts follow the comparison variable
+        // R33/R34: view tabs follow the comparison variable; run-button tabs re-run on demand.
+        if (['overview', 'ridge', 'violin', 'heatmap'].includes(this.currentTab)) this.loadCurrentTab();
       });
     }
     // Clear quadrant gate filter
@@ -452,55 +389,90 @@ const App = {
     }
   },
 
-  _updateExtraGroupingOptions(extraGrouping) {
-    const dynamicCols = ['gate_population', 'cluster_identity'];
-    const groupBySelects = ['ridge-groupby', 'violin-groupby', 'heatmap-groupby'];
-    const colorBySelects = ['ridge-colorby', 'violin-colorby'];
-    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify', 'overview-split'];   // F1: gate / cluster columns reach the Split-by select too
-    const allSelects = [...groupBySelects, ...colorBySelects, ...stratifySelects];
+  // R34: one shared option list for every grouping control.
+  // Each managed <select> has an entry here: prefix for the option text, an
+  // optional "none" option, fixed extra
+  // options (first: true puts them before the list), and the default — the
+  // comparison variable unless the entry names another value. A select keeps
+  // the user's choice (data-user-set, written by the change listener bound in
+  // bindGroupingSelects) as long as that value is still offered.
+  GROUPING_SELECTS: {
+    'overview-split':   { prefix: 'Split by' },
+    'ridge-groupby':    { prefix: 'Group by', extra: [{ value: 'marker', label: 'Group by H3-PTM' }] },
+    'ridge-colorby':    { prefix: 'Color by', extra: [{ value: 'same', label: 'Color = Group', first: true }, { value: 'marker', label: 'Color by H3-PTM' }], default: 'same' },
+    'violin-groupby':   { prefix: 'Group by' },
+    'violin-colorby':   { prefix: 'Color by', extra: [{ value: 'same', label: 'Color = Group', first: true }], default: 'same' },
+    'heatmap-groupby':  { prefix: 'Group by' },
+    'stats-stratify':   { prefix: 'By', none: 'No stratification', default: 'None' },
+    'forest-stratify':  { prefix: 'By', none: 'No stratification', default: 'None' },
+    'diag-stratify':    { prefix: 'By', none: 'No stratification', default: 'None' },
+    'ml-target':        { prefix: 'Target:' },
+    'pca-color':        { prefix: 'Color:' },
+    'umap-color':       { prefix: 'Color:' },   // keeps its marker <optgroup>
+    'cluster-color':    { prefix: 'Color:', extra: [{ value: 'cluster', label: 'Color: Cluster', first: true }], default: 'cluster' },
+    'cluster-compare-color': { prefix: '', none: '— select —', noneValue: 'none', extra: [{ value: 'cluster', label: 'Cluster' }], default: 'none' },
+  },
 
-    allSelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-
-      // Remove old dynamic options
-      dynamicCols.forEach(col => {
-        const existing = sel.querySelector(`option[value="${col}"]`);
-        if (existing && !extraGrouping.includes(col)) {
-          existing.remove();
-        }
-      });
-
-      // Add new dynamic options
-      extraGrouping.forEach(col => {
-        if (!sel.querySelector(`option[value="${col}"]`)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          const isStratify = stratifySelects.includes(selId);
-          const isColor = colorBySelects.includes(selId);
-          const prefix = isStratify ? 'By' : (isColor ? 'Color by' : 'Group by');
-          const icon = col === 'gate_population' ? '⊞ ' : '◆ ';
-          sel.insertAdjacentHTML('beforeend',
-            `<option value="${col}">${prefix} ${icon}${label}</option>`);
-        }
-      });
+  groupingOptions() {
+    return buildGroupingOptions({
+      comparisonVar: DataManager.getComparisonVar(),
+      availableMeta: ensureArray(DataManager.metadata ? DataManager.metadata.available_meta : []),
+      extraGrouping: ensureArray(DataManager.extraGrouping || []),
     });
+  },
 
-    // Also update comparison variable dropdown
+  fillGroupingSelect(selId, cfg) {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    const opts = this.groupingOptions();
+    const extra = cfg.extra || [];
+    const keep = sel.value;
+    const optHtml = (value, label) => `<option value="${value}">${label}</option>`;
+    let html = '';
+    if (cfg.none) html += optHtml(cfg.noneValue || 'None', cfg.none);
+    extra.filter(e => e.first).forEach(e => { html += optHtml(e.value, e.label); });
+    opts.forEach(col => { html += optHtml(col, `${cfg.prefix} ${groupingLabel(col)}`.trim()); });
+    extra.filter(e => !e.first).forEach(e => { html += optHtml(e.value, e.label); });
+    // Keep <optgroup>s some selects carry (e.g. the UMAP marker list).
+    const groups = Array.from(sel.querySelectorAll('optgroup')).map(g => g.outerHTML).join('');
+    sel.innerHTML = html + groups;
+    const offered = new Set(Array.from(sel.options).map(o => o.value));
+    const fallback = cfg.default || DataManager.getComparisonVar();
+    if (sel.dataset.userSet && offered.has(keep)) sel.value = keep;
+    else sel.value = offered.has(fallback) ? fallback : (opts[0] || '');
+  },
+
+  refreshGroupingSelects() {
+    Object.entries(this.GROUPING_SELECTS).forEach(([selId, cfg]) => this.fillGroupingSelect(selId, cfg));
+    const lab = document.getElementById('umap-split-label');   // R34: "Split by <comparison variable>"
+    if (lab) lab.textContent = groupingLabel(DataManager.getComparisonVar());
+  },
+
+  bindGroupingSelects() {
+    Object.keys(this.GROUPING_SELECTS).forEach(selId => {
+      const sel = document.getElementById(selId);
+      if (sel) sel.addEventListener('change', () => { sel.dataset.userSet = '1'; });
+    });
+  },
+
+  _updateExtraGroupingOptions(extraGrouping) {
+    // gate_population / cluster_identity exist only while a gate or clustering
+    // is applied; the filter response says which. Every grouping control and
+    // the comparison variable select are rebuilt from the shared list.
+    DataManager.extraGrouping = ensureArray(extraGrouping);
     const compSel = document.getElementById('filter-comparison-var');
     if (compSel) {
-      dynamicCols.forEach(col => {
-        const existing = compSel.querySelector(`option[value="${col}"]`);
-        if (existing && !extraGrouping.includes(col)) existing.remove();
+      const keep = compSel.value;
+      const opts = buildGroupingOptions({
+        comparisonVar: null,
+        availableMeta: ensureArray(DataManager.metadata ? DataManager.metadata.available_meta : []),
+        extraGrouping: DataManager.extraGrouping,
       });
-      extraGrouping.forEach(col => {
-        if (!compSel.querySelector(`option[value="${col}"]`)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          const icon = col === 'gate_population' ? '⊞ ' : '◆ ';
-          compSel.insertAdjacentHTML('beforeend',
-            `<option value="${col}">${icon}${label}</option>`);
-        }
-      });
+      compSel.innerHTML = opts.map(col => `<option value="${col}">${groupingLabel(col)}</option>`).join('');
+      compSel.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
     }
+    this.refreshGroupingSelects();
+    this.syncStratifyOptions();
   },
 
   async resetFilters() {
@@ -778,7 +750,7 @@ const App = {
       let colorBy;
       if (groupBy === 'marker') {
         // rows = PTM; color by a metadata variable (default genotype)
-        colorBy = (colorBySelect === 'same' || colorBySelect === 'marker') ? 'genotype' : colorBySelect;
+        colorBy = (colorBySelect === 'same' || colorBySelect === 'marker') ? DataManager.getComparisonVar() : colorBySelect;   // R34
       } else {
         // rows = group metadata; one colored curve per selected PTM
         colorBy = 'marker';
@@ -1071,7 +1043,8 @@ const App = {
     document.getElementById('run-all-ml-btn').addEventListener('click', () => this.runAllML());
     document.getElementById('run-diagnostic-btn').addEventListener('click', () => this.runDiagnostic());
     document.getElementById('refresh-overview-btn').addEventListener('click', () => this.loadOverview());
-    document.getElementById('overview-split')?.addEventListener('change', (e) => { e.target.dataset.userSet = '1'; if (this.currentTab === 'overview') this.loadOverview(); });
+    document.getElementById('overview-split')?.addEventListener('change', () => { if (this.currentTab === 'overview') this.loadOverview(); });
+    this.bindGroupingSelects();   // R34: remembers which grouping selects the user has set
     document.getElementById('run-forest-btn').addEventListener('click', () => this.runForestDirect());
     document.getElementById('forest-marker-filter').addEventListener('change', () => { if (this.currentTab === 'forest') this.loadForest(); });
     document.getElementById('forest-stratify').addEventListener('change', () => { /* user clicks Generate to apply */ });
@@ -1207,7 +1180,8 @@ const App = {
     this.showLoading('Computing PCA...');
     try {
       const inclPheno = document.getElementById('pca-pheno').checked;
-      const data = await EpiFlowAPI.runPCA3D({ include_phenotypic: inclPheno, n_components: 5 });
+      // R34: carry only the columns the colour control can show (not every metadata field).
+      const data = await EpiFlowAPI.runPCA3D({ include_phenotypic: inclPheno, n_components: 5, meta_cols: this.groupingOptions() });
       if (data.error) throw new Error(data.error);
       this._pcaData = data;
       this._renderPCA();
@@ -1215,11 +1189,25 @@ const App = {
     finally { this.hideLoading(); }
   },
 
+  // R34: the colour select lists the shared grouping options; the payload says
+  // which of them it carries (meta_cols). A column the cached payload lacks
+  // (e.g. a gate applied after the run) falls back to the first carried one
+  // and the select follows, so the legend never shows an undefined group.
+  _dimredColorBy(selId, data, extraAllowed = []) {
+    const sel = document.getElementById(selId);
+    const want = sel ? sel.value : DataManager.getComparisonVar();
+    const carried = ensureArray(data.meta_cols);
+    if (!carried.length || carried.includes(want) || extraAllowed.includes(want)) return want;
+    const fallback = carried[0];
+    if (sel && [...sel.options].some(o => o.value === fallback)) sel.value = fallback;
+    return fallback;
+  },
+
   /** Render PCA from cached scores (no re-run needed for colour changes) */
   _renderPCA() {
     const data = this._pcaData;
     if (!data) return;
-    const colorBy = document.getElementById('pca-color').value;
+    const colorBy = this._dimredColorBy('pca-color', data);
     PCAPlot.render('pca-chart-main', data, { colorBy, pcX: 'PC1', pcY: 'PC2' });
     PCAPlot.render('pca-chart-secondary', data, { colorBy, pcX: 'PC1', pcY: 'PC3' });
     PCAPlot.renderVariance('pca-variance-chart', data);
@@ -1236,7 +1224,8 @@ const App = {
       const data = await EpiFlowAPI.runUMAPPhase3({
         n_neighbors: nNeighbors,
         min_dist: minDist,
-        include_phenotypic: inclPheno
+        include_phenotypic: inclPheno,
+        meta_cols: this.groupingOptions()   // R34: only the columns the colour / split controls can show
       });
       if (data.error) throw new Error(data.error);
       this._umapData = data;
@@ -1257,6 +1246,18 @@ const App = {
     finally { this.hideLoading(); }
   },
 
+  // R34: split panels follow the comparison variable; if the cached embedding
+  // does not carry it (changed after the run), fall back to the first carried
+  // column so the panels still mean something, and say which in the label.
+  _umapSplitVar(data) {
+    const want = DataManager.getComparisonVar();
+    const carried = ensureArray(data && data.meta_cols);
+    const v = (!carried.length || carried.includes(want)) ? want : carried[0];
+    const lab = document.getElementById('umap-split-label');
+    if (lab) lab.textContent = groupingLabel(v);
+    return v;
+  },
+
   /** Render UMAP from cached data (no re-run needed for color/size/split changes) */
   _renderUMAP() {
     const data = this._umapData;
@@ -1268,10 +1269,12 @@ const App = {
     if (!emb.length) return;
 
     const isMarker = colorSel.startsWith('marker:');
-    const colorBy = isMarker ? colorSel.replace('marker:', '') : colorSel;
+    const colorBy = isMarker ? colorSel.replace('marker:', '') : this._dimredColorBy('umap-color', data);
+    // R34: the split is by the sidebar comparison variable, whatever column that is.
+    const splitVar = this._umapSplitVar(data);
 
     if (isSplit) {
-      const genotypes = [...new Set(emb.map(d => d.genotype))].sort();
+      const genotypes = [...new Set(emb.map(d => d[splitVar]).filter(v => v !== undefined && v !== null))].sort();
       const grid = document.getElementById('umap-split-grid');
       grid.innerHTML = '';
       if (!genotypes.length) {
@@ -1291,8 +1294,8 @@ const App = {
           panel.id = cid;
           panel.style.minHeight = panelMinH;
           grid.appendChild(panel);
-          const subset = emb.filter(d => d.genotype === gName);
-          this._renderUMAPScatter(cid, subset, colorBy, isMarker, dotSize, gName, emb);
+          const subset = emb.filter(d => d[splitVar] === gName);
+          this._renderUMAPScatter(cid, subset, colorBy, isMarker, dotSize, `${groupingLabel(splitVar)}: ${gName}`, emb);
         });
       }
     } else {
@@ -1418,7 +1421,10 @@ const App = {
     const colorBy = document.getElementById('cluster-color').value;
     const isGraph = method === 'louvain' || method === 'leiden';
     const inclPheno = document.getElementById('cluster-pheno').checked;
-    const params = { method: method, include_phenotypic: inclPheno };
+    // R34: the composition table is cluster × the comparison variable; the
+    // visualization carries only the columns the colour controls can show.
+    const params = { method: method, include_phenotypic: inclPheno,
+                     comparison_var: DataManager.getComparisonVar(), meta_cols: this.groupingOptions() };
     if (!isGraph) {
       params.n_clusters = parseInt(document.getElementById('cluster-k').value) || 5;
     } else {
@@ -1445,7 +1451,8 @@ const App = {
       if (sigs.length && allMarkers.length) {
         ClusterPlot.renderSignatures('cluster-signatures-chart', sigs, allMarkers, clusters);
       }
-      if (data.cross_genotype) ClusterPlot.renderCrossTab('cluster-cross-genotype', ensureArray(data.cross_genotype), 'Genotype');
+      const crossComp = data.cross_comparison || data.cross_genotype;   // R34 (cross_genotype: alias for one release)
+      if (crossComp) ClusterPlot.renderCrossTab('cluster-cross-genotype', ensureArray(crossComp), groupingLabel(data.comparison_var || DataManager.getComparisonVar()));
       if (data.cross_identity) ClusterPlot.renderCrossTab('cluster-cross-identity', ensureArray(data.cross_identity), 'Identity');
       this._showIdentityHelper(clusters);
       // Render comparison UMAP if selected
@@ -1464,6 +1471,9 @@ const App = {
     if (!data) return;
     const viz = ensureArray(data.visualization);
     if (!viz.length) return;
+    // R34: a colour column the cached run does not carry falls back to the first carried one.
+    const carried = ensureArray(data.meta_cols);
+    if (colorBy !== 'cluster' && carried.length && !carried.includes(colorBy)) colorBy = carried[0];
     const targetId = containerId || 'cluster-scatter-chart';
     const container = document.getElementById(targetId);
     container.innerHTML = '';
@@ -2143,7 +2153,7 @@ const App = {
     const cellW = Math.floor((container.clientWidth - 20) / cols);
     const cellH = hasViolins ? 220 : 180;
 
-    const palette = DataManager.serverPalette?.genotype || {};
+    const palette = DataManager.serverPalette?.[DataManager.getComparisonVar()] || {};   // R34: groups are levels of the comparison variable
     const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const colorScale = d3.scaleOrdinal()
       .domain(groups)
@@ -2300,7 +2310,7 @@ const App = {
     try {
       const method = document.getElementById('corr-method').value;
       const includePheno = document.getElementById('corr-include-pheno').checked;
-      const data = await EpiFlowAPI.runCorrelation({ method, include_phenotypic: includePheno });
+      const data = await EpiFlowAPI.runCorrelation({ method, include_phenotypic: includePheno, comparison_var: DataManager.getComparisonVar() });   // R34: replicate-level block is replicate × comparison variable
       // Hide diff results when showing global
       document.getElementById('corr-diff-results').style.display = 'none';
       CorrelationPlot.render('correlation-chart', data, {
@@ -2319,9 +2329,10 @@ const App = {
     const baseline = (100 / n).toFixed(1);
     // Circularity guardrail: classifying identity from the markers that defined
     // it is tautological, so near-perfect accuracy is not evidence of anything.
-    const circular = String(tv).toLowerCase() === 'identity'
+    // R34: any target derived from the features (identity, cell_cycle, gate_population, cluster_identity).
+    const circular = isDerivedGrouping(tv)
       ? `<div style="margin-top:6px;padding:6px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;font-size:11px;color:#9a3412;">
-      <strong>⚠ Circularity:</strong> if this identity was gated from these same markers, high accuracy is expected and not a finding. For a meaningful test, classify genotype or condition instead.</div>`
+      <strong>⚠ Circularity:</strong> ${groupingLabel(tv)} was derived from these same markers (gated, clustered or assigned on them), so high accuracy is expected and not a finding. For a meaningful test, classify the comparison variable (e.g. genotype or condition) instead.</div>`
       : '';
     return `<div style="margin-bottom:6px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e3a5f;">
       <strong>Classifying ${tv}</strong> — ${n} classes${classes.length ? ` (${classes.join(', ')})` : ''}
@@ -2770,7 +2781,7 @@ const App = {
           html += '</tr>';
         });
         html += '</tbody></table></div>';
-        const targetVar = document.getElementById('ml-target')?.value || 'genotype';
+        const targetVar = data.target_var || document.getElementById('ml-target')?.value || DataManager.getComparisonVar();   // R34
         const groups = ensureArray(data.groups);
         // In LMM: marker ~ genotype, estimate is for non-reference vs reference
         // R uses alphabetical reference by default, or user's selected reference
@@ -3097,7 +3108,7 @@ const App = {
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
     // Title
-    const targetVar = document.getElementById('ml-target')?.value || 'genotype';
+    const targetVar = document.getElementById('ml-target')?.value || DataManager.getComparisonVar();   // R34 (groups are the target's levels)
     svg.append('text')
       .attr('class', 'chart-title')
       .attr('x', totalW / 2).attr('y', 18)
@@ -3427,7 +3438,7 @@ const App = {
     try {
       const marker = document.getElementById('pos-marker').value;
       const threshInput = document.getElementById('pos-threshold').value;
-      const params = { marker };
+      const params = { marker, comparison_var: DataManager.getComparisonVar() };   // R34: groups are the comparison variable's levels
       if (threshInput) params.threshold = parseFloat(threshInput);
 
       const data = await EpiFlowAPI.runPositivity(params);
@@ -3451,7 +3462,7 @@ const App = {
       const stats = document.getElementById('positivity-stats');
       const groupStats = ensureArray(data.group_stats);
       let html = '<table class="stats-table" style="font-size:12px;max-width:600px;">';
-      html += '<thead><tr><th>Group</th><th>n</th><th>Fraction Positive</th><th>Mean</th><th>Median</th></tr></thead><tbody>';
+      html += `<thead><tr><th>${groupingLabel(data.comparison_var || DataManager.getComparisonVar())}</th><th>n</th><th>Fraction Positive</th><th>Mean</th><th>Median</th></tr></thead><tbody>`;   // R34: header names the grouping column
       groupStats.forEach(gs => {
         const gr = Array.isArray(gs.group) ? gs.group[0] : String(gs.group || '');
         html += `<tr><td>${gr}</td><td>${Number(gs.n_total).toLocaleString()}</td>
@@ -3629,7 +3640,7 @@ const App = {
           method: data.method
         }, {
           title: `${gr} (n=${Number(pg.n_cells).toLocaleString()})`,
-          subtitle: `${data.method} correlation · ${data.group_by || 'genotype'}-stratified${pg.n_replicates ? ' · ' + pg.n_replicates + ' replicates' : ''}`
+          subtitle: `${data.method} correlation · ${data.group_by || DataManager.getComparisonVar()}-stratified${pg.n_replicates ? ' · ' + pg.n_replicates + ' replicates' : ''}`
         });
       });
 
@@ -3872,7 +3883,7 @@ const App = {
 
       if (markerX === markerY) throw new Error('Please select two different markers');
 
-      const params = { marker_x: markerX, marker_y: markerY };
+      const params = { marker_x: markerX, marker_y: markerY, comparison_var: DataManager.getComparisonVar() };   // R34: quadrant counts per level of the comparison variable
       if (filterIdentity !== 'All') params.filter_identity = filterIdentity;
       if (filterCycle !== 'All') params.filter_cycle = filterCycle;
       Object.assign(params, overrides);
@@ -3932,12 +3943,12 @@ const App = {
       const data = await EpiFlowAPI.runGatingDetail({
         marker_x: markerX, marker_y: markerY,
         threshold_x: threshX, threshold_y: threshY,
-        quadrant
+        quadrant, comparison_var: DataManager.getComparisonVar()   // R34
       });
       if (data.error) { densEl.innerHTML = `<p style="color:#dc2626;font-size:11px;">${data.error}</p>`; return; }
 
       const groups = ensureArray(data.groups);
-      const palette = DataManager.serverPalette?.genotype || {};
+      const palette = DataManager.serverPalette?.[data.comparison_var || DataManager.getComparisonVar()] || {};   // R34
       const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
       const colorScale = d3.scaleOrdinal()
         .domain(groups)

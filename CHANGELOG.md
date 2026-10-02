@@ -3,6 +3,27 @@
 Earlier release notes: `CHANGELOG_v1.2.0.md`. Finding IDs (R1 …, L1 …) refer to
 the September 2026 publication audit; each has an entry in `DECISIONS.md`.
 
+## EpiFlow D3 v1.6.0 — 2026-10-02
+
+- **R34** — Every grouping, colour-by, stratify-by, split-by and ML-target
+  control is built from one shared list (`frontend/js/utils/grouping.js`):
+  the sidebar comparison variable first, then genotype, identity, cell_cycle,
+  replicate, every metadata column, and gate_population / cluster_identity
+  while applied. Every endpoint that groups cells takes the column from the
+  request (its own key, else `comparison_var`, else the genotype column),
+  validates it and echoes it; nothing defaults to genotype silently. Tabs:
+  Ridge, Violin, Heatmap, Cell Cycle, Correlation (replicate-level block is
+  replicate × comparison variable), Positivity, Gating, PCA / UMAP /
+  Clustering (`meta_cols`: only the columns the colour controls can show;
+  UMAP split and the clustering composition table follow the comparison
+  variable — `cross_comparison`, with `cross_genotype` kept as an alias for
+  one release), Statistics / Forest / Diagnostic, ML (target defaults to the
+  comparison variable; circularity warning for every feature-derived target).
+  Volcano re-renders the last Statistics run; Titration groups by dose and
+  identity by design — unchanged.
+- Tests: `test_grouping_options.R` (V8 + static), `test_comparison_var_everywhere.R`
+  (one block per tab on a fixture whose `condition` column crosses genotype).
+
 ## EpiFlow D3 v1.5.1 — 2026-10-01
 
 - **R33** — Overview count charts, cross table, "levels" card and the default

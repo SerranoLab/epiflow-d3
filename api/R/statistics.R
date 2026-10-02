@@ -1241,8 +1241,8 @@ compute_signatures_diagnostic <- function(data, target_var = "genotype",
       all_clusters <- km$cluster
     }
 
-    # Cross-tab: cluster vs genotype
-    ct <- table(cluster = all_clusters, genotype = wide_df[[target_var]])
+    # Cross-tab: cluster vs target_var level
+    ct <- table(cluster = all_clusters, group = wide_df[[target_var]])   # R34: the dimension is the target, not genotype
 
     # Silhouette on subsample only (dist() is O(n^2))
     sil_val <- tryCatch({

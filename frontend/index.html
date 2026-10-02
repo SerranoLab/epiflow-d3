@@ -734,7 +734,7 @@
             </div>
           </div>
           <div class="help-panel"><i class="fas fa-info-circle"></i>
-            PCA reduces multi-dimensional H3-PTM space. Color by <strong>Replicate</strong> to check for batch effects — replicates of the same genotype should cluster together.
+            PCA reduces multi-dimensional H3-PTM space. Color by <strong>Replicate</strong> to check for batch effects — replicates of the same group (the comparison variable's level) should cluster together. The colour list offers the comparison variable first, then every metadata column.
           </div>
           <div class="chart-container" id="pca-chart-main"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
@@ -761,7 +761,7 @@
                 <option value="3">Dots: Medium</option>
                 <option value="5">Dots: Large</option>
               </select>
-              <label class="checkbox-inline"><input type="checkbox" id="umap-split"> Split by Genotype</label>
+              <label class="checkbox-inline"><input type="checkbox" id="umap-split"> Split by <span id="umap-split-label">Genotype</span></label>
               <label class="checkbox-inline"><input type="checkbox" id="umap-pheno"> + Phenotypic</label>
               <button class="btn btn-primary btn-sm" id="run-umap-btn"><i class="fas fa-play"></i> Run UMAP</button>
               <button class="btn btn-sm" id="umap-export-svg"><i class="fas fa-download"></i> SVG</button>
@@ -779,7 +779,7 @@
           <div class="help-panel"><i class="fas fa-info-circle"></i>
             UMAP preserves local neighborhoods to reveal cell population structure.
             Select a <strong>marker</strong> from the color dropdown to see its arcsinh intensity (FeaturePlot).
-            Toggle <strong>Split</strong> to compare genotypes side-by-side on the same embedding.
+            Toggle <strong>Split</strong> to compare the levels of the sidebar comparison variable side-by-side on the same embedding (the colour list offers the comparison variable first, then every metadata column).
             <em>Re-coloring uses cached data — no need to re-run.</em>
           </div>
           <!-- Single UMAP or Split view -->
@@ -1113,25 +1113,26 @@
   </div>
 
   <script src="js/utils/palettes.js?v=1.3.2"></script>
+  <script src="js/utils/grouping.js?v=1.0.0"></script>
   <script src="js/utils/export.js?v=1.2.2"></script>
   <script src="js/utils/titrationHelp.js?v=1.2.2"></script>
   <script src="js/api.js?v=1.2.5"></script>
-  <script src="js/dataManager.js?v=1.2.2"></script>
-  <script src="js/charts/ridgePlot.js?v=1.2.5"></script>
-  <script src="js/charts/violinPlot.js?v=1.3.1"></script>
-  <script src="js/charts/pcaPlot.js?v=1.2.2"></script>
-  <script src="js/charts/heatmap.js?v=1.2.3"></script>
+  <script src="js/dataManager.js?v=1.2.3"></script>
+  <script src="js/charts/ridgePlot.js?v=1.2.6"></script>
+  <script src="js/charts/violinPlot.js?v=1.3.2"></script>
+  <script src="js/charts/pcaPlot.js?v=1.2.3"></script>
+  <script src="js/charts/heatmap.js?v=1.2.4"></script>
   <script src="js/charts/forestPlot.js?v=1.2.8"></script>
   <script src="js/charts/volcanoPlot.js?v=1.2.6"></script>
   <script src="js/charts/markerHeatmap.js?v=1.2.5"></script>
-  <script src="js/charts/positivityPlot.js?v=1.2.4"></script>
-  <script src="js/charts/gatingPlot.js?v=1.3.6"></script>
+  <script src="js/charts/positivityPlot.js?v=1.2.5"></script>
+  <script src="js/charts/gatingPlot.js?v=1.3.7"></script>
   <script src="js/charts/cellCyclePlot.js?v=1.2.2"></script>
-  <script src="js/charts/correlationPlot.js?v=1.2.3"></script>
+  <script src="js/charts/correlationPlot.js?v=1.2.4"></script>
   <script src="js/charts/overviewCharts.js?v=1.3.2"></script>
-  <script src="js/charts/scatter3D.js?v=1.2.2"></script>
+  <script src="js/charts/scatter3D.js?v=1.2.3"></script>
   <script src="js/charts/clusterPlot.js?v=1.2.4"></script>
   <script src="js/charts/titrationPanel.js?v=1.3.0"></script>
-  <script src="js/app.js?v=1.3.23"></script>
+  <script src="js/app.js?v=1.3.33"></script>
 </body>
 </html>

@@ -200,7 +200,7 @@ const CorrelationPlot = {
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
     const xScale = d3.scaleLinear().domain([-1, 1]).range([0, width]);
     const yScale = d3.scaleBand().domain(keys).range([0, height]).padding(0.2);
-    const colorScale = getColorScale(data.group_by || 'genotype', groups, DataManager.serverPalette);
+    const colorScale = getColorScale(data.group_by || DataManager.getComparisonVar(), groups, DataManager.serverPalette);   // R34
     const groupOffset = d3.scalePoint().domain(groups).range([-rowH * 0.22, rowH * 0.22]);
 
     g.append('g').attr('class', 'axis').attr('transform', `translate(0,${height})`)
