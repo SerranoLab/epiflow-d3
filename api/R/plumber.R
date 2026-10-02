@@ -191,7 +191,8 @@ function(req, res) {   # R10: res must be a parameter for the 400 below to be re
     cell_cycles = result$cell_cycles,
     replicates = result$replicates,
     available_meta = result$available_meta,
-    palette = result$palette
+    palette = result$palette,
+    data_contract = result$data_contract   # R21
   )
 
   # Append dynamic meta_levels (e.g., timepoint_levels, condition_levels)
@@ -299,7 +300,8 @@ function(req) {
     cell_cycles = result$cell_cycles,
     replicates = result$replicates,
     available_meta = result$available_meta,
-    palette = result$palette
+    palette = result$palette,
+    data_contract = result$data_contract   # R21
   )
   if (!is.null(result$downsample_note)) {
     response$downsampled <- TRUE

@@ -133,6 +133,7 @@ const App = {
       <div><span class="stat-label">Groups:</span> <span class="stat-value">${genoLevels.join(', ')}</span></div>
       <div><span class="stat-label">Replicates:</span> <span class="stat-value">${replicates.length}</span></div>
       ${meta.downsample_note ? `<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:10px;color:#92400e;"><strong>\u26a0 Downsampled.</strong> ${meta.downsample_note}</div>` : ''}
+      ${this._contractLine(meta.data_contract)}
     `;
 
     this.populateFilters(meta);
@@ -176,6 +177,20 @@ const App = {
   },
 
   // ===== FILTERS =====
+
+  // R21: the data contract stamped on the file (scale, cofactor rule, importer)
+  // or the legacy warning when the file predates the Import tab.
+  _contractLine(dc) {
+    if (!dc) return '';
+    if (dc.legacy) {
+      return `<div style="margin-top:6px;padding:6px 8px;background:#fff7ed;border-left:3px solid #fb923c;border-radius:4px;font-size:10px;color:#9a3412;"><strong>⚠ Legacy file.</strong> ${dc.warning || 'No data-contract attributes; cofactor unknown.'}</div>`;
+    }
+    const rule = dc.cofactor_rule && typeof dc.cofactor_rule === 'object'
+      ? [...new Set(Object.values(dc.cofactor_rule))].join(', ') : (dc.cofactor_rule || '—');
+    const thinned = dc.n_cells_kept && dc.n_cells_source && Number(dc.n_cells_kept) < Number(dc.n_cells_source)
+      ? ` · thinned ${Number(dc.n_cells_source).toLocaleString()} → ${Number(dc.n_cells_kept).toLocaleString()} cells (seed ${dc.ingest_seed})` : '';
+    return `<div style="margin-top:6px;font-size:10px;color:#475569;"><span class="stat-label">Scale:</span> ${dc.value_scale || '—'} · cofactor rule: ${rule} · source: ${dc.source || '—'}${dc.importer_version ? ` · importer ${dc.importer_version}` : ''}${thinned}</div>`;
+  },
 
   populateFilters(meta) {
     const identities = ensureArray(meta.identities);

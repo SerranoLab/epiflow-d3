@@ -273,5 +273,13 @@ check(has(gp, "Q1: [size - PAD, 18, 'end'],") && has(gp, "Q2: [PAD, 18, 'start']
       "quadrant labels pinned to the four plot corners")
 check(ver_of("gatingPlot.js") >= "1.3.9", "gatingPlot.js cache-busting bump (>= 1.3.9)")
 
+# ---- R21: data contract — legacy warning and contract line in the data summary ----
+cat("\n--- R21 data contract labels ---\n")
+check(has("api/R/helpers.R", 'EPIFLOW_LEGACY_WARNING <- paste(') && has("api/R/helpers.R", '"No data-contract attributes: this file predates the Import tab (converter v5.1 or earlier),"'),
+      "loader defines the legacy warning naming the Import tab and the converter version")
+check(has(a, "_contractLine(dc) {") && has(a, "Legacy file.</strong>") && has(a, '<span class="stat-label">Scale:</span> ${dc.value_scale'),
+      "data summary shows the legacy warning or the scale / cofactor-rule / source line")
+check(has(a, "${this._contractLine(meta.data_contract)}") && ver_of("js/app.js") >= "1.3.35", "data summary renders the contract line; app.js bumped")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

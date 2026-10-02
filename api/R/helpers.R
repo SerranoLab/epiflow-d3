@@ -78,6 +78,61 @@ sanitize_session_id <- function(id) {
     all(as.character(data$H3PTM) == "none")
 }
 
+# ---- R21: the data contract --------------------------------------------------
+# The Import tab (F4) stamps these attributes on the .rds it writes; the loader
+# reads them BEFORE any dplyr step (dplyr verbs drop custom attributes) and
+# echoes them as `data_contract` in every ingest response and /api/metadata.
+# A file without them is "legacy": it loads, with a warning, and its cofactor
+# is unknown — only cofactor-dependent features refuse (.cofactor_required()).
+EPIFLOW_CONTRACT_ATTRS <- c(
+  "epiflow_schema_version", "value_scale", "cofactors", "cofactor_rule",
+  "dna_cofactor", "dna_gating_cofactor", "source", "omiq_workflow_id",
+  "importer_version", "import_date", "instrument", "panel", "sample_sheet",
+  "cell_cycle_gating", "n_cells_source", "n_cells_kept", "ingest_seed", "epiflow_mode")
+EPIFLOW_LEGACY_WARNING <- paste(
+  "No data-contract attributes: this file predates the Import tab (converter v5.1 or earlier),",
+  "so its arcsinh cofactor is unknown. Cofactor-dependent features (back-transform to instrument",
+  "units, the c/2-2c sensitivity check) are unavailable for this file.")
+
+.epiflow_read_contract <- function(data) {
+  a <- attributes(data)
+  found <- intersect(EPIFLOW_CONTRACT_ATTRS, names(a))
+  contract <- a[found]
+  # Named vectors become named lists so jsonlite writes them as objects
+  # ({"H3K27ac": 6000, ...}); a named numeric vector would serialize as a bare
+  # array and lose the channel names.
+  for (nm in c("cofactors", "cofactor_rule")) {
+    if (!is.null(contract[[nm]]) && !is.list(contract[[nm]]) && !is.null(names(contract[[nm]]))) contract[[nm]] <- as.list(contract[[nm]])
+  }
+  legacy <- is.null(contract$value_scale) && is.null(contract$cofactors)
+  contract$legacy <- legacy
+  if (legacy) {
+    contract$value_scale <- "arcsinh (assumed; not stamped)"
+    contract$cofactor_rule <- "unknown"
+    contract$warning <- EPIFLOW_LEGACY_WARNING
+  }
+  contract
+}
+
+# Stamp the contract on a data frame (the importer and the example generator
+# use this; attributes survive saveRDS / readRDS).
+.epiflow_stamp_contract <- function(df, contract) {
+  for (nm in intersect(names(contract), EPIFLOW_CONTRACT_ATTRS)) attr(df, nm) <- contract[[nm]]
+  df
+}
+
+# TRUE when the session's file carries a usable cofactor; endpoints that
+# back-transform or stress-test the cofactor call this and return the R21
+# error otherwise.
+.cofactor_required <- function(store) {
+  dc <- store$metadata$data_contract
+  if (is.null(dc) || isTRUE(dc$legacy) || is.null(dc$cofactors)) {
+    return(list(error = paste0("This feature needs the arcsinh cofactor stamped on the file (R21). ",
+      if (!is.null(dc) && isTRUE(dc$legacy)) dc$warning else "No cofactor is stamped.")))
+  }
+  NULL
+}
+
 #' @return List with data, h3_markers, phenotypic_markers, metadata
 load_epiflow_data <- function(path) {
   data <- readRDS(path)
@@ -91,9 +146,12 @@ load_epiflow_data <- function(path) {
     stop("Dataset too large (", nrow(data), " rows); exceeds the 50M-row safety cap.")
   }
 
-  # Capture the converter's mode stamp before any dplyr transforms below can
-  # drop custom attributes, so phenotype-only detection stays robust.
-  epiflow_mode_attr <- attr(data, "epiflow_mode")
+  # R21: read the data contract (every stamped attribute) before any dplyr
+  # transform below can drop custom attributes. The converter's mode stamp is
+  # part of it; phenotype-only detection stays robust.
+  data_contract <- .epiflow_read_contract(data)
+  epiflow_mode_attr <- data_contract$epiflow_mode
+  if (is.null(data_contract$n_cells_source)) data_contract$n_cells_source <- dplyr::n_distinct(data$cell_id)
 
   # Normalize identity column
   identity_candidates <- c("identity", "Identity", "Filter", "filter",
@@ -143,8 +201,12 @@ load_epiflow_data <- function(path) {
         "Dataset downsampled from %s to %s cells at upload to fit server memory. All rows are kept for the sampled cells, and replicate-level statistics are unaffected.",
         format(n_orig, big.mark = ","), format(ingest_cap, big.mark = ","))
       cat(downsample_note, "\n")
+      # R21: a thinned file says so in its contract.
+      data_contract$n_cells_kept <- ingest_cap
+      data_contract$ingest_seed <- 42L
     }
   }
+  if (is.null(data_contract$n_cells_kept)) data_contract$n_cells_kept <- dplyr::n_distinct(data$cell_id)
 
   # If no genotype column, try common alternatives
   if (!"genotype" %in% names(data)) {
@@ -179,7 +241,8 @@ load_epiflow_data <- function(path) {
   # Columns to exclude from phenotypic markers
   meta_cols <- c("cell_id", "genotype", "replicate", "identity", "cell_cycle",
                  "H3PTM", "value", "sample_id", "raw_identity", "quadrant",
-                 "FxCycle_raw", "FxCycle_aligned", "FxCycle_centered",
+                 "FxCycle_raw", "FxCycle_aligned", "FxCycle_centered", "FxCycle_gating",
+                 "orig_row_number", "omiq_file",   # F4 importer provenance columns
                  "original_genotype", "timepoint", "cell_type", "condition", "treatment")
   numeric_cols <- names(data)[sapply(data, is.numeric)]
   phenotypic_markers <- setdiff(numeric_cols, c(meta_cols, "value"))
@@ -188,6 +251,7 @@ load_epiflow_data <- function(path) {
   known_meta <- c("genotype", "replicate", "identity", "cell_cycle")
   skip_cols <- c("cell_id", "H3PTM", "value", "sample_id", "raw_identity",
                  "quadrant", "FxCycle_raw", "FxCycle_aligned", "FxCycle_centered",
+                 "FxCycle_gating", "orig_row_number", "omiq_file",   # F4: provenance, not grouping
                  "original_genotype")
   all_cat_cols <- names(data)[sapply(data, function(x) is.character(x) || is.factor(x))]
   # Also detect numeric columns with few unique values (e.g. timepoint = 0, 24, 48)
@@ -233,7 +297,8 @@ load_epiflow_data <- function(path) {
     cell_cycles = safe_I(sort(unique(data$cell_cycle))),
     replicates = safe_I(sort(unique(data$replicate))),
     downsampled = !is.null(downsample_note),
-    downsample_note = downsample_note
+    downsample_note = downsample_note,
+    data_contract = data_contract   # R21
   )
   # Append meta_levels for each available_meta column
   result <- c(result, meta_levels)
@@ -1435,7 +1500,12 @@ generate_example_data <- function(seed = 4242, cells_per_rep = 600) {
 
   long <- merge(long, pheno_df, by = "cell_id", all.x = TRUE, sort = FALSE)
   rownames(long) <- NULL
-  long
+  # R21: the synthetic example is on the arcsinh scale by construction; stamp
+  # it so it is not reported as a legacy file (no cofactor exists for it).
+  .epiflow_stamp_contract(long, list(
+    epiflow_schema_version = "2", value_scale = "arcsinh", cofactor_rule = "synthetic",
+    source = "example", importer_version = if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_,
+    import_date = format(Sys.Date()), n_cells_source = dplyr::n_distinct(long$cell_id), epiflow_mode = "standard"))
 }
 
 # ----------------------------------------------------------------------------
@@ -1625,5 +1695,10 @@ generate_example_pbmc <- function(seed = 7373, cells_per_rep = 600) {
 
   long <- merge(long, pheno_df, by = "cell_id", all.x = TRUE, sort = FALSE)
   rownames(long) <- NULL
-  long
+  # R21: the synthetic example is on the arcsinh scale by construction; stamp
+  # it so it is not reported as a legacy file (no cofactor exists for it).
+  .epiflow_stamp_contract(long, list(
+    epiflow_schema_version = "2", value_scale = "arcsinh", cofactor_rule = "synthetic",
+    source = "example", importer_version = if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_,
+    import_date = format(Sys.Date()), n_cells_source = dplyr::n_distinct(long$cell_id), epiflow_mode = "standard"))
 }

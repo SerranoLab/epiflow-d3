@@ -576,7 +576,23 @@ the in-app Methods for the volcano; axis label text asserted in
 ---
 
 ## R21 — Data contract: the arcsinh transform and its cofactor are assumed, never stamped or checked
-Status: open (2026-09-25)
+Status: done (2026-10-02); branch `features/import`, commit "R21: data contract"; the importer that writes the stamps is F4
+
+Done. `.epiflow_read_contract()` (`helpers.R`) reads every contract attribute
+(`epiflow_schema_version, value_scale, cofactors, cofactor_rule, dna_cofactor,
+dna_gating_cofactor, source, omiq_workflow_id, importer_version, import_date,
+instrument, panel, sample_sheet, cell_cycle_gating, n_cells_source,
+n_cells_kept, ingest_seed, epiflow_mode`) before any dplyr step; the loader
+fills `n_cells_source` / `n_cells_kept` and, when `EPIFLOW_MAX_CELLS_INGEST`
+thins a file, `ingest_seed = 42`; a file without the stamps is `legacy = TRUE`
+with a warning, `value_scale = "arcsinh (assumed; not stamped)"` and
+`cofactor_rule = "unknown"`. `data_contract` travels in both ingest responses
+and `/api/metadata`; the sidebar data summary shows the contract line or the
+legacy warning. `.cofactor_required(store)` returns the R21 error for any
+endpoint that needs a cofactor (Gate Finder export, R32 (3)); nothing refuses
+a legacy file otherwise. `.epiflow_stamp_contract()` writes the stamps; the
+two example generators stamp `value_scale = "arcsinh"`, `cofactor_rule =
+"synthetic"`, `source = "example"`. Test: `test_data_contract.R`.
 
 What changes. `load_epiflow_data()` (`helpers.R:83-170`) never inspects
 `value`: no transform attribute is read, no cofactor is recorded, and the
