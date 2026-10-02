@@ -799,9 +799,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: comparison_var from the request (else the genotype column); the helper echoes it.
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)
   compute_cycle_distribution(
     store$filtered_data,
-    comparison_var = params$comparison_var %||% "genotype"
+    comparison_var = g$col
   )
 }
 
@@ -813,12 +815,14 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
-  geno_col <- store$metadata$genotype_col %||% "genotype"
-  compute_cycle_marker_analysis(
-    store$filtered_data,
-    phase = params$phase %||% "all",
-    comparison_var = params$comparison_var %||% geno_col
-  )
+  g <- .resolve_grouping(params, store); if (!is.null(g$error)) return(g$error)   # R34
+  .with_grouping(
+    compute_cycle_marker_analysis(
+      store$filtered_data,
+      phase = params$phase %||% "all",
+      comparison_var = g$col
+    ),
+    comparison_var = g$col)
 }
 
 # ===========================================================================

@@ -2110,7 +2110,7 @@ const App = {
     const cellW = Math.floor((container.clientWidth - 20) / cols);
     const cellH = hasViolins ? 220 : 180;
 
-    const palette = DataManager.serverPalette?.genotype || {};
+    const palette = DataManager.serverPalette?.[DataManager.getComparisonVar()] || {};   // R34: groups are levels of the comparison variable
     const defaultColors = OKABE_ITO;   // L10: Okabe-Ito default (palettes.js)
     const colorScale = d3.scaleOrdinal()
       .domain(groups)

@@ -93,5 +93,23 @@ hm3 <- post(paste0("/api/viz/heatmap/", sid), list())
 check(identical(chr(hm3$group_by), "genotype"), "no keys: the genotype column, echoed (the fixed identity default is gone)")
 check(has("frontend/js/charts/heatmap.js", "options.groupBy || data.group_by || DataManager.getComparisonVar()"), "heatmap.js title names the payload's grouping column")
 
+# ================================================================== Cell Cycle
+cat("\n--- Cell Cycle: /api/viz/cellcycle and /cellcycle-markers group by comparison_var and echo it ---\n")
+cc1 <- post(paste0("/api/viz/cellcycle/", sid), list(comparison_var = "condition"))
+check(is.null(cc1$error) && setequal(unique(chr(lapply(cc1$proportions, `[[`, "group"))), COND) && identical(chr(cc1$comparison_var), "condition"),
+      "cellcycle: phase proportions per condition level, echoed")
+exp_tot <- table(cells$condition)
+tot <- vapply(COND, function(l) num(Filter(function(p) chr(p$group) == l, cc1$proportions)[[1]]$total), numeric(1))
+check(all(tot == as.integer(exp_tot[COND])), "cellcycle: per-level totals equal the condition cell counts")
+cc2 <- post(paste0("/api/viz/cellcycle/", sid), list())
+check(identical(chr(cc2$comparison_var), "genotype"), "cellcycle with no key: the genotype column, echoed")
+cm1 <- post(paste0("/api/viz/cellcycle-markers/", sid), list(phase = "all", comparison_var = "condition"))
+check(is.null(cm1$error) && setequal(chr(cm1$groups), COND) && identical(chr(cm1$comparison_var), "condition"), "cellcycle-markers: groups are the condition levels, comparison_var echoed")
+check(setequal(unique(chr(lapply(cm1$violins, `[[`, "group"))), COND), "cellcycle-markers: per-marker violins are per condition level")
+cm2 <- post(paste0("/api/viz/cellcycle-markers/", sid), list(phase = "all", comparison_var = "not_a_column"))
+check(!is.null(cm2$error) && grepl("comparison_var column not found", chr(cm2$error), fixed = TRUE), "cellcycle-markers: unknown column returns the error")
+check(has("frontend/js/app.js", "DataManager.serverPalette?.[DataManager.getComparisonVar()] || {};   // R34: groups are levels of the comparison variable"),
+      "cell-cycle marker chart palette is keyed by the comparison variable, not genotype")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)
