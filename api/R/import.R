@@ -90,11 +90,14 @@ omiq_scaling <- function(path) {
 # tallest. The two TALLEST prominent peaks are returned ordered by position,
 # so a sub-G1 debris peak (small, left of G1) can never become "peak 1".
 # Values below the 1st percentile are ignored before the density is fit.
-omiq_density_peaks <- function(x, prominence = 0.20, trim_low = 0.01) {
+# Two peaks closer than `min_sep` (0.35 on the arcsinh scale; G1 and G2 sit
+# ln 2 ≈ 0.69 apart) are one split peak, not G1 / G2: only the taller is kept.
+OMIQ_MIN_PEAK_SEP <- 0.35
+omiq_density_peaks <- function(x, prominence = 0.20, trim_low = 0.01, min_sep = OMIQ_MIN_PEAK_SEP) {
   x <- x[is.finite(x)]
   if (length(x) >= 10 && trim_low > 0) x <- x[x >= stats::quantile(x, trim_low, names = FALSE)]
   if (length(x) < 10) return(list(x = NULL, y = NULL, peaks = numeric(0), heights = numeric(0)))
-  d <- tryCatch(stats::density(x, bw = "SJ"), error = function(e) stats::density(x))
+  d <- tryCatch(stats::density(x, bw = "SJ", n = 2048), error = function(e) stats::density(x, n = 2048))
   n <- length(d$y)
   is_peak <- c(FALSE, d$y[2:(n - 1)] > d$y[1:(n - 2)] & d$y[2:(n - 1)] >= d$y[3:n], FALSE)
   idx <- which(is_peak)
@@ -104,6 +107,7 @@ omiq_density_peaks <- function(x, prominence = 0.20, trim_low = 0.01) {
   kh <- d$y[keep]
   top <- keep[order(kh, decreasing = TRUE)][seq_len(min(2, length(keep)))]
   top <- sort(top)
+  if (length(top) == 2 && abs(d$x[top[2]] - d$x[top[1]]) < min_sep) top <- top[which.max(d$y[top])]
   list(x = d$x, y = d$y, peaks = d$x[top], heights = d$y[top], all_peaks = d$x[keep])
 }
 
@@ -114,8 +118,7 @@ omiq_find_mode <- function(x, prefer_lower = TRUE) {
   if (length(x) < 10) return(stats::median(x))
   p <- omiq_density_peaks(x, prominence = 0.20)
   if (!length(p$peaks)) return(stats::median(x))
-  if (!prefer_lower || length(p$peaks) == 1) return(p$peaks[which.max(p$heights)])
-  p$peaks[1]
+  if (!prefer_lower || length(p$peaks) == 1) p$peaks[which.max(p$heights)] else p$peaks[1]
 }
 
 # G2/M threshold: the valley between the two tallest prominent peaks
@@ -314,4 +317,224 @@ omiq_sheet_template <- function(files) {
   tpl <- data.frame(file = files, condition = "", genotype = "", replicate = "", identity = "", role = "", stringsAsFactors = FALSE)
   tc <- textConnection("out", "w", local = TRUE); utils::write.csv(tpl, tc, row.names = FALSE); close(tc)
   paste(out, collapse = "\n")
+}
+
+# ============================================================================
+# F4b: transform, cell-cycle gating (ported from the Shiny converter), long
+# format, stamped attributes, and the run job.
+# ============================================================================
+
+# Shared loader for inspect and run: the export as RAW values (back-transformed
+# when declared scaled and a Scaling CSV exists), channels, scaling, flags.
+omiq_load_prepared <- function(raw_path, scaling_path, declared = "raw") {
+  df <- omiq_read_export(raw_path)
+  channels <- omiq_channels(df)
+  scaling <- if (!is.null(scaling_path) && file.exists(scaling_path) && file.size(scaling_path) > 0)
+    tryCatch(omiq_scaling(scaling_path), error = function(e) NULL) else NULL
+  back_transformed <- FALSE; not_bt <- character(0)
+  if (identical(declared, "scaled") && !is.null(scaling)) {
+    bt <- omiq_back_transform(df, channels, scaling); df <- bt$df; back_transformed <- TRUE; not_bt <- bt$missing
+  }
+  list(df = df, channels = channels, scaling = scaling, back_transformed = back_transformed,
+       not_back_transformed = not_bt, values_are_raw = identical(declared, "raw") || back_transformed)
+}
+
+# Per-sample DNA alignment and cell-cycle assignment. `dna_g` is the DNA on
+# the GATING scale (asinh(raw / dna_gating_cofactor)); `sample` the file per
+# cell; `ph3` the transformed phH3 or NULL; `group` the per-cell genotype
+# (for threshold_scope = "per_group").
+# `support` is an optional named list of per-cell vectors (Ki67, CyclinD1 on
+# the arcsinh scale) used ONLY for QC after assignment, never as an input.
+omiq_cell_cycle <- function(dna_g, sample, ph3 = NULL, group = NULL, opts = list(), support = list()) {
+  method <- opts$method %||% "valley"            # valley | percentile | ln2 | manual
+  scope  <- opts$threshold_scope %||% "global"   # global | per_group
+  s_on   <- isTRUE(opts$s_phase)
+  s_fraction <- as.numeric(opts$s_fraction %||% 0.4)
+  pct    <- as.numeric(opts$percentile %||% 0.75)   # for method = "percentile" (0.75 or 0.90, explicit)
+  n <- length(dna_g)
+  samples <- sort(unique(as.character(sample)))
+  # 1. align each sample's G0/G1 mode to zero; a sample with fewer than 10
+  #    finite DNA values has no mode: its cells stay "Unassigned".
+  g1_mode <- vapply(samples, function(s) { v <- dna_g[sample == s]; v <- v[is.finite(v)]; if (length(v) < 10) NA_real_ else omiq_find_mode(v, prefer_lower = TRUE) }, numeric(1))
+  aligned <- dna_g - unname(g1_mode[as.character(sample)])
+  # 2. G2/M threshold on the aligned scale.
+  # "valley": the valley between the two prominent peaks; when no second peak
+  # exists the rule falls back to "ln2_midpoint" — the G2 population sits at
+  # +ln 2 above the aligned G0/G1 mode (twice the DNA), so the threshold is
+  # +ln(2)/2. The percentile rules are explicit methods only, never fallbacks.
+  ln2_rule <- list(threshold = log(2) / 2, rule = "ln2_midpoint", peaks = numeric(0))
+  thr_one <- function(x) switch(method,
+    manual = list(threshold = as.numeric(opts$g2_threshold), rule = "manual", peaks = numeric(0)),
+    percentile = list(threshold = unname(stats::quantile(x, pct, na.rm = TRUE)), rule = paste0("percentile_", round(100 * pct)), peaks = numeric(0)),
+    ln2 = ln2_rule,
+    { v <- omiq_find_valley(x[is.finite(x)]); if (identical(v$rule, "valley")) v else c(ln2_rule, list(valley_attempt = v$rule)) })
+  if (identical(scope, "per_group") && !is.null(group)) {
+    groups <- sort(unique(as.character(group)))
+    per <- lapply(groups, function(g) thr_one(aligned[group == g])); names(per) <- groups
+    g2_threshold <- vapply(per, function(p) p$threshold, numeric(1)); g2_rule <- vapply(per, function(p) p$rule, character(1))
+    row_thr <- unname(g2_threshold[as.character(group)])
+  } else {
+    one <- thr_one(aligned); g2_threshold <- one$threshold; g2_rule <- one$rule; row_thr <- rep(one$threshold, n)
+  }
+  # 3. phH3 threshold (M phase): valley on the stained phH3; 2.5 only when unimodal; manual override
+  ph3_threshold <- NA_real_; ph3_rule <- NA_character_
+  if (!is.null(ph3)) {
+    if (!is.null(opts$ph3_threshold) && is.finite(as.numeric(opts$ph3_threshold))) { ph3_threshold <- as.numeric(opts$ph3_threshold); ph3_rule <- "manual" }
+    else { v <- omiq_find_valley(ph3); if (identical(v$rule, "valley")) { ph3_threshold <- v$threshold; ph3_rule <- "valley" } else { ph3_threshold <- 2.5; ph3_rule <- "unimodal_default" } }
+  }
+  # 4. S boundary = fraction of the G2/M threshold (rescaled per group)
+  row_s <- if (s_on) row_thr * s_fraction else NULL
+  # 5. assignment (the converter's four branches)
+  above <- aligned > row_thr
+  mitotic <- if (!is.null(ph3)) ph3 > ph3_threshold else NULL
+  cc <- if (s_on && !is.null(ph3)) ifelse(aligned <= row_s, "G0/G1", ifelse(!above, "S", ifelse(mitotic, "M", "G2")))
+    else if (s_on) ifelse(aligned <= row_s, "G0/G1", ifelse(!above, "S", "G2/M"))
+    else if (!is.null(ph3)) ifelse(!above, "G0/G1", ifelse(mitotic, "M", "G2"))
+    else ifelse(!above, "G0/G1", "G2/M")
+  cc[is.na(cc)] <- "Unassigned"
+  # 6. QC per sample: G1 mode (gating scale), G2-G1 peak spacing (expected ln 2), CV of G1 modes
+  spacing <- vapply(samples, function(s) { v <- dna_g[sample == s]; v <- v[is.finite(v)]; if (length(v) < 10) return(NA_real_); p <- omiq_density_peaks(v, prominence = 0.10); if (length(p$peaks) == 2) diff(p$peaks) else NA_real_ }, numeric(1))
+  qc <- data.frame(sample = samples, g1_mode = unname(g1_mode), g2_g1_spacing = unname(spacing),
+                   spacing_flag = ifelse(is.na(g1_mode), "no G1 mode (Unassigned)", ifelse(is.na(spacing), "no second peak", ifelse(spacing < 0.55 | spacing > 0.85, "OUT OF RANGE", "OK"))),
+                   n_cells = as.integer(table(factor(sample, levels = samples))), stringsAsFactors = FALSE)
+  cv <- function(v) { v <- v[is.finite(v)]; if (length(v) >= 2 && mean(v) != 0) 100 * stats::sd(v) / abs(mean(v)) else NA_real_ }
+  cv_all <- cv(g1_mode)
+  qc$g1_mode_cv_pct <- cv_all
+  qc$g1_cv_flag <- if (is.na(cv_all)) "n/a" else if (cv_all > 15) "HIGH" else if (cv_all > 8) "MODERATE" else "OK"
+  # 7. support-marker QC (optional, never an input to the assignment): Ki67
+  #    should be higher in assigned G2/M than in G0/G1; CyclinD1 the reverse
+  #    (a G1 cyclin — a weaker check). Absent markers add no columns.
+  g2m <- cc %in% c("G2", "M", "G2/M"); g1c <- cc == "G0/G1"
+  med_by <- function(v, sel) vapply(samples, function(s) { w <- v[sample == s & sel]; if (sum(is.finite(w)) >= 5) stats::median(w, na.rm = TRUE) else NA_real_ }, numeric(1))
+  if (!is.null(support$Ki67)) {
+    qc$ki67_median_g1 <- unname(med_by(support$Ki67, g1c)); qc$ki67_median_g2m <- unname(med_by(support$Ki67, g2m))
+    qc$ki67_flag <- ifelse(is.na(qc$ki67_median_g1) | is.na(qc$ki67_median_g2m), "n/a", ifelse(qc$ki67_median_g2m > qc$ki67_median_g1, "OK", "NOT HIGHER in G2/M"))
+  }
+  if (!is.null(support$CyclinD1)) {
+    qc$cyclind1_median_g1 <- unname(med_by(support$CyclinD1, g1c)); qc$cyclind1_median_g2m <- unname(med_by(support$CyclinD1, g2m))
+    qc$cyclind1_flag <- ifelse(is.na(qc$cyclind1_median_g1) | is.na(qc$cyclind1_median_g2m), "n/a (weaker)", ifelse(qc$cyclind1_median_g1 > qc$cyclind1_median_g2m, "OK (weaker)", "NOT HIGHER in G0/G1 (weaker)"))
+  }
+  list(cell_cycle = cc, aligned = aligned,
+       gating = list(method = method, threshold_scope = scope, g2_threshold = g2_threshold, g2_rule = g2_rule,
+                     s_phase = s_on, s_rule = "fraction_of_g2_threshold", s_fraction = s_fraction,
+                     ph3_threshold = ph3_threshold, ph3_rule = ph3_rule, alignment = "per sample (G0/G1 mode subtracted)",
+                     support_markers = names(support), phases = sort(unique(cc)), qc = qc))
+}
+
+# The whole import: returns list(data, summary, contract) or stops with a message.
+# `progress(stage, pct, message)` is called at each step.
+omiq_run <- function(imp, params, progress = function(...) NULL) {
+  progress("read", 5, "Reading the export")
+  prep <- omiq_load_prepared(imp$paths$raw, imp$paths$scaling, imp$declared_scale)
+  df <- prep$df; channels <- prep$channels
+  ins <- omiq_inspect(imp$paths$raw, imp$paths$scaling, imp$paths$sample_sheet, declared = imp$declared_scale)
+  if (!is.null(ins$error)) stop(ins$error)
+  file_col <- ins$file_column; row_col <- ins$row_column
+  sheet <- ins$sample_sheet
+  # single-replicate guard
+  if (isTRUE(ins$any_single_replicate) && !isTRUE(params$confirm_single_replicate)) {
+    srg <- ins$single_replicate_groups
+    stop("Group(s) with a single replicate: ", paste(paste(srg$condition, srg$genotype, sep = " / "), collapse = "; "),
+         ". Replicate-level tests will not be estimable for them; set confirm_single_replicate = TRUE to export anyway.")
+  }
+  # blank out; per-file metadata in
+  blank_file <- ins$blank_file
+  keep <- if (!is.null(blank_file)) df[[file_col]] != blank_file else rep(TRUE, nrow(df))
+  df <- df[keep, , drop = FALSE]
+  stained <- sheet[sheet$role != "blank", , drop = FALSE]
+  m <- match(as.character(df[[file_col]]), stained$file)
+  if (anyNA(m)) stop("cells from a file that is not in the sample sheet: ", paste(unique(df[[file_col]][is.na(m)]), collapse = ", "))
+  progress("metadata", 20, "Joining the sample sheet")
+  extras <- setdiff(names(stained), c("file", "condition", "genotype", "replicate", "identity", "role"))
+  cells <- data.frame(cell_id = seq_len(nrow(df)), orig_row_number = if (!is.na(row_col)) df[[row_col]] else NA_integer_,
+                      omiq_file = as.character(df[[file_col]]),
+                      condition = as.character(stained$condition[m]), genotype = as.character(stained$genotype[m]),
+                      replicate = as.character(stained$replicate[m]), stringsAsFactors = FALSE)
+  for (e in extras) cells[[e]] <- stained[[e]][m]
+  # identity: a filter column (per cell; last path segment unless asked otherwise), the sheet value, or "All"
+  id_src <- params$identity_source %||% ins$identity_source
+  filter_cols <- channels$column[channels$role == "filter"]
+  if (id_src %in% filter_cols) {
+    idv <- as.character(df[[id_src]])
+    if (!isTRUE(params$identity_full_path)) idv <- sub("^.*/", "", idv)
+    cells$identity <- idv
+  } else if (identical(id_src, "sheet")) cells$identity <- as.character(stained$identity[m])
+  else cells$identity <- "All"
+  cells$identity[is.na(cells$identity) | !nzchar(cells$identity)] <- "Unassigned"
+  # cofactors: chosen per channel (named by EpiFlow name), else the inspect defaults
+  cof_tbl <- ins$cofactors
+  chosen <- list(); rules <- list()
+  for (r in cof_tbl) {
+    nm <- r$epiflow_name
+    v <- params$cofactors[[nm]]; rl <- params$cofactor_rule[[nm]]
+    if (is.null(v) || !is.finite(as.numeric(v))) { v <- r$default_cofactor; rl <- r$default_rule }
+    chosen[[nm]] <- as.numeric(v); rules[[nm]] <- if (is.null(rl)) "manual" else as.character(rl)
+  }
+  dna_name <- channels$epiflow_name[channels$role == "dna"][1]
+  dna_cof <- if (!is.na(dna_name)) (if (!is.null(params$dna_cofactor)) as.numeric(params$dna_cofactor) else chosen[[dna_name]]) else NA_real_
+  if (!is.na(dna_name) && is.finite(dna_cof)) { chosen[[dna_name]] <- dna_cof; if (!is.null(params$dna_cofactor)) rules[[dna_name]] <- "manual" }
+  dna_gating_cof <- if (!is.na(dna_name)) (if (!is.null(params$dna_gating_cofactor)) as.numeric(params$dna_gating_cofactor) else dna_cof) else NA_real_
+  unknown <- vapply(chosen, function(v) !is.finite(v), logical(1))
+  if (any(unknown) && prep$values_are_raw) stop("No cofactor for channel(s): ", paste(names(chosen)[unknown], collapse = ", "), " — set one in the cofactor panel.")
+  # transform
+  progress("transform", 35, "Applying asinh(x / cofactor) per channel")
+  chan <- channels[channels$role %in% c("h3", "phenotypic", "dna", "ph3"), , drop = FALSE]
+  wide <- cells
+  for (i in seq_len(nrow(chan))) {
+    nm <- chan$epiflow_name[i]; x <- df[[chan$column[i]]]
+    wide[[nm]] <- if (prep$values_are_raw && is.finite(chosen[[nm]])) asinh(x / chosen[[nm]]) else x
+  }
+  # cell cycle
+  progress("cellcycle", 55, "Gating the cell cycle (per-sample G0/G1 alignment)")
+  gating <- NULL
+  if (!is.na(dna_name)) {
+    raw_dna <- df[[chan$column[chan$role == "dna"][1]]]
+    if (isTRUE(params$outliers)) {
+      lo <- as.numeric(params$outlier_low_pct %||% 1); hi <- as.numeric(params$outlier_high_pct %||% 99)
+      b <- stats::quantile(raw_dna, c(lo, hi) / 100, na.rm = TRUE)
+      ok <- raw_dna >= b[1] & raw_dna <= b[2]
+      df <- df[ok, , drop = FALSE]; wide <- wide[ok, , drop = FALSE]; raw_dna <- raw_dna[ok]; wide$cell_id <- seq_len(nrow(wide))
+    }
+    dna_g <- if (prep$values_are_raw) asinh(raw_dna / dna_gating_cof) else raw_dna
+    ph3 <- if ("phH3" %in% names(wide)) wide$phH3 else NULL
+    # support markers for QC only: a Ki67 channel and a CyclinD1 channel, when present
+    support <- list()
+    ki <- grep("^ki67$", names(wide), ignore.case = TRUE, value = TRUE); if (length(ki)) support$Ki67 <- wide[[ki[1]]]
+    cy <- grep("^cyclin_?d1$", names(wide), ignore.case = TRUE, value = TRUE); if (length(cy)) support$CyclinD1 <- wide[[cy[1]]]
+    cc <- omiq_cell_cycle(dna_g, wide$omiq_file, ph3 = ph3, group = wide$genotype, opts = params$cell_cycle %||% list(), support = support)
+    wide$cell_cycle <- cc$cell_cycle; wide$FxCycle_aligned <- cc$aligned
+    gating <- cc$gating
+    gating$outliers <- if (isTRUE(params$outliers)) list(low_pct = lo, high_pct = hi, removed = sum(!ok)) else list(removed = 0L)
+  } else wide$cell_cycle <- "Unassigned"
+  # long format
+  progress("long", 80, "Writing the long format")
+  h3 <- chan$epiflow_name[chan$role == "h3"]
+  phenotype_only <- length(h3) == 0
+  long <- if (phenotype_only) { wide$H3PTM <- "none"; wide$value <- NA_real_; wide } else
+    tidyr::pivot_longer(wide, cols = dplyr::all_of(h3), names_to = "H3PTM", values_to = "value") %>% as.data.frame()
+  # stamps
+  contract <- list(
+    epiflow_schema_version = "2", value_scale = if (prep$values_are_raw) "arcsinh" else "arcsinh (as exported; cofactor unknown)",
+    cofactors = unlist(chosen), cofactor_rule = unlist(rules),
+    dna_cofactor = dna_cof, dna_gating_cofactor = dna_gating_cof,
+    source = "omiq_csv", source_scale = imp$declared_scale,
+    omiq_workflow_id = params$omiq_workflow_id %||% NA_character_,
+    importer_version = getOption("epiflow.version", if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_),
+    import_date = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+    instrument = params$instrument %||% NA_character_, panel = params$panel %||% NA_character_,
+    sample_sheet = sheet, cell_cycle_gating = gating,
+    n_cells_source = nrow(wide), epiflow_mode = if (phenotype_only) "phenotype_only" else "standard")
+  long <- .epiflow_stamp_contract(long, contract)
+  attr(long, "source_scale") <- imp$declared_scale
+  # summary for the result card
+  per_group <- wide %>% dplyr::count(condition, genotype, replicate, omiq_file, name = "n_cells") %>% as.data.frame()
+  cc_frac <- if (!is.null(gating)) wide %>% dplyr::count(omiq_file, cell_cycle) %>% dplyr::group_by(omiq_file) %>%
+    dplyr::mutate(fraction = n / sum(n)) %>% dplyr::ungroup() %>% as.data.frame() else NULL
+  summary <- list(n_cells = nrow(wide), n_rows = nrow(long), n_h3 = length(h3), h3_markers = h3,
+                  phenotypic_markers = chan$epiflow_name[chan$role == "phenotypic"], phenotype_only = phenotype_only,
+                  blank_excluded = blank_file, per_sample = per_group, cell_cycle_fractions = cc_frac,
+                  gating = gating, cofactors = chosen, cofactor_rule = rules, dna_cofactor = dna_cof, dna_gating_cofactor = dna_gating_cof,
+                  identity_source = id_src, identity_levels = sort(unique(wide$identity)), extras = extras)
+  progress("done", 100, "Done")
+  list(data = long, summary = summary, contract = contract)
 }

@@ -50,6 +50,34 @@ vu <- omiq_find_valley(uni)
 check(identical(vu$rule, "unimodal_percentile_90") && abs(vu$threshold - quantile(uni, 0.9)) < 1e-9, "unimodal distribution falls back to the 90th percentile, and says so")
 check(identical(omiq_find_valley(rnorm(30))$rule, "percentile_75_fallback"), "fewer than 50 values fall back to the 75th percentile")
 
+# ---- in-process: cell-cycle rules, Unassigned, support-marker QC ----
+cat("\n--- 0a. omiq_cell_cycle: ln2 fallback, Unassigned, Ki67 / CyclinD1 QC ---\n")
+set.seed(11)
+mk_sample <- function(n, g1 = 5, bimodal = TRUE) if (bimodal) c(rnorm(round(n * .7), g1, .06), rnorm(round(n * .22), g1 + log(2), .07), runif(round(n * .08), g1 + .15, g1 + .55)) else rnorm(n, g1, .25)
+sA <- mk_sample(4000, 5.0); sB <- mk_sample(4000, 5.2, bimodal = FALSE); sC <- rnorm(5, 5, .1)   # bimodal, unimodal, too few
+dna <- c(sA, sB, sC); smp <- c(rep("A", length(sA)), rep("B", length(sB)), rep("C", length(sC)))
+cc1 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp)
+check(identical(unname(cc1$gating$g2_rule["A"]), "valley") && identical(unname(cc1$gating$g2_rule["B"]), "ln2_midpoint") && abs(cc1$gating$g2_threshold[["B"]] - log(2) / 2) < 1e-9,
+      "valley where a second peak exists; ln2_midpoint (+ln 2 / 2) where it does not — never a silent percentile")
+check(all(cc1$cell_cycle[smp == "C"] == "Unassigned") && is.na(cc1$gating$qc$g1_mode[cc1$gating$qc$sample == "C"]) && grepl("no G1 mode", cc1$gating$qc$spacing_flag[cc1$gating$qc$sample == "C"]),
+      "a sample with fewer than 10 cells has no G1 mode: its cells are Unassigned and the QC row says so")
+ccP <- omiq_cell_cycle(dna, smp, opts = list(method = "percentile", percentile = 0.9))
+check(identical(ccP$gating$g2_rule, "percentile_90"), "the 90th percentile is available only as the explicit method percentile (0.90)")
+# support markers: Ki67 higher in G2/M (OK), CyclinD1 higher in G0/G1 (OK, weaker); then reversed
+is_g2m <- cc1$cell_cycle %in% c("G2", "M", "G2/M")
+ki <- ifelse(is_g2m, rnorm(length(dna), 3, .2), rnorm(length(dna), 1.5, .2)); cy <- ifelse(is_g2m, rnorm(length(dna), 1, .2), rnorm(length(dna), 2.5, .2))
+cc2 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp, support = list(Ki67 = ki, CyclinD1 = cy))
+q2 <- cc2$gating$qc
+check(all(c("ki67_median_g1", "ki67_median_g2m", "ki67_flag", "cyclind1_median_g1", "cyclind1_median_g2m", "cyclind1_flag") %in% names(q2)) && identical(cc2$gating$support_markers, c("Ki67", "CyclinD1")),
+      "support-marker QC columns present when Ki67 and CyclinD1 exist")
+check(all(q2$ki67_flag[q2$sample %in% c("A", "B")] == "OK") && all(q2$cyclind1_flag[q2$sample %in% c("A", "B")] == "OK (weaker)") && q2$ki67_flag[q2$sample == "C"] == "n/a",
+      "Ki67 higher in G2/M → OK; CyclinD1 higher in G0/G1 → OK (weaker); too few cells → n/a")
+check(identical(cc2$cell_cycle, cc1$cell_cycle), "support markers never change the assignment")
+cc3 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp, support = list(Ki67 = -ki, CyclinD1 = -cy))
+check(all(cc3$gating$qc$ki67_flag[1:2] == "NOT HIGHER in G2/M") && all(cc3$gating$qc$cyclind1_flag[1:2] == "NOT HIGHER in G0/G1 (weaker)"), "reversed markers are flagged")
+cc4 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley"), support = list(Ki67 = ki))
+check(!any(grepl("cyclind1", names(cc4$gating$qc))) && any(grepl("ki67", names(cc4$gating$qc))), "an absent support marker adds no columns")
+
 # ---- in-process: channel roles and names ----
 cat("\n--- 0b. channel roles ---\n")
 hdr <- omiq_read_export(file.path(FIX, "npc_raw.csv"), nrows = 5)
@@ -144,6 +172,152 @@ rR <- POST(paste0(BASE, "/api/import/upload"), body = list(raw = upload_file(fil
 check(!is.null(fromJSON(content(rR, as = "text", encoding = "UTF-8"), simplifyVector = FALSE)$error), "a raw export without a Scaling CSV is refused at upload")
 insR <- post(paste0("/api/import/inspect/", upload_import(file.path(FIX, "npc_blank_raw.csv"), file.path(FIX, "npc_scaling.csv"), file.path(FIX, "npc_sample_sheet.csv"), declared = "scaled")$import_id))
 check(!is.null(insR$error) && grepl("looks untransformed", chr(insR$error), fixed = TRUE), "a raw export declared scaled is refused by the scale check")
+
+# ================================================================== F4b: run / progress / result
+cat("\n--- 6. run: progress, result, stamps, equality with the scaled export ---\n")
+run_import <- function(import_id, body = list(), timeout_s = 600) {
+  st <- post(paste0("/api/import/run/", import_id), body)
+  if (!is.null(st$error)) return(list(error = st$error))
+  t0 <- Sys.time(); prog <- NULL
+  repeat {
+    prog <- fromJSON(content(GET(paste0(BASE, "/api/import/progress/", import_id), timeout(60)), as = "text", encoding = "UTF-8"), simplifyVector = FALSE)
+    if (isTRUE(prog$done) || !is.null(prog$error)) break
+    if (as.numeric(difftime(Sys.time(), t0, units = "secs")) > timeout_s) return(list(error = "timeout"))
+    Sys.sleep(0.5)
+  }
+  if (!is.null(prog$error)) return(list(error = prog$error, progress = prog))
+  res <- post(paste0("/api/import/result/", import_id), list(action = "summary"))
+  res$progress_seen <- prog
+  res
+}
+download_rds <- function(import_id) {
+  r <- POST(paste0(BASE, "/api/import/result/", import_id), body = list(action = "download"), encode = "json", timeout(600))
+  f <- tempfile(fileext = ".rds"); writeBin(content(r, as = "raw"), f); readRDS(f)
+}
+# (a) raw blank fixture, OmiQ defaults
+upA <- upload_import(file.path(FIX, "npc_blank_raw.csv"), file.path(FIX, "npc_scaling.csv"), file.path(FIX, "npc_sample_sheet.csv"))
+insA <- post(paste0("/api/import/inspect/", upA$import_id))
+resA <- run_import(upA$import_id, list(omiq_workflow_id = "183012389097095", instrument = "Aurora", panel = "NPC PAX6/H3K27me3"))
+check(is.null(resA$error), paste("run finishes without error", if (!is.null(resA$error)) resA$error else ""))
+check(isTRUE(resA$progress_seen$done) && num(resA$progress_seen$pct) == 100 && identical(chr(resA$progress_seen$stage), "done"), "progress endpoint reports done at 100%")
+check(num(resA$n_cells) == 1500 && is.null(resA$blank_excluded) == FALSE && identical(chr(resA$blank_excluded), "14-Blank.fcs"), "1,500 stained cells kept; the blank file is excluded and named")
+check(num(resA$n_h3) == 6 && num(resA$n_rows) == 1500 * 6, "six H3 marks → 9,000 long rows")
+ps <- resA$per_sample
+check(length(ps) == 8 && setequal(chr(lapply(ps, `[[`, "genotype")), c("180+.-", "180+.+")) && all(num(lapply(ps, `[[`, "n_cells")) > 0), "per-sample table: 8 stained samples with condition / genotype / replicate")
+rdsA <- download_rds(upA$import_id)
+dc <- .epiflow_read_contract(rdsA)
+check(!isTRUE(dc$legacy) && identical(dc$value_scale, "arcsinh") && num(dc$cofactors$Pax6_PE) == 1000 && num(dc$cofactors$FxCycle) == 600 && num(dc$cofactors$H3K27ac) == 6000,
+      "stamped cofactors: Pax6_PE 1000, FxCycle 600, H3K27ac 6000")
+check(identical(dc$cofactor_rule$Pax6_PE, "omiq") && dc$dna_cofactor == 600 && dc$dna_gating_cofactor == 600 && identical(dc$source, "omiq_csv") &&
+      identical(attr(rdsA, "source_scale"), "raw") && identical(dc$omiq_workflow_id, "183012389097095") && identical(dc$instrument, "Aurora") && identical(dc$panel, "NPC PAX6/H3K27me3"),
+      "stamped rule omiq, dna_gating_cofactor defaults to the DNA cofactor, source / workflow / instrument / panel")
+check(is.data.frame(dc$sample_sheet) && nrow(dc$sample_sheet) == 9 && any(dc$sample_sheet$role == "blank"), "the sample sheet (with the blank row) is stamped")
+g <- dc$cell_cycle_gating
+check(is.list(g) && g$g2_rule %in% c("valley", "ln2_midpoint") && is.finite(g$g2_threshold) && identical(g$s_rule, "fraction_of_g2_threshold") && g$s_fraction == 0.4 && !isTRUE(g$s_phase) &&
+      g$ph3_rule %in% c("valley", "unimodal_default") && is.finite(g$ph3_threshold),
+      sprintf("cell_cycle_gating stamped: G2/M %s (%.3f), phH3 %s (%.2f), S rule fraction_of_g2_threshold", g$g2_rule, g$g2_threshold, g$ph3_rule, g$ph3_threshold))
+qc <- g$qc
+check(is.data.frame(qc) && nrow(qc) == 8 && all(c("g1_mode", "g2_g1_spacing", "spacing_flag", "g1_mode_cv_pct", "g1_cv_flag") %in% names(qc)), "QC per sample: G1 mode, G2−G1 spacing with flag, G1-mode CV with flag")
+check(all(c("ki67_flag", "cyclind1_flag") %in% names(qc)) && identical(g$support_markers, c("Ki67", "CyclinD1")) && all(qc$ki67_flag %in% c("OK", "NOT HIGHER in G2/M", "n/a")),
+      sprintf("support-marker QC on the NPC panel (Ki67, CyclinD1): Ki67 flags %s", paste(qc$ki67_flag, collapse = "/")))
+check(dc$n_cells_source == 1500 && is.character(dc$importer_version) && grepl("^[0-9]+\\.[0-9]+", dc$importer_version), sprintf("n_cells_source and importer_version (%s) stamped", dc$importer_version))
+# columns the loader expects, and the provenance columns
+check(all(c("cell_id", "orig_row_number", "omiq_file", "condition", "genotype", "replicate", "identity", "cell_cycle", "FxCycle", "FxCycle_aligned", "phH3", "Pax6_PE", "H3PTM", "value") %in% names(rdsA)),
+      "long format carries the EpiFlow columns, the provenance columns and the sheet columns")
+check(setequal(unique(rdsA$identity), c("PAX6+", "PAX6-", "Apoptotic", "Low H3_PTM Cells")), "identity from OmiqFilter uses the last gate-path segment")
+check(all(unique(rdsA$cell_cycle) %in% c("G0/G1", "G2", "M")), "cell-cycle phases without S: G0/G1 / G2 / M (phH3 present)")
+ccf <- resA$cell_cycle_fractions
+sums <- tapply(num(lapply(ccf, `[[`, "fraction")), chr(lapply(ccf, `[[`, "omiq_file")), sum)
+check(all(abs(sums - 1) < 1e-9), "cell-cycle fractions sum to 1 per sample")
+# (b) equality with OmiQ's scaled export on every channel and row
+sc <- read.csv(file.path(FIX, "npc_blank_scaled.csv"), check.names = FALSE)
+sc <- sc[sc$OmiqFileIndex != "14-Blank.fcs", ]
+chs <- omiq_channels(sc); key_sc <- paste(sc$OmiqFileIndex, sc$Orig_Row_Number)
+wideA <- rdsA[!duplicated(rdsA$cell_id), ]
+key_A <- paste(wideA$omiq_file, wideA$orig_row_number)
+mA <- match(key_A, key_sc)
+check(!anyNA(mA) && length(mA) == nrow(sc), "every imported cell maps to one row of the scaled export (key file + Orig_Row_Number)")
+maxd <- 0
+for (i in which(chs$role %in% c("phenotypic", "dna", "ph3"))) maxd <- max(maxd, max(abs(wideA[[chs$epiflow_name[i]]] - sc[[chs$column[i]]][mA])))
+for (h in chs$epiflow_name[chs$role == "h3"]) { sub <- rdsA[rdsA$H3PTM == h, ]; mm <- match(paste(sub$omiq_file, sub$orig_row_number), key_sc); maxd <- max(maxd, max(abs(sub$value - sc[[chs$column[chs$epiflow_name == h]]][mm]))) }
+check(maxd < 1e-4, sprintf("imported values equal OmiQ's scaled export on every channel and cell (max |diff| %.2g < 1e-4)", maxd))
+# (c) the scaled fixture declared scaled gives the same .rds as the raw fixture declared raw
+upB <- upload_import(file.path(FIX, "npc_blank_scaled.csv"), file.path(FIX, "npc_scaling.csv"), file.path(FIX, "npc_sample_sheet.csv"), declared = "scaled")
+resB <- run_import(upB$import_id, list(omiq_workflow_id = "183012389097095"))
+check(is.null(resB$error), "scaled-as-scaled run finishes")
+rdsB <- download_rds(upB$import_id)
+same_cols <- setdiff(names(rdsA), character(0))
+num_cols <- names(rdsA)[vapply(rdsA, is.numeric, logical(1))]
+dmax <- max(vapply(setdiff(num_cols, c("cell_id", "FxCycle_aligned")), function(cn) max(abs(rdsA[[cn]] - rdsB[[cn]]), na.rm = TRUE), numeric(1)))
+dal  <- max(abs(rdsA$FxCycle_aligned - rdsB$FxCycle_aligned), na.rm = TRUE)
+chr_same <- all(vapply(setdiff(names(rdsA), num_cols), function(cn) identical(as.character(rdsA[[cn]]), as.character(rdsB[[cn]])), logical(1)))
+check(identical(names(rdsA), names(rdsB)) && nrow(rdsA) == nrow(rdsB) && dmax < 1e-4 && chr_same, sprintf("scaled-as-scaled .rds equals raw-as-raw .rds (numeric max |diff| %.2g < 1e-4; every label identical)", dmax))
+check(dal < 5e-3, sprintf("FxCycle_aligned agrees to %.2g on the 190-cell fixture samples (per-sample density argmax; bound 5e-3 here, 2e-4 on the full export below)", dal))
+dcB <- .epiflow_read_contract(rdsB)
+check(identical(attr(rdsB, "source_scale"), "scaled") && identical(unlist(dcB$cofactors), unlist(dc$cofactors)) && identical(dcB$cell_cycle_gating$g2_rule, dc$cell_cycle_gating$g2_rule),
+      "source_scale = scaled stamped; cofactors and gating rules identical to the raw import")
+# (d) single-replicate guard on run
+sh <- read.csv(file.path(FIX, "npc_sample_sheet.csv"), stringsAsFactors = FALSE)
+sh1 <- sh; sh1$replicate[sh1$genotype == "180+.+"] <- "r1"
+t1 <- tempfile(fileext = ".csv"); write.csv(sh1, t1, row.names = FALSE)
+upC <- upload_import(file.path(FIX, "npc_blank_raw.csv"), file.path(FIX, "npc_scaling.csv"), t1)
+invisible(post(paste0("/api/import/inspect/", upC$import_id)))
+resC <- run_import(upC$import_id, list())
+check(!is.null(resC$error) && grepl("single replicate: NPC / 180+.+", chr(resC$error), fixed = TRUE), "run refuses a one-replicate group without confirmation, naming it")
+resC2 <- run_import(upC$import_id, list(confirm_single_replicate = TRUE))
+check(is.null(resC2$error) && num(resC2$n_cells) == 1500, "run proceeds with confirm_single_replicate = TRUE")
+# (e) load into a session: sheet columns reach available_meta and the grouping list
+ld <- post(paste0("/api/import/result/", upA$import_id), list(action = "load"))
+check(is.null(ld$error) && grepl("^s_", chr(ld$session_id)) && num(ld$n_cells) == 1500 && isTRUE(ld$imported), "result action = load opens a data session")
+check("condition" %in% chr(ld$available_meta) && !"omiq_file" %in% chr(ld$available_meta) && !"orig_row_number" %in% chr(ld$available_meta) &&
+      setequal(chr(ld$genotype_levels), c("180+.-", "180+.+")) && length(chr(ld$replicates)) == 8,
+      "loaded session: condition in available_meta (grouping list), provenance columns not, 2 genotypes, 8 replicates")
+check(!isTRUE(ld$data_contract$legacy) && num(ld$data_contract$cofactors$Pax6_PE) == 1000, "loaded session carries the stamped data_contract")
+ov <- post(paste0("/api/data/overview/", ld$session_id), list(comparison_var = "condition"))
+check(is.null(ov$error) && identical(chr(ov$comparison_var), "condition") && num(ov$n_cells) == 1500, "the overview groups the imported session by a sheet column through .resolve_grouping")
+# (f) manual overrides and S phase
+resD <- run_import(upload_import(file.path(FIX, "npc_blank_raw.csv"), file.path(FIX, "npc_scaling.csv"), file.path(FIX, "npc_sample_sheet.csv"))$import_id,
+                   list(cofactors = list(Pax6_PE = 1500), cofactor_rule = list(Pax6_PE = "manual"), dna_gating_cofactor = 150,
+                        cell_cycle = list(method = "valley", s_phase = TRUE, s_fraction = 0.4, ph3_threshold = 2.5)))
+check(is.null(resD$error) && num(resD$cofactors$Pax6_PE) == 1500 && identical(chr(resD$cofactor_rule$Pax6_PE), "manual") && num(resD$dna_gating_cofactor) == 150 && num(resD$dna_cofactor) == 600,
+      "manual cofactor + rule and a separate DNA gating cofactor (150) are honoured and reported; the stored DNA stays at 600")
+check(identical(chr(resD$gating$ph3_rule), "manual") && isTRUE(resD$gating$s_phase) && "S" %in% chr(resD$gating$phases), "manual phH3 threshold and S phase on: phases include S")
+resE <- run_import(upload_import(file.path(FIX, "npc_blank_raw.csv"), file.path(FIX, "npc_scaling.csv"), file.path(FIX, "npc_sample_sheet.csv"))$import_id,
+                   list(cell_cycle = list(method = "ln2")))
+check(is.null(resE$error) && identical(chr(resE$gating$g2_rule), "ln2_midpoint") && abs(num(resE$gating$g2_threshold) - log(2) / 2) < 1e-9, "method ln2: G2/M threshold at +ln(2)/2 on the aligned scale, rule ln2_midpoint")
+
+# ---- 7. full files (EPIFLOW_OMIQ_FIXTURES) ----
+cat("\n--- 7. full export (", FULL, ") ---\n")
+full_raw <- list.files(file.path(FULL, "npc_raw_blank"), pattern = "\\.csv$", full.names = TRUE)
+full_sc  <- list.files(file.path(FULL, "npc_scaled_blank"), pattern = "\\.csv$", full.names = TRUE)
+full_scaling <- list.files(FULL, pattern = "^Scaling.*\\.csv$", full.names = TRUE)
+if (length(full_raw) == 1 && length(full_sc) == 1 && length(full_scaling) == 1) {
+  t0 <- Sys.time()
+  upF <- upload_import(full_raw, full_scaling, file.path(FIX, "npc_sample_sheet.csv"))
+  insF <- post(paste0("/api/import/inspect/", upF$import_id))
+  resF <- run_import(upF$import_id, list(), timeout_s = 1800)
+  secs <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+  check(is.null(resF$error) && num(resF$n_cells) > 100000, sprintf("full export imported: %s cells in %.0f s (upload + inspect + run)", format(num(resF$n_cells), big.mark = ","), secs))
+  rdsF <- download_rds(upF$import_id)
+  scF <- read.csv(full_sc, check.names = FALSE); scF <- scF[scF$OmiqFileIndex != "14-Blank.fcs", ]
+  set.seed(1); idx <- sample(nrow(scF), 5000); keyF <- paste(scF$OmiqFileIndex, scF$Orig_Row_Number)[idx]
+  wF <- rdsF[!duplicated(rdsF$cell_id), ]; mF <- match(keyF, paste(wF$omiq_file, wF$orig_row_number))
+  chF <- omiq_channels(scF); md <- 0
+  for (i in which(chF$role %in% c("phenotypic", "dna", "ph3"))) md <- max(md, max(abs(wF[[chF$epiflow_name[i]]][mF] - scF[[chF$column[i]]][idx]), na.rm = TRUE))
+  check(!anyNA(mF) && md < 1e-4, sprintf("full export: 5,000 sampled cells equal the scaled export on every phenotypic / DNA / phH3 channel (max |diff| %.2g)", md))
+  qcF <- .epiflow_read_contract(rdsF)$cell_cycle_gating$qc
+  cat("      per-sample QC:\n"); print(qcF[, c("sample", "n_cells", "g1_mode", "g2_g1_spacing", "spacing_flag", "g1_cv_flag", "ki67_flag", "cyclind1_flag")], row.names = FALSE)
+  gF <- .epiflow_read_contract(rdsF)$cell_cycle_gating
+  cat(sprintf("      G2/M rule on the full export: %s (threshold %.3f on the aligned scale); phH3 rule %s (%.2f)\n", gF$g2_rule, gF$g2_threshold, gF$ph3_rule, gF$ph3_threshold))
+  upG <- upload_import(full_sc, full_scaling, file.path(FIX, "npc_sample_sheet.csv"), declared = "scaled")
+  resG <- run_import(upG$import_id, list(), timeout_s = 1800)
+  rdsG <- download_rds(upG$import_id)
+  check(is.null(resG$error) && nrow(rdsG) == nrow(rdsF), "full scaled export declared scaled imports to the same number of rows")
+  numF <- names(rdsF)[vapply(rdsF, is.numeric, logical(1))]
+  dF <- max(vapply(setdiff(numF, c("cell_id", "FxCycle_aligned")), function(cn) max(abs(rdsF[[cn]] - rdsG[[cn]]), na.rm = TRUE), numeric(1)))
+  dFa <- max(abs(rdsF$FxCycle_aligned - rdsG$FxCycle_aligned), na.rm = TRUE)
+  check(dF < 1e-4 && dFa < 2e-4, sprintf("full export: scaled-as-scaled equals raw-as-raw — values to %.2g, FxCycle_aligned to %.2g", dF, dFa))
+} else cat("  [SKIP] full exports not found under", FULL, "(set EPIFLOW_OMIQ_FIXTURES)\n")
 
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

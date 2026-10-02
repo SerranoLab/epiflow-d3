@@ -1504,7 +1504,7 @@ generate_example_data <- function(seed = 4242, cells_per_rep = 600) {
   # it so it is not reported as a legacy file (no cofactor exists for it).
   .epiflow_stamp_contract(long, list(
     epiflow_schema_version = "2", value_scale = "arcsinh", cofactor_rule = "synthetic",
-    source = "example", importer_version = if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_,
+    source = "example", importer_version = getOption("epiflow.version", if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_),
     import_date = format(Sys.Date()), n_cells_source = dplyr::n_distinct(long$cell_id), epiflow_mode = "standard"))
 }
 
@@ -1699,6 +1699,6 @@ generate_example_pbmc <- function(seed = 7373, cells_per_rep = 600) {
   # it so it is not reported as a legacy file (no cofactor exists for it).
   .epiflow_stamp_contract(long, list(
     epiflow_schema_version = "2", value_scale = "arcsinh", cofactor_rule = "synthetic",
-    source = "example", importer_version = if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_,
+    source = "example", importer_version = getOption("epiflow.version", if (exists("EPIFLOW_VERSION")) EPIFLOW_VERSION else NA_character_),
     import_date = format(Sys.Date()), n_cells_source = dplyr::n_distinct(long$cell_id), epiflow_mode = "standard"))
 }

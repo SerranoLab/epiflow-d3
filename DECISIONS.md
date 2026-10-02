@@ -1341,14 +1341,54 @@ carried a Pax6 PE cofactor of 9900; it reproduced the scaled export but hid
 the PE negatives' spread, so the set was re-exported with 1000 (tasks 38 /
 39 / 42 / 43, Scaling task 29), which the fixtures and tests now use.
 
-Import (commits F4b–F4c, to follow). Per-channel arcsinh from the chosen
-cofactors; DNA at the chosen cofactor, gating at `dna_gating_cofactor`
-(default = the chosen DNA cofactor); cell-cycle gating ported from the Shiny
-app (mode-aligned G0/G1 per sample, valley G2/M threshold, data-driven phH3
-threshold, optional S phase, `s_rule = "fraction_of_g2_threshold"`); per-sample
-QC (G1-mode CV, G2−G1 spacing vs ln 2 ≈ 0.69, flagged outside 0.55–0.85);
-blank excluded from groups; a one-replicate group blocks export unless
-confirmed; run / progress / result endpoints; the Import tab UI.
+F4b (commit 3) — transform, cell-cycle port, long format, stamps, run job.
+`omiq_run()`: the blank's cells are dropped and the sample sheet joined per
+file (condition, genotype, replicate, every extra column); identity from an
+export filter column (last gate-path segment unless `identity_full_path`),
+the sheet, or "All"; chosen cofactors (named by EpiFlow channel name) or the
+inspect defaults, `dna_cofactor` and `dna_gating_cofactor` (default = the
+chosen DNA cofactor; a separate value such as 150 is allowed and stamped);
+`asinh(x / c)` per channel; `omiq_cell_cycle()` = the Shiny port: per-sample
+G0/G1 mode (density argmax, `bw = "SJ"`, 2048 points, values below the 1st
+percentile ignored, the two tallest prominent peaks ordered by position, two
+peaks closer than 0.35 merged — a split G1, not G1 / G2), `FxCycle_aligned`
+on the gating scale, G2/M threshold by `valley` (two prominent peaks ≥ 0.10
+× max; when no second peak exists the rule falls back to `ln2_midpoint`,
++ln 2 / 2 on the aligned scale — the G2 population sits at twice the DNA —
+and `g2_rule` says so; the percentile rules are explicit methods only,
+never silent fallbacks), `percentile` (0.75 or 0.90, `percentile_75` /
+`percentile_90`), `ln2` or `manual`, globally or per genotype; a sample with
+fewer than 10 DNA values has no G1 mode and stays "Unassigned"; phH3 threshold by valley on the stained phH3 (2.5 only when
+unimodal, `ph3_rule` says which; manual override); optional S phase with
+`s_rule = "fraction_of_g2_threshold"` and `s_fraction` 0.4; the four
+assignment branches; optional 1st–99th percentile outlier removal on raw
+DNA. QC per sample: G1 mode, G2−G1 peak spacing (expected ln 2, flagged
+outside 0.55–0.85 or "no second peak"), CV of G1 modes across samples
+(> 8 % MODERATE, > 15 % HIGH); support-marker QC, optional and never an
+input to the assignment: with a Ki67 channel, the per-sample median Ki67 in
+assigned G2/M vs G0/G1 (flag "NOT HIGHER in G2/M"); with a CyclinD1 channel
+the reverse, labelled weaker; absent markers add no columns. Long format: `cell_id`, `orig_row_number`,
+`omiq_file`, sheet columns, `identity`, `cell_cycle`, phenotypic columns,
+`FxCycle`, `FxCycle_aligned`, `phH3`, `H3PTM / value` (phenotype-only
+sentinel when no H3 channel); every contract attribute stamped, plus
+`source_scale`. Endpoints: `POST /api/import/run/<id>` forks the job
+(`parallel::mcparallel`; Windows synchronous) and refuses a one-replicate
+group without `confirm_single_replicate`; `GET /api/import/progress/<id>`
+reads the child's progress file; `POST /api/import/result/<id>` returns the
+summary, streams the `.rds` (`download`) or opens it as a data session
+(`load`, same response as `/api/upload` plus `import_summary`).
+Finding on the NPC data: the DNA distributions carry no resolvable G2 peak
+in 7 of 8 samples (the G2 region is a shoulder at 40–70 % of the G1 density
+height, never a local maximum), so the valley rule falls back to
+`ln2_midpoint` (user decision 2026-10-02; the converter's 90th-percentile
+fallback is gone). The G1-mode CV across the 8 samples is within 8 % after
+the split-peak merge.
+Verified: the imported values equal OmiQ's scaled export on every channel
+and cell (< 1e-4) on the fixture and on 5,000 sampled cells of the full
+export (124,105 cells import in 3–4 s); the scaled export declared scaled
+yields the same `.rds` as the raw export to < 1e-4 on every value column.
+
+Import tab UI (commit F4c, to follow).
 
 ---
 

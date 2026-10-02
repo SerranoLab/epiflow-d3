@@ -12,6 +12,10 @@ library(jsonlite)
 # echoes it, and the frontend fills its badge, footers and report from it —
 # no version literal lives in index.html or app.js. Bump here at deploy.
 EPIFLOW_VERSION <- "1.6.1"
+# plumb() evaluates this file in its own environment while helpers are sourced
+# into the global one; the option makes the version visible to every helper
+# (importer stamps, example stamps) without a second literal.
+options(epiflow.version = EPIFLOW_VERSION)
 
 # Source helper functions
 # NOTE: plumber::plumb() evaluates this file from its own directory (R/),
@@ -1589,6 +1593,103 @@ function(import_id, req) {
     data_store[[sanitize_session_id(import_id)]]$inspect <- res[setdiff(names(res), "sheet_template")]
   }
   res
+}
+
+# ---- F4b: run / progress / result ----
+# The job forks (parallel::mcparallel) so the single plumber process can keep
+# answering /progress; the child writes progress.json, then result.rds and
+# done.json (or error.json) in the import's tempdir. Windows: synchronous.
+.import_progress_write <- function(dir, stage, pct, message) {
+  writeLines(jsonlite::toJSON(list(stage = stage, pct = pct, message = message, at = format(Sys.time())), auto_unbox = TRUE), file.path(dir, "progress.json"))
+}
+.import_job <- function(imp, params) {
+  dir <- imp$dir
+  tryCatch({
+    out <- omiq_run(imp, params, progress = function(stage, pct, message) .import_progress_write(dir, stage, pct, message))
+    saveRDS(out$data, file.path(dir, "result.rds"))
+    writeLines(jsonlite::toJSON(out$summary, auto_unbox = TRUE, digits = NA, na = "null", dataframe = "rows"), file.path(dir, "done.json"))
+    TRUE
+  }, error = function(e) {
+    writeLines(jsonlite::toJSON(list(error = conditionMessage(e)), auto_unbox = TRUE), file.path(dir, "error.json"))
+    FALSE
+  })
+}
+
+#* Start the import. Body: cofactors (named by EpiFlow channel name),
+#* cofactor_rule (named), dna_cofactor, dna_gating_cofactor, identity_source,
+#* identity_full_path, cell_cycle {method, threshold_scope, s_phase, s_fraction,
+#* g2_threshold, ph3_threshold}, outliers, outlier_low_pct, outlier_high_pct,
+#* instrument, panel, omiq_workflow_id, confirm_single_replicate.
+#* @post /api/import/run/<import_id>
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
+function(import_id, req) {
+  imp <- get_import(import_id)
+  if (is.null(imp)) return(list(error = "Import not found (upload the three files first)."))
+  params <- req$body %||% list()
+  for (f in c("progress.json", "done.json", "error.json", "result.rds")) unlink(file.path(imp$dir, f))
+  .import_progress_write(imp$dir, "queued", 0, "Starting")
+  id <- sanitize_session_id(import_id)
+  if (.Platform$OS.type == "windows") {
+    ok <- .import_job(imp, params)
+    data_store[[id]]$job <- NULL
+    return(list(import_id = import_id, job = if (ok) "done" else "error"))
+  }
+  job <- parallel::mcparallel(.import_job(imp, params), detached = FALSE)
+  data_store[[id]]$job <- job
+  list(import_id = import_id, job = "running")
+}
+
+#* Progress of the import job.
+#* @get /api/import/progress/<import_id>
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
+function(import_id) {
+  imp <- get_import(import_id)
+  if (is.null(imp)) return(list(error = "Import not found."))
+  if (!is.null(imp$job)) parallel::mccollect(imp$job, wait = FALSE)   # reap when finished
+  prog <- if (file.exists(file.path(imp$dir, "progress.json"))) jsonlite::fromJSON(file.path(imp$dir, "progress.json")) else list(stage = "idle", pct = 0, message = "Not started")
+  prog$done <- file.exists(file.path(imp$dir, "done.json"))
+  if (file.exists(file.path(imp$dir, "error.json"))) { prog$error <- jsonlite::fromJSON(file.path(imp$dir, "error.json"))$error; prog$stage <- "error" }
+  prog$import_id <- import_id
+  prog
+}
+
+#* Result of a finished import. Body action: "summary" (default), "load"
+#* (open the .rds as a data session, same response as /api/upload), or
+#* "download" (the .rds bytes).
+#* @post /api/import/result/<import_id>
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
+function(import_id, req, res) {
+  imp <- get_import(import_id)
+  if (is.null(imp)) return(list(error = "Import not found."))
+  if (file.exists(file.path(imp$dir, "error.json"))) return(jsonlite::fromJSON(file.path(imp$dir, "error.json")))
+  if (!file.exists(file.path(imp$dir, "done.json"))) return(list(error = "Import not finished yet — poll /api/import/progress."))
+  action <- (req$body %||% list())$action %||% "summary"
+  summary <- jsonlite::fromJSON(file.path(imp$dir, "done.json"), simplifyVector = FALSE)
+  rds <- file.path(imp$dir, "result.rds")
+  if (identical(action, "download")) {
+    res$setHeader("Content-Type", "application/octet-stream")
+    res$setHeader("Content-Disposition", paste0("attachment; filename=\"epiflow_import_", format(Sys.Date(), "%Y%m%d"), ".rds\""))
+    res$body <- readBin(rds, "raw", n = file.size(rds))
+    return(res)
+  }
+  if (identical(action, "load")) {
+    result <- tryCatch(load_epiflow_data(rds), error = function(e) list(error = e$message))
+    if (!is.null(result$error)) return(result)
+    session_id <- generate_session_id("s_")
+    data_store[[session_id]] <- list(raw_data = result$data, filtered_data = result$data,
+                                     metadata = result[setdiff(names(result), "data")],
+                                     created = Sys.time(), last_access = Sys.time())
+    prune_data_store(); prune_idle_sessions()
+    response <- list(session_id = session_id, n_cells = result$n_cells, phenotype_only = result$phenotype_only,
+                     h3_markers = result$h3_markers, phenotypic_markers = result$phenotypic_markers,
+                     genotype_levels = result$genotype_levels, identities = result$identities, cell_cycles = result$cell_cycles,
+                     replicates = result$replicates, available_meta = result$available_meta, palette = result$palette,
+                     data_contract = result$data_contract, import_summary = summary, imported = TRUE)
+    if (!is.null(result$downsample_note)) { response$downsampled <- TRUE; response$downsample_note <- result$downsample_note }
+    for (nm in setdiff(grep("_levels$", names(result), value = TRUE), "genotype_levels")) response[[nm]] <- result[[nm]]
+    return(response)
+  }
+  c(list(import_id = import_id, rds_bytes = file.size(rds)), summary)
 }
 
 # ============================================================================
