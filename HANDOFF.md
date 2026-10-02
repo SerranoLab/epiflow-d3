@@ -1,13 +1,21 @@
-# EpiFlow D3 — handoff (2026-10-01; v1.5.0 deployed)
+# EpiFlow D3 — handoff (2026-10-01; v1.5.1 deployed)
 
 ## State
 
-- `main` @ `eed473f` = tag **`v1.5.0`**, pushed, clean. `features/overview-violin`
-  is merged (merge commit `eed473f`; branch pushed and can be deleted). Every
-  earlier audit branch is merged too (`audit/gating`, `audit/diagnostic`,
-  `audit/contrasts`, `audit/stratified-cv`, `audit/labels`, `fix/ridge-labels`).
-- **Deployed 2026-10-01 19:36 UTC (droplet, `/opt/epiflow-d3`)**: `/api/health`
-  in the container reports `version 1.5.0`. Nothing is pending on the server.
+- `main` @ `d21e01f` = tag **`v1.5.1`**, pushed, clean. `fix/overview-comparison-var`
+  (R33) and `features/overview-violin` (v1.5.0) are merged; both branches are
+  pushed and can be deleted. Every earlier audit branch is merged too
+  (`audit/gating`, `audit/diagnostic`, `audit/contrasts`, `audit/stratified-cv`,
+  `audit/labels`, `fix/ridge-labels`).
+- **Deployed 2026-10-01 (droplet, `/opt/epiflow-d3`)**: `/api/health` in the
+  container reports `version 1.5.1` (v1.5.0 went live at 19:36 UTC, v1.5.1 the
+  same evening). Nothing is pending on the server.
+- **v1.5.1 = R33**: the Overview count charts, cross table, levels card and the
+  default marker-distribution split follow the sidebar comparison variable
+  (`comparison_var` on `/api/data/overview`); they grouped by genotype
+  regardless. Test: `test_overview_comparison_var.R`.
+- `.gitignore` now hides the NPC OmiQ fixture CSVs (`npc_*.csv`) and the iPER
+  416k file (`iPER_*.rds`) at the repo root; `test_condition.rds` stays tracked.
 - Deploy flow on the droplet (always; never `git checkout <tag>` there — a
   detached HEAD breaks the next pull):
   ```bash
@@ -68,10 +76,11 @@ cd ../../frontend && python3 -m http.server 8080 --bind 127.0.0.1
 ```
 `EPIFLOW_CORES` unset locally = `detectCores() − 1`.
 
-## Tests (11 verdict suites, all ALL PASS at `eed473f`, API on 127.0.0.1:8000)
+## Tests (12 verdict suites, all ALL PASS at `d21e01f`, API on 127.0.0.1:8000)
 
 `test_labels.R` (static + live: health version, ridge n), `test_overview_quantiles.R`,
-`test_violin_panels.R`, `test_lmm_parallel.R` (in-process serial vs 4 workers;
+`test_overview_comparison_var.R` (R33; uploads a file whose `condition` column
+crosses genotype), `test_violin_panels.R`, `test_lmm_parallel.R` (in-process serial vs 4 workers;
 optional 416k timing), `test_lmm_contrasts.R`, `test_lmm_errors.R`,
 `test_serializer_precision.R`, `test_corr_diff.R`, `test_diagnostic_stratified.R`,
 `test_diagnostic_cv.R`, `test_gating_subsample.R`. Gate commits on
@@ -89,7 +98,8 @@ optional 416k timing), `test_lmm_contrasts.R`, `test_lmm_errors.R`,
    the OmiQ value and the c/2 – 2c sensitivity check. Validation fixture: the NPC
    PAX6/H3K27me3 export (189,059 cells, 12 channels). The Gate Finder export and
    R19 option (ii) depend on it.
-2. **Mon 2026-10-06** — execute the Import tab; deploy **v1.5.1**.
+2. **Mon 2026-10-06** — execute the Import tab; deploy **v1.6.0** (v1.5.1 was
+   taken by the R33 patch).
 3. **Tue 2026-10-07** — offline differential-abundance spike script on the NPC file:
    propeller baseline, cydar, miloR (no app code).
 4. **Wed 2026-10-08** — **R8** + propeller cluster differential abundance in the app.
