@@ -124,7 +124,7 @@ const RidgePlot = {
       .padding(0);
 
     // Color scales
-    const groupColorType = data.group_by || 'genotype';
+    const groupColorType = data.group_by || DataManager.getComparisonVar();   // R34: the payload names its grouping column
     const groupColorScale = getColorScale(groupColorType, groups, DataManager.serverPalette);
 
     // Sub-color scale (for overlay genotype curves)
@@ -134,7 +134,7 @@ const RidgePlot = {
       const subLevels = orderRefFirst([...new Set(
         data.densities.flatMap(d => (d.sub_colors || []).map(sc => sc.color_level))
       )].sort(), data.ref_level);
-      const subColorType = data.color_by || 'genotype';
+      const subColorType = data.color_by || DataManager.getComparisonVar();
       subColorScale = getColorScale(subColorType, subLevels, DataManager.serverPalette);
       // Past ~5 overlaid curves the translucent fills turn to mud — draw
       // outlines only so the shapes stay readable.

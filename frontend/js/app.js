@@ -744,7 +744,7 @@ const App = {
       let colorBy;
       if (groupBy === 'marker') {
         // rows = PTM; color by a metadata variable (default genotype)
-        colorBy = (colorBySelect === 'same' || colorBySelect === 'marker') ? 'genotype' : colorBySelect;
+        colorBy = (colorBySelect === 'same' || colorBySelect === 'marker') ? DataManager.getComparisonVar() : colorBySelect;   // R34
       } else {
         // rows = group metadata; one colored curve per selected PTM
         colorBy = 'marker';

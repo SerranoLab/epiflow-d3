@@ -27,6 +27,28 @@ source("interpret.R")
 # In production, consider Redis or file-based caching
 data_store <- new.env(parent = emptyenv())
 
+# ---- R34: grouping column from the request ----
+# Every endpoint that groups cells takes the column from the request: the
+# endpoint's own key (group_by / target_var / comparison_var), else
+# comparison_var in the same body, else the genotype column. The column must
+# exist in the session's filtered data (gate_population / cluster_identity are
+# there only while a gate or clustering is applied), and the payload echoes
+# the column used — nothing defaults to genotype silently.
+.resolve_grouping <- function(params, store, key = "comparison_var") {
+  col <- params[[key]] %||% params$comparison_var %||% store$metadata$genotype_col %||% "genotype"
+  col <- as.character(col)[1]
+  if (!col %in% names(store$filtered_data)) {
+    return(list(col = col, error = list(error = paste0(key, " column not found: ", col,
+      " (gate_population and cluster_identity exist only while a gate or clustering is applied)"))))
+  }
+  list(col = col, error = NULL)
+}
+.with_grouping <- function(res, ...) {
+  extra <- list(...)
+  if (is.list(res) && is.null(res$error)) for (nm in names(extra)) res[[nm]] <- extra[[nm]]
+  res
+}
+
 # ---- CORS configuration ----
 # EPIFLOW_CORS_ORIGIN: a comma-separated allowlist of exact origins. The
 # default is the production origin (release 1.4.1); "*" is honoured only when
@@ -688,13 +710,24 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: group_by / color_by come from the request (else comparison_var, else
+  # the genotype column); "marker" is the overlay mode, not a column.
+  group_by <- if (identical(params$group_by, "marker")) "marker" else {
+    g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error); g$col
+  }
+  color_by <- if (identical(params$color_by, "marker")) "marker" else if (is.null(params$color_by)) {
+    if (!is.null(params$comparison_var)) { cb <- .resolve_grouping(params, store, "comparison_var"); if (!is.null(cb$error)) return(cb$error); cb$col }
+    else if (identical(group_by, "marker")) "marker" else group_by
+  } else {
+    cb <- .resolve_grouping(params, store, "color_by"); if (!is.null(cb$error)) return(cb$error); cb$col
+  }
   tryCatch(
-    if (identical(params$group_by, "marker") || identical(params$color_by, "marker")) {
+    if (identical(group_by, "marker") || identical(color_by, "marker")) {
       compute_ridge_overlay(
         store$filtered_data,
         markers    = params$markers,
-        group_by   = params$group_by %||% "genotype",
-        color_by   = params$color_by %||% "marker",
+        group_by   = group_by,
+        color_by   = color_by,
         h3_markers = store$metadata$h3_markers,
         phenotypic_markers = store$metadata$phenotypic_markers,
         bw         = params$bandwidth %||% "auto",
@@ -704,8 +737,8 @@ function(session_id, req) {
       compute_ridge_data(
         store$filtered_data,
         marker     = params$marker %||% store$metadata$h3_markers[1],
-        group_by   = params$group_by %||% "genotype",
-        color_by   = params$color_by %||% "genotype",
+        group_by   = group_by,
+        color_by   = color_by,
         bw         = params$bandwidth %||% "auto",
         h3_markers = store$metadata$h3_markers
       )
