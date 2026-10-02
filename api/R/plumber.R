@@ -781,9 +781,11 @@ function(session_id, req) {
   if (is.null(store)) return(list(error = "Session not found"))
 
   params <- req$body
+  # R34: group_by from the request (else comparison_var, else the genotype column), echoed by the helper.
+  g <- .resolve_grouping(params, store, "group_by"); if (!is.null(g$error)) return(g$error)
   compute_identity_heatmap(
     store$filtered_data,
-    group_by = params$group_by %||% "identity",
+    group_by = g$col,
     include_phenotypic = isTRUE(params$include_phenotypic),
     phenotypic_markers = store$metadata$phenotypic_markers
   )

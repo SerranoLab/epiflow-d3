@@ -26,7 +26,7 @@ const Heatmap = {
       .attr('height', height + margin.top + margin.bottom);
 
     // Title + subtitle
-    const groupBy = options.groupBy || 'identity';
+    const groupBy = options.groupBy || data.group_by || DataManager.getComparisonVar();   // R34: the payload names its grouping column
     svg.append('text').attr('class', 'chart-title')
       .attr('x', (width + margin.left + margin.right) / 2).attr('y', 18)
       .attr('text-anchor', 'middle').text(options.title || `H3-PTM Heatmap — grouped by ${groupBy}`);
