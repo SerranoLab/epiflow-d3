@@ -1007,6 +1007,26 @@ Backing. Azad, Rajwa & Pothen 2016 (flowVS, BMC Bioinformatics); Parks,
 Roederer & Moore 2006 (logicle); R19 (titration metrics on arcsinh), R21
 (data contract).
 
+Help text (Import tab, "Before you import: unmixing and scaling"; logged
+2026-10-02, shipped with F4c). After unmixing, cells with no signal in a
+channel scatter symmetrically around zero; the width of that scatter is
+spread from brighter fluors in neighbouring channels (Nguyen 2013). A
+cofactor sets how much of that scatter you see (Parks 2006): a small cofactor
+shows the negatives' width, a large one hides it. Choose the cofactor from
+the negatives (the blank-spread suggestion), not from how smooth the plot
+looks (Roederer 2001). If the negatives are very wide, check (1) the
+spillover-spreading matrix row for this channel, (2) this marker against the
+suspected donor on the blank or an FMO, (3) that the single-stain control
+uses the same conjugate lot and is at least as bright as the sample positives
+(Ferrer-Font 2020). Fix the unmixing, then set the cofactor. The chosen value
+and rule are stamped in the file.
+Case in point (2026-10-02): the NPC Pax6 PE export at cofactor 9900 hid the
+PE negatives' spread; re-exported at 1000 (fixture set tasks 38–43).
+Refs: Nguyen R et al. 2013 Cytometry A 83:306 (spillover spreading);
+Roederer M 2001 Cytometry 45:194 (compensation and display); Parks DR,
+Roederer M, Moore WA 2006 Cytometry A 69:541 (logicle); Ferrer-Font L et al.
+2020 Curr Protoc Cytom 92:e70 (panel design and controls).
+
 ---
 
 ## R29 — Strata × features heatmap of the per-stratum LDA weights
