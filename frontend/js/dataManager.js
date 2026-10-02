@@ -14,6 +14,7 @@ const DataManager = {
   gatingMetadata: null,
   clusterNameMap: null,
   clusterAssignments: null,
+  extraGrouping: [],   // R34: gate_population / cluster_identity while applied (from /api/filter)
 
   init(uploadResponse) {
     this.metadata = uploadResponse;
@@ -123,14 +124,6 @@ const DataManager = {
 
   getH3Markers() {
     return this.metadata ? ensureArray(this.metadata.h3_markers) : [];
-  },
-
-  getGroupingOptions() {
-    const opts = ['genotype', 'identity', 'cell_cycle'];
-    if (this.metadata && this.metadata.available_meta) {
-      ensureArray(this.metadata.available_meta).forEach(m => opts.push(m));
-    }
-    return [...new Set(opts)];
   },
 
   _getCheckedValues(containerId) {

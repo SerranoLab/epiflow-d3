@@ -216,11 +216,6 @@ const App = {
       }
     });
 
-    // Dynamic group-by and color-by dropdowns
-    const groupBySelects = ['ridge-groupby', 'violin-groupby', 'heatmap-groupby'];
-    const colorBySelects = ['ridge-colorby', 'violin-colorby'];
-    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify'];
-
     // Populate gating filter dropdowns
     const gateIdSel = document.getElementById('gate-filter-identity');
     if (gateIdSel) {
@@ -237,82 +232,22 @@ const App = {
       });
     }
 
-    // Add all categorical columns (including available_meta) to group-by/color-by
-    const allGroupOpts = ['identity', 'genotype', 'cell_cycle', ...availMeta];
-    const uniqueGroupOpts = [...new Set(allGroupOpts)];
-
-    groupBySelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-      // Keep first option (default), remove dynamically added ones
-      const existingVals = new Set(Array.from(sel.options).map(o => o.value));
-      uniqueGroupOpts.forEach(col => {
-        if (!existingVals.has(col)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          sel.insertAdjacentHTML('beforeend', `<option value="${col}">Group by ${label}</option>`);
-        }
-      });
-    });
-
-    colorBySelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-      const existingVals = new Set(Array.from(sel.options).map(o => o.value));
-      uniqueGroupOpts.forEach(col => {
-        if (!existingVals.has(col)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          sel.insertAdjacentHTML('beforeend', `<option value="${col}">Color by ${label}</option>`);
-        }
-      });
-    });
-
-    // Populate stratification dropdowns dynamically
-    stratifySelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-      sel.innerHTML = '<option value="None">No stratification</option>';
-      uniqueGroupOpts.forEach(col => {
-        const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        sel.insertAdjacentHTML('beforeend', `<option value="${col}">By ${label}</option>`);
-      });
-    });
-
-    // F1: Overview "Split by" — every categorical column plus replicate; no "None".
-    const splitSel = document.getElementById('overview-split');
-    if (splitSel) {
-      const keep = splitSel.value;
-      const opts = [...new Set([...uniqueGroupOpts, 'replicate'])];
-      splitSel.innerHTML = opts.map(col =>
-        `<option value="${col}">Split by ${col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>`).join('');
-      // R33: the default follows the comparison variable (loadOverview sets it until the user picks a split).
-      splitSel.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
-      delete splitSel.dataset.userSet;
-    }
-
-    // Populate comparison variable dropdown
+    // R34: the comparison variable select offers the shared list (genotype,
+    // identity, cell_cycle, replicate, every metadata column, gate / cluster
+    // while applied); it defaults to genotype on a fresh load. Every other
+    // grouping control is rebuilt from that list, comparison variable first,
+    // by refreshGroupingSelects().
+    DataManager.extraGrouping = [];
     const compSelect = document.getElementById('filter-comparison-var');
     if (compSelect) {
-      compSelect.innerHTML = '';
-      uniqueGroupOpts.forEach(opt => {
-        const el = document.createElement('option');
-        el.value = opt;
-        el.textContent = opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        compSelect.appendChild(el);
-      });
-      // Default to genotype if available
-      if (uniqueGroupOpts.includes('genotype')) compSelect.value = 'genotype';
+      const keep = compSelect.value;
+      const opts = buildGroupingOptions({ comparisonVar: null, availableMeta: availMeta, extraGrouping: [] });
+      compSelect.innerHTML = opts.map(col => `<option value="${col}">${groupingLabel(col)}</option>`).join('');
+      compSelect.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
     }
+    Object.keys(this.GROUPING_SELECTS).forEach(id => { const s = document.getElementById(id); if (s) delete s.dataset.userSet; });
+    this.refreshGroupingSelects();
     this.syncStratifyOptions();   // R18: comparison variable is never a stratum
-
-    // Populate ML target dropdown dynamically
-    const mlTarget = document.getElementById('ml-target');
-    if (mlTarget) {
-      mlTarget.innerHTML = '';
-      uniqueGroupOpts.forEach(opt => {
-        const label = opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        mlTarget.insertAdjacentHTML('beforeend', `<option value="${opt}">Target: ${label}</option>`);
-      });
-    }
 
     // The reference-level dropdown is kept in sync with the comparison variable
     // by a single handler bound once in bindFilters() (avoids stacking listeners
@@ -382,9 +317,11 @@ const App = {
       compSelect.addEventListener('change', () => {
         this.populateRefLevel(this._getLevelsForVar(compSelect.value));
         this.populateCustomColors(compSelect.value);
+        this.refreshGroupingSelects();   // R34: every grouping control lists the comparison variable first
         this.syncStratifyOptions();   // R18
         this.markStatsStale();        // results were computed with the old comparison variable
-        if (this.currentTab === 'overview') this.loadOverview();   // R33: count charts follow the comparison variable
+        // R33/R34: view tabs follow the comparison variable; run-button tabs re-run on demand.
+        if (['overview', 'ridge', 'violin', 'heatmap'].includes(this.currentTab)) this.loadCurrentTab();
       });
     }
     // Clear quadrant gate filter
@@ -452,55 +389,84 @@ const App = {
     }
   },
 
-  _updateExtraGroupingOptions(extraGrouping) {
-    const dynamicCols = ['gate_population', 'cluster_identity'];
-    const groupBySelects = ['ridge-groupby', 'violin-groupby', 'heatmap-groupby'];
-    const colorBySelects = ['ridge-colorby', 'violin-colorby'];
-    const stratifySelects = ['stats-stratify', 'forest-stratify', 'diag-stratify', 'overview-split'];   // F1: gate / cluster columns reach the Split-by select too
-    const allSelects = [...groupBySelects, ...colorBySelects, ...stratifySelects];
+  // R34: one shared option list for every grouping control.
+  // Each managed <select> has an entry here: prefix for the option text, an
+  // optional "none" option, fixed extra
+  // options (first: true puts them before the list), and the default — the
+  // comparison variable unless the entry names another value. A select keeps
+  // the user's choice (data-user-set, written by the change listener bound in
+  // bindGroupingSelects) as long as that value is still offered.
+  GROUPING_SELECTS: {
+    'overview-split':   { prefix: 'Split by' },
+    'ridge-groupby':    { prefix: 'Group by', extra: [{ value: 'marker', label: 'Group by H3-PTM' }] },
+    'ridge-colorby':    { prefix: 'Color by', extra: [{ value: 'same', label: 'Color = Group', first: true }, { value: 'marker', label: 'Color by H3-PTM' }], default: 'same' },
+    'violin-groupby':   { prefix: 'Group by' },
+    'violin-colorby':   { prefix: 'Color by', extra: [{ value: 'same', label: 'Color = Group', first: true }], default: 'same' },
+    'heatmap-groupby':  { prefix: 'Group by' },
+    'stats-stratify':   { prefix: 'By', none: 'No stratification', default: 'None' },
+    'forest-stratify':  { prefix: 'By', none: 'No stratification', default: 'None' },
+    'diag-stratify':    { prefix: 'By', none: 'No stratification', default: 'None' },
+    'ml-target':        { prefix: 'Target:' },
+  },
 
-    allSelects.forEach(selId => {
-      const sel = document.getElementById(selId);
-      if (!sel) return;
-
-      // Remove old dynamic options
-      dynamicCols.forEach(col => {
-        const existing = sel.querySelector(`option[value="${col}"]`);
-        if (existing && !extraGrouping.includes(col)) {
-          existing.remove();
-        }
-      });
-
-      // Add new dynamic options
-      extraGrouping.forEach(col => {
-        if (!sel.querySelector(`option[value="${col}"]`)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          const isStratify = stratifySelects.includes(selId);
-          const isColor = colorBySelects.includes(selId);
-          const prefix = isStratify ? 'By' : (isColor ? 'Color by' : 'Group by');
-          const icon = col === 'gate_population' ? '⊞ ' : '◆ ';
-          sel.insertAdjacentHTML('beforeend',
-            `<option value="${col}">${prefix} ${icon}${label}</option>`);
-        }
-      });
+  groupingOptions() {
+    return buildGroupingOptions({
+      comparisonVar: DataManager.getComparisonVar(),
+      availableMeta: ensureArray(DataManager.metadata ? DataManager.metadata.available_meta : []),
+      extraGrouping: ensureArray(DataManager.extraGrouping || []),
     });
+  },
 
-    // Also update comparison variable dropdown
+  fillGroupingSelect(selId, cfg) {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    const opts = this.groupingOptions();
+    const extra = cfg.extra || [];
+    const keep = sel.value;
+    const optHtml = (value, label) => `<option value="${value}">${label}</option>`;
+    let html = '';
+    if (cfg.none) html += optHtml('None', cfg.none);
+    extra.filter(e => e.first).forEach(e => { html += optHtml(e.value, e.label); });
+    opts.forEach(col => { html += optHtml(col, `${cfg.prefix} ${groupingLabel(col)}`.trim()); });
+    extra.filter(e => !e.first).forEach(e => { html += optHtml(e.value, e.label); });
+    // Keep <optgroup>s some selects carry (e.g. the UMAP marker list).
+    const groups = Array.from(sel.querySelectorAll('optgroup')).map(g => g.outerHTML).join('');
+    sel.innerHTML = html + groups;
+    const offered = new Set(Array.from(sel.options).map(o => o.value));
+    const fallback = cfg.default || DataManager.getComparisonVar();
+    if (sel.dataset.userSet && offered.has(keep)) sel.value = keep;
+    else sel.value = offered.has(fallback) ? fallback : (opts[0] || '');
+  },
+
+  refreshGroupingSelects() {
+    Object.entries(this.GROUPING_SELECTS).forEach(([selId, cfg]) => this.fillGroupingSelect(selId, cfg));
+  },
+
+  bindGroupingSelects() {
+    Object.keys(this.GROUPING_SELECTS).forEach(selId => {
+      const sel = document.getElementById(selId);
+      if (sel) sel.addEventListener('change', () => { sel.dataset.userSet = '1'; });
+    });
+  },
+
+  _updateExtraGroupingOptions(extraGrouping) {
+    // gate_population / cluster_identity exist only while a gate or clustering
+    // is applied; the filter response says which. Every grouping control and
+    // the comparison variable select are rebuilt from the shared list.
+    DataManager.extraGrouping = ensureArray(extraGrouping);
     const compSel = document.getElementById('filter-comparison-var');
     if (compSel) {
-      dynamicCols.forEach(col => {
-        const existing = compSel.querySelector(`option[value="${col}"]`);
-        if (existing && !extraGrouping.includes(col)) existing.remove();
+      const keep = compSel.value;
+      const opts = buildGroupingOptions({
+        comparisonVar: null,
+        availableMeta: ensureArray(DataManager.metadata ? DataManager.metadata.available_meta : []),
+        extraGrouping: DataManager.extraGrouping,
       });
-      extraGrouping.forEach(col => {
-        if (!compSel.querySelector(`option[value="${col}"]`)) {
-          const label = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          const icon = col === 'gate_population' ? '⊞ ' : '◆ ';
-          compSel.insertAdjacentHTML('beforeend',
-            `<option value="${col}">${icon}${label}</option>`);
-        }
-      });
+      compSel.innerHTML = opts.map(col => `<option value="${col}">${groupingLabel(col)}</option>`).join('');
+      compSel.value = opts.includes(keep) ? keep : (opts.includes('genotype') ? 'genotype' : opts[0]);
     }
+    this.refreshGroupingSelects();
+    this.syncStratifyOptions();
   },
 
   async resetFilters() {
@@ -1071,7 +1037,8 @@ const App = {
     document.getElementById('run-all-ml-btn').addEventListener('click', () => this.runAllML());
     document.getElementById('run-diagnostic-btn').addEventListener('click', () => this.runDiagnostic());
     document.getElementById('refresh-overview-btn').addEventListener('click', () => this.loadOverview());
-    document.getElementById('overview-split')?.addEventListener('change', (e) => { e.target.dataset.userSet = '1'; if (this.currentTab === 'overview') this.loadOverview(); });
+    document.getElementById('overview-split')?.addEventListener('change', () => { if (this.currentTab === 'overview') this.loadOverview(); });
+    this.bindGroupingSelects();   // R34: remembers which grouping selects the user has set
     document.getElementById('run-forest-btn').addEventListener('click', () => this.runForestDirect());
     document.getElementById('forest-marker-filter').addEventListener('change', () => { if (this.currentTab === 'forest') this.loadForest(); });
     document.getElementById('forest-stratify').addEventListener('change', () => { /* user clicks Generate to apply */ });

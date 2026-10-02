@@ -871,6 +871,66 @@ wall time recorded in the entry; memory per worker checked on the droplet
 
 ---
 
+## R34 — Grouping, colour-by, stratify-by, split-by and ML-target controls do not follow the sidebar comparison variable
+Status: in progress (2026-10-02); branch `fix/comparison-var-everywhere`; one commit per tab; v1.6.0
+
+What was wrong (audit 2026-10-01). Only Overview (R33), Statistics, Forest,
+Cell Cycle and differential correlation sent the sidebar comparison
+variable. Ridge, Violin and Heatmap built their lists from a private
+`['identity','genotype','cell_cycle', ...available_meta]` array and their
+endpoints defaulted to genotype; PCA, UMAP and Clustering had static
+four-option colour lists that never saw a metadata, gate or cluster column,
+and their helpers return a fixed `meta_base` (phase3.R 15, 107) so even a
+`condition` column could not be coloured by; the UMAP split filtered on
+`d.genotype`; Positivity and Gating sent no grouping key, so plumber.R
+filled genotype (986, 1080, 1106) and gatingPlot.js / positivityPlot.js
+coloured from `serverPalette.genotype`; the global correlation's
+replicate-level block grouped on the literal `genotype` column (helpers.R
+1065–1085); the clustering composition table is `cross_genotype`
+(phase3.R 438–441); ML targets never included gate / cluster columns and
+two render paths fell back to `'genotype'` (app.js 2773, 3100); the
+signatures-diagnostic cross-tab names its dimension "genotype" whatever the
+target (statistics.R 1245). Volcano re-renders the last Statistics run and
+Titration groups by dose (condition) and identity by design — no change.
+
+Rule. One list, built by `buildGroupingOptions()` in
+`frontend/js/utils/grouping.js`: the sidebar comparison variable first, then
+genotype, identity, cell_cycle, replicate, every `available_meta` column,
+and gate_population / cluster_identity while a gate or clustering is
+applied. `App.GROUPING_SELECTS` registers every managed select (prefix,
+optional "None", fixed extras such as "marker" / "same" / "cluster",
+default); `fillGroupingSelect()` rebuilds it and keeps the user's choice
+while it is still offered, otherwise selects the default — the comparison
+variable unless the entry says otherwise. Changing the comparison variable
+rebuilds every list and reloads the open view tab (Overview, Ridge, Violin,
+Heatmap); run-button tabs re-run on demand. Every grouping endpoint takes
+the column from the request (falling back to `comparison_var` in the same
+body, then the genotype column) and echoes the column it used; the frontend
+always sends it. PCA / UMAP / Clustering take `meta_cols` — only the
+columns their colour controls can show — so the point payload does not
+grow with unused fields. The ML target defaults to the comparison variable;
+the circularity warning fires for any target derived from the features
+(identity, cell_cycle, gate_population, cluster_identity —
+`isDerivedGrouping()`). `cross_genotype` stays as an alias of
+`cross_comparison` for one release (removal logged under open items).
+`/api/ml/clustering` (`run_clustering`, statistics.R 694) still hard-codes
+genotype; it has no frontend caller and is left alone (open item).
+
+Tests. `test_grouping_options.R` evaluates grouping.js under V8: order,
+de-duplication, a `condition` column offered after the core columns, gate /
+cluster appended only while present. `test_comparison_var_everywhere.R`
+uploads the R33 fixture (a `condition` column crossing genotype) once and
+adds one block per tab commit: the endpoint called with `condition` groups
+by ctrl / treated and echoes the column. `test_labels.R` asserts the
+relabelled headings and the absence of the retired literals.
+
+Commits. 0 shared list; then Ridge, Violin, Heatmap, Cell Cycle,
+Correlation, Positivity, Statistics/Forest/Diagnostic, ML (delegated: commit
+once the test block and test_labels.R pass); Gating, PCA, UMAP, Clustering
+and release prep 1.6.0 wait for a go.
+
+---
+
 ## R33 — Overview count charts grouped by genotype regardless of the sidebar comparison variable
 Status: done (2026-10-01); branch `fix/overview-comparison-var`; v1.5.1
 
@@ -1152,6 +1212,11 @@ equals that genotype's distinct-cell count, not 5× it.
 ---
 
 ## Open items without a finding ID (2026-09-24)
+- R34 follow-ups (2026-10-02): remove the `cross_genotype` alias from the
+  clustering payload one release after v1.6.0 (frontend reads
+  `cross_comparison`); `/api/ml/clustering` (`run_clustering`, statistics.R
+  694) hard-codes the genotype column and has no frontend caller — port it to
+  `comparison_var` or delete it.
 - `test_ridge_all_markers.R` (v1.2.0) calls `compute_ridge_all_markers()`, a
   function renamed to `compute_ridge_overlay()`; it has errored since then.
   Either port it to the overlay function (and give it a PASS/FAIL verdict
