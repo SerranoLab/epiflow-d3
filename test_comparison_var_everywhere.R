@@ -219,5 +219,21 @@ check(has("frontend/js/app.js", "const params = { marker_x: markerX, marker_y: m
       "frontend sends comparison_var on gating and quadrant detail; palettes and the stats header follow it")
 check(lacks("api/R/plumber.R", 'params$comparison_var %||% geno_col') && lacks("api/R/plumber.R", "geno_col <- "), "no endpoint keeps its own genotype default; all go through .resolve_grouping")
 
+# ================================================================== PCA
+cat("\n--- PCA: /api/phase3/pca carries the requested metadata columns (meta_cols) and echoes them ---\n")
+pc1 <- post(paste0("/api/phase3/pca/", sid), list(n_components = 3, meta_cols = I(c("condition", "genotype", "replicate"))))
+check(is.null(pc1$error) && setequal(chr(pc1$meta_cols), c("condition", "genotype", "replicate")), "meta_cols echoed as requested")
+check(all(c("condition", "genotype", "PC1") %in% names(pc1$scores[[1]])) && setequal(unique(chr(lapply(pc1$scores, `[[`, "condition"))), COND),
+      "every score row carries condition (ctrl / treated) and genotype")
+check(!"identity" %in% names(pc1$scores[[1]]), "a column not requested is not carried (payload does not grow with unused fields)")
+pc2 <- post(paste0("/api/phase3/pca/", sid), list(n_components = 3, meta_cols = I(c("condition", "not_a_column"))))
+check(is.null(pc2$error) && identical(chr(pc2$meta_cols), "condition"), "an unknown column is dropped and absent from the echo")
+pc3 <- post(paste0("/api/phase3/pca/", sid), list(n_components = 3))
+check(is.null(pc3$error) && all(c("genotype", "replicate", "cell_cycle", "identity", "condition") %in% chr(pc3$meta_cols)), "no meta_cols: the historical column set (incl. condition) is carried")
+check(has("frontend/js/app.js", "'pca-color':        { prefix: 'Color:' },") && has("frontend/js/app.js", "n_components: 5, meta_cols: this.groupingOptions() })") &&
+      has("frontend/js/app.js", "const colorBy = this._dimredColorBy('pca-color', data);") && lacks("frontend/js/charts/pcaPlot.js", "|| 'genotype'"),
+      "pca-color is a managed grouping select; the run sends the shared list as meta_cols; the chart has no genotype fallback")
+check(lacks("frontend/index.html", "replicates of the same genotype should cluster together"), "PCA help text no longer says genotype")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

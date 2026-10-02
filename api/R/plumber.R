@@ -1213,7 +1213,8 @@ function(session_id, req) {
       store$filtered_data,
       include_phenotypic = isTRUE(params$include_phenotypic),
       phenotypic_markers = store$metadata$phenotypic_markers,
-      n_components       = params$n_components %||% 5
+      n_components       = params$n_components %||% 5,
+      meta_cols          = params$meta_cols   # R34: the columns the colour control can show
     ),
     error = function(e) list(error = paste("PCA failed:", e$message))
   )

@@ -17,7 +17,7 @@ const PCAPlot = {
     // Equal-aspect plot dimensions — PC scores are in equivalent units,
     // so equal pixels-per-unit on both axes preserves the relative variance
     // structure (PC1 with more variance naturally shows wider spread).
-    const colorBy = options.colorBy || 'genotype';
+    const colorBy = options.colorBy || DataManager.getComparisonVar();   // R34
     const pcX = options.pcX || 'PC1';
     const pcY = options.pcY || 'PC2';
     const pcXIdx = parseInt(pcX.replace('PC', '')) - 1;

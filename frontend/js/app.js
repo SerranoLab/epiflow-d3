@@ -407,6 +407,7 @@ const App = {
     'forest-stratify':  { prefix: 'By', none: 'No stratification', default: 'None' },
     'diag-stratify':    { prefix: 'By', none: 'No stratification', default: 'None' },
     'ml-target':        { prefix: 'Target:' },
+    'pca-color':        { prefix: 'Color:' },
   },
 
   groupingOptions() {
@@ -1174,7 +1175,8 @@ const App = {
     this.showLoading('Computing PCA...');
     try {
       const inclPheno = document.getElementById('pca-pheno').checked;
-      const data = await EpiFlowAPI.runPCA3D({ include_phenotypic: inclPheno, n_components: 5 });
+      // R34: carry only the columns the colour control can show (not every metadata field).
+      const data = await EpiFlowAPI.runPCA3D({ include_phenotypic: inclPheno, n_components: 5, meta_cols: this.groupingOptions() });
       if (data.error) throw new Error(data.error);
       this._pcaData = data;
       this._renderPCA();
@@ -1182,11 +1184,25 @@ const App = {
     finally { this.hideLoading(); }
   },
 
+  // R34: the colour select lists the shared grouping options; the payload says
+  // which of them it carries (meta_cols). A column the cached payload lacks
+  // (e.g. a gate applied after the run) falls back to the first carried one
+  // and the select follows, so the legend never shows an undefined group.
+  _dimredColorBy(selId, data, extraAllowed = []) {
+    const sel = document.getElementById(selId);
+    const want = sel ? sel.value : DataManager.getComparisonVar();
+    const carried = ensureArray(data.meta_cols);
+    if (!carried.length || carried.includes(want) || extraAllowed.includes(want)) return want;
+    const fallback = carried[0];
+    if (sel && [...sel.options].some(o => o.value === fallback)) sel.value = fallback;
+    return fallback;
+  },
+
   /** Render PCA from cached scores (no re-run needed for colour changes) */
   _renderPCA() {
     const data = this._pcaData;
     if (!data) return;
-    const colorBy = document.getElementById('pca-color').value;
+    const colorBy = this._dimredColorBy('pca-color', data);
     PCAPlot.render('pca-chart-main', data, { colorBy, pcX: 'PC1', pcY: 'PC2' });
     PCAPlot.render('pca-chart-secondary', data, { colorBy, pcX: 'PC1', pcY: 'PC3' });
     PCAPlot.renderVariance('pca-variance-chart', data);

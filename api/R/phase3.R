@@ -3,6 +3,18 @@
 # Serrano Lab | Boston University
 # ============================================================================
 
+# ---- R34: metadata columns carried into dim-red / clustering payloads ----
+# `meta_cols` is the list of columns the frontend's colour / split controls can
+# show (comparison variable first, then genotype, identity, cell_cycle,
+# replicate, the metadata columns, gate_population / cluster_identity while
+# applied). Only columns present in the data are kept; the historical set is
+# the fallback when the request names none.
+.dimred_meta_cols <- function(data, meta_cols = NULL) {
+  default <- c("genotype", "replicate", "cell_cycle", "identity", "timepoint", "cell_type", "condition")
+  want <- if (is.null(meta_cols) || !length(meta_cols)) default else as.character(unlist(meta_cols))
+  unique(c("cell_id", intersect(want, names(data))))
+}
+
 # ---- UMAP with marker intensities for FeaturePlot ----
 compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
                          n_neighbors = 15, min_dist = 0.1,
@@ -103,10 +115,11 @@ compute_umap <- function(data, h3_markers, phenotypic_markers = character(0),
 # ---- Enhanced PCA with 3+ components ----
 compute_pca_3d <- function(data, include_phenotypic = FALSE,
                            phenotypic_markers = character(0),
-                           n_components = 5) {
-  meta_base <- c("cell_id", "genotype", "replicate", "cell_cycle", "identity")
-  meta_extra <- intersect(c("timepoint", "cell_type", "condition"), names(data))
-  meta_all <- c(meta_base, meta_extra)
+                           n_components = 5, meta_cols = NULL) {
+  # R34: the metadata columns carried into `scores` are the ones the colour
+  # control can show (`meta_cols` from the request); absent -> the historical
+  # set. Columns not in the data are dropped and the payload echoes what went.
+  meta_all <- .dimred_meta_cols(data, meta_cols)
 
   if (.epiflow_phenotype_only(data)) {
     pheno_cols <- intersect(phenotypic_markers %||% character(0), names(data))
@@ -151,6 +164,7 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
   scores_df <- as.data.frame(pca_result$x[, 1:n_comp])
   meta_present <- intersect(meta_all, names(complete_data))
   scores_df <- dplyr::bind_cols(scores_df, complete_data[, meta_present])
+  meta_out <- setdiff(meta_present, "cell_id")   # R34: echoed as meta_cols
 
   # Subsample for rendering only (PCA itself was computed on all complete cases
   # above). One SVG <circle> per point is the bottleneck; see UMAP note.
@@ -175,7 +189,8 @@ compute_pca_3d <- function(data, include_phenotypic = FALSE,
     n_analyzed = nrow(complete_data),# cells the PCA was computed on
     n_features = length(feature_cols),
     feature_label = feature_label,
-    n_components = n_comp
+    n_components = n_comp,
+    meta_cols = safe_I(meta_out)    # R34: the metadata columns each score row carries
   )
 }
 
