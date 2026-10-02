@@ -3,6 +3,17 @@
 Earlier release notes: `CHANGELOG_v1.2.0.md`. Finding IDs (R1 …, L1 …) refer to
 the September 2026 publication audit; each has an entry in `DECISIONS.md`.
 
+## EpiFlow D3 v1.6.1 — 2026-10-02
+
+- **F3** — Gating plot coloured by any label: the comparison variable
+  (default), a metadata column, a gate population, a named cluster identity,
+  or the last unapplied clustering run (`color_by` on `/api/phase2/gating`;
+  the clustering endpoint stores its run in the session). Density contours
+  are drawn per colour level; on-plot percentages for up to 3 levels. New
+  level × quadrant table with % of level (yield) and % of quadrant (purity),
+  computed on all cells. Statistics stay on the comparison variable.
+- Tests: `test_gating_color.R`; F3 block in `test_labels.R`.
+
 ## EpiFlow D3 v1.6.0 — 2026-10-02
 
 - **R34** — Every grouping, colour-by, stratify-by, split-by and ML-target
