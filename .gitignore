@@ -4,12 +4,14 @@ certs/
 docker-compose.override.yml
 
 # Large data files (not versioned): every .rds at the repo root except the
-# committed fixture test_condition.rds; the iPER 416k-cell file; the NPC
-# PAX6/H3K27me3 OmiQ exports (Import-tab validation fixture, R21/R32).
+# committed fixture test_condition.rds; the iPER 416k-cell file; the full NPC
+# PAX6/H3K27me3 OmiQ exports under OMIQ/ (= $EPIFLOW_OMIQ_FIXTURES; the
+# 2,000-row subsamples under tests/fixtures/omiq/ ARE tracked, R21/R32/F4).
 /*.rds
 !/test_condition.rds
 iPER_*.rds
-npc_*.csv
+/npc_*.csv
+/OMIQ/
 # Installer backups
 api/R/*.bak.*
 # Titration installer scaffolding (endpoints now live in plumber.R)
