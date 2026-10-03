@@ -1274,7 +1274,7 @@ equals that genotype's distinct-cell count, not 5× it.
 ---
 
 ## F4 — OmiQ Import tab: replaces the Shiny converter (closes R21; delivers R32 (1) and (2))
-Status: in progress (2026-10-02); branch `features/import`; one commit per step; v1.7.0
+Status: done (2026-10-02); branch `features/import`; commits fixtures, fixtures follow-up, R21, F4a, F4b, F4c; v1.7.0
 
 Why. EpiFlow only read `.rds` files written by the external Shiny converter
 (v5.1), which never transforms marker channels (it assumes OmiQ's scaled

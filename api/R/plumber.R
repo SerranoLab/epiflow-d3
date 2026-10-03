@@ -11,7 +11,7 @@ library(jsonlite)
 # R10: single source of the app version. /api/health returns it, /api/metadata
 # echoes it, and the frontend fills its badge, footers and report from it —
 # no version literal lives in index.html or app.js. Bump here at deploy.
-EPIFLOW_VERSION <- "1.6.1"
+EPIFLOW_VERSION <- "1.7.0"
 # plumb() evaluates this file in its own environment while helpers are sourced
 # into the global one; the option makes the version visible to every helper
 # (importer stamps, example stamps) without a second literal.
