@@ -124,6 +124,16 @@ const App = {
     const status = document.getElementById('data-status');
     status.innerHTML = `<span class="status-dot"></span>
       <span>${Number(meta.n_cells).toLocaleString()} cells · ${markers.length} H3-PTMs · ${genoLevels.length} groups</span>`;
+    // F4: provenance badge — IMPORTED (built by the Import tab) or LEGACY (no data contract)
+    const dc = meta.data_contract;
+    if (dc && (dc.legacy || dc.source === 'omiq_csv')) {
+      const b = document.createElement('span');
+      const legacy = !!dc.legacy;
+      b.style.cssText = `margin-left:8px;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${legacy ? '#fff7ed' : '#dbeafe'};color:${legacy ? '#9a3412' : '#1e3a8a'};`;
+      b.innerHTML = legacy ? '<i class="fas fa-exclamation-triangle"></i> LEGACY' : '<i class="fas fa-file-import"></i> IMPORTED';
+      b.title = legacy ? (dc.warning || 'No data-contract attributes') : 'Built by the Import tab; provenance stamped on the file';
+      status.appendChild(b);
+    }
 
     const summary = document.getElementById('data-summary');
     summary.classList.remove('hidden');
@@ -605,6 +615,7 @@ const App = {
         case 'umap':        break;
         case 'clustering':  break;
         case 'statistics':  break;
+        case 'import':      break;   // F4: the Import tab manages itself (import.js)
         case 'volcano':     this.loadVolcano(); break;
         case 'forest':      this.loadForest(); break;
         case 'ml':          break;
@@ -4257,6 +4268,42 @@ const App = {
     }, 50);
   },
 
+  // F4: the report's "Import provenance" section, from the data contract the
+  // Import tab stamped on the .rds (scale, cofactors and rules, DNA cofactors,
+  // source, workflow, importer, date, instrument, panel, sample sheet, gating
+  // thresholds and rules, QC). A legacy file gets one sentence.
+  _provenanceSection(dc) {
+    const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (!dc || dc.legacy) {
+      return `<div class="report-section"><h2>Import provenance</h2><p>No provenance recorded (file predates the Import tab); the arcsinh cofactor is unknown.</p></div>`;
+    }
+    const row = (k, v) => `<tr><td><strong>${k}</strong></td><td>${esc(v)}</td></tr>`;
+    const cof = dc.cofactors && typeof dc.cofactors === 'object' ? Object.entries(dc.cofactors).map(([ch, v]) => `${ch}: ${v} (${(dc.cofactor_rule || {})[ch] || '—'})`).join('; ') : '—';
+    const g = dc.cell_cycle_gating || null;
+    let html = `<div class="report-section"><h2>Import provenance</h2><table class="meta-table">` +
+      row('Value scale', dc.value_scale) + row('Source', `${dc.source || '—'}${dc.source_scale ? ` (${dc.source_scale} export)` : ''}${dc.omiq_workflow_id ? ` · OmiQ workflow ${dc.omiq_workflow_id}` : ''}`) +
+      row('Importer', `EpiFlow D3 ${dc.importer_version || '—'} · ${dc.import_date || '—'}`) + row('Instrument / panel', `${dc.instrument || '—'} / ${dc.panel || '—'}`) +
+      row('Cofactors (rule)', cof) + row('DNA cofactor / gating cofactor', `${dc.dna_cofactor ?? '—'} / ${dc.dna_gating_cofactor ?? '—'}`) +
+      row('Cells', `${dc.n_cells_source ?? '—'} in the file${dc.n_cells_kept && dc.n_cells_source && Number(dc.n_cells_kept) < Number(dc.n_cells_source) ? `, thinned to ${dc.n_cells_kept} at upload (seed ${dc.ingest_seed})` : ''}`);
+    if (g) {
+      const g2 = Array.isArray(g.g2_threshold) ? g.g2_threshold.map((v, i) => `${Number(v).toFixed(3)} (${ensureArray(g.g2_rule)[i] || ''})`).join('; ') : `${Number(g.g2_threshold).toFixed(3)} (${g.g2_rule})`;
+      html += row('Cell-cycle gating', `${g.alignment || ''}; G2/M at +${g2} on the aligned scale, scope ${g.threshold_scope || 'global'}; phH3 ${Number.isFinite(Number(g.ph3_threshold)) ? `${Number(g.ph3_threshold).toFixed(2)} (${g.ph3_rule})` : 'none'}; S phase ${g.s_phase ? `on (${g.s_rule}, ${g.s_fraction})` : 'off'}; G2 peak resolved in ${g.g2_resolved_n ?? '?'} of ${g.n_samples ?? '?'} samples${g.g2_resolved === false ? ' — G2/M by the ln 2 rule, fractions approximate' : ''}`);
+    }
+    html += '</table>';
+    const sheet = ensureArray(dc.sample_sheet);
+    if (sheet.length) {
+      const cols = Object.keys(sheet[0]);
+      html += `<table class="meta-table"><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>` + sheet.map(r => `<tr>${cols.map(c => `<td>${esc(r[c])}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
+    }
+    const qc = g ? ensureArray(g.qc) : [];
+    if (qc.length) {
+      const cols = ['sample', 'n_cells', 'g1_mode', 'g1_peak_cv_pct', 'g1_peak_cv_flag', 'g2_g1_spacing', 'spacing_flag', 'g1_mode_cv_pct', 'g1_cv_flag', 'ki67_flag'].filter(c => c in qc[0]);
+      html += `<table class="meta-table"><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>` +
+        qc.map(r => `<tr>${cols.map(c => `<td>${typeof r[c] === 'number' ? Number(r[c]).toFixed(3) : esc(r[c])}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
+    }
+    return html + '</div>';
+  },
+
   _buildReport() {
     const sections = [];
     const timestamp = new Date().toLocaleString();
@@ -4280,6 +4327,9 @@ const App = {
         ${filterSummary ? '<div class="filter-note"><strong>Active filters:</strong> ' + filterSummary.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() + '</div>' : ''}
       </div>
     `);
+
+    // --- Import provenance (F4): from the attributes stamped on the file ---
+    sections.push(this._provenanceSection(meta.data_contract));
 
     // --- Collect charts and stats from each panel ---
     const panels = [

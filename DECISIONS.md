@@ -1364,10 +1364,16 @@ unimodal, `ph3_rule` says which; manual override); optional S phase with
 assignment branches; optional 1st–99th percentile outlier removal on raw
 DNA. QC per sample: G1 mode, G2−G1 peak spacing (expected ln 2, flagged
 outside 0.55–0.85 or "no second peak"), CV of G1 modes across samples
-(> 8 % MODERATE, > 15 % HIGH); support-marker QC, optional and never an
-input to the assignment: with a Ki67 channel, the per-sample median Ki67 in
-assigned G2/M vs G0/G1 (flag "NOT HIGHER in G2/M"); with a CyclinD1 channel
-the reverse, labelled weaker; absent markers add no columns. Long format: `cell_id`, `orig_row_number`,
+(> 8 % MODERATE, > 15 % HIGH); G1 peak CV per sample (full width at half
+maximum of the G0/G1 peak on the gating scale, as % CV; flagged above
+10 %); `g2_resolved` (a G2 peak in more than half the samples) with the
+mean G1 peak CV, so the result card can say "G2/M assigned by the ln 2
+rule; G2 not resolved as a peak (G1 CV = x %); treat fractions as
+approximate"; support-marker QC, optional and never an input to the
+assignment: with a Ki67 channel, the per-sample median Ki67 in assigned
+G2/M vs G0/G1 (flag "NOT HIGHER in G2/M"); CyclinD1 was tried and removed
+(user decision 2026-10-02: a G1 cyclin that accumulates into S/G2 is not a
+check); absent markers add no columns. Long format: `cell_id`, `orig_row_number`,
 `omiq_file`, sheet columns, `identity`, `cell_cycle`, phenotypic columns,
 `FxCycle`, `FxCycle_aligned`, `phH3`, `H3PTM / value` (phenotype-only
 sentinel when no H3 channel); every contract attribute stamped, plus
@@ -1388,7 +1394,66 @@ and cell (< 1e-4) on the fixture and on 5,000 sampled cells of the full
 export (124,105 cells import in 3–4 s); the scaled export declared scaled
 yields the same `.rds` as the raw export to < 1e-4 on every value column.
 
-Import tab UI (commit F4c, to follow).
+F4c (commit 4) — the Import tab. `frontend/js/import.js` self-installs a
+sidebar entry ("Import OmiQ export (CSV)"), a nav button and
+`#panel-import` (the titration pattern): Files (export + declared scale,
+Scaling CSV, sample sheet, template download) → Preview (channels with
+roles, files × sheet, samples per group with the single-replicate rows
+flagged amber and the blank grey; the group-by select is
+`buildGroupingOptions` over the sheet columns) → Cofactors (OmiQ value,
+suggestion + rule, weaker badge, chosen input; "use OmiQ / suggestion for
+all") → Cell cycle (G2/M rule valley / ln 2 / percentile / manual, scope,
+S phase, phH3 override, outliers, DNA gating cofactor; previews recompute
+(debounced, 400 ms) on every control change through
+`POST /api/import/cc-preview/<id>` — the run's gating on the full data —
+giving per-sample DNA densities on the gating scale with the G0/G1 mode and
+G2/M threshold drawn (axis "FxCycle (arcsinh intensity, cofactor c)"),
+per-sample phH3 densities with the phH3 threshold, and a pooled
+aligned-DNA × phH3 scatter (6,000-cell display sample, density contours)
+with draggable G2/M and phH3 lines whose drop writes the manual value into
+the field and switches the rule to manual) → Run (single-replicate
+confirmation only when needed; progress bar polling `/progress`) → Result
+(cells per sample, cell-cycle fractions, the per-sample QC table with the
+G1 peak CV, G2−G1 spacing, G1-mode CV and Ki67 flags, the ln 2 caveat when
+G2 is not resolved, the same previews with the stamped thresholds, the
+stamped cofactors; "Download .rds" and
+"Load into EpiFlow", which opens the session through the normal
+`onDataLoaded` path so every R34 list sees the sheet columns). The R32
+help text "Before you import: unmixing and scaling" sits at the top of the
+tab. USER_GUIDE's data-preparation section now describes the tab (the Shiny
+converter is kept as a legacy link); README and LOCAL_DEV updated.
+Follow-up 2 (2026-10-02): the step-4 banner names the rule the server
+actually applied (per group when scoped) and the mean G1 peak CV, with
+"(valley requested; no G2 peak to find)" when the ln 2 fallback took over;
+one legend strip for the step (Okabe-Ito: G0/G1 mode #0072B2 solid, G2/M
+#D55E00 dashed, phH3 #CC79A7 dotted); the scatter is titled "DNA aligned
+per sample (G0/G1 mode = 0) vs phH3" with a solid line at x = 0; one row per
+sample with the DNA and phH3 panels side by side and compact QC badges at
+the row end (single column otherwise); the phH3 field shows the valley
+rule's value as "auto 5.xx" until edited; the run writes
+`<name>_import_log.md` beside the `.rds` (sample sheet, cofactors + rules,
+gating thresholds + rules, QC table, importer version, date, OmiQ workflow
+id; `result` action `log` serves it); the HTML report gains an "Import
+provenance" section from the stamped attributes ("no provenance recorded
+(file predates the Import tab)" on legacy files); the landing puts the
+Import card first and "Upload .rds" second, and a loaded file is badged
+IMPORTED or LEGACY from its contract.
+Browser bug (2026-10-02, user report): upload and inspect returned 200 but
+rendering the Preview threw "Cannot set properties of null (setting
+'innerHTML')". The null container was `#imp-dna-hist`, removed from the
+step-4 markup by follow-up 2 while `prepareCellCycle()` still wrote to it,
+so the throw happened on every path (the nav-tab and the landing-card
+entries already share one `#panel-import`); it now writes to
+`#imp-cc-rows`. The two legend strips had the same id; the result card's is
+`imp-result-legend`.
+Tests: F4 block in `test_labels.R` (banner, legend, log, report section,
+badges, the retired container); `log`, `cc-preview` and G1-peak-CV blocks
+in `test_omiq_import.R`; **`test_import_headless.R`** drives the tab in a
+real headless Chrome over the DevTools protocol (`tools/cdp_smoke.py`,
+standard library only): scenario A from the empty landing card, scenario B
+with the example loaded and Import opened from the nav tab — inspect,
+cell-cycle preview, run, result and load, with no JS error, rejection or
+alert; it prints [SKIP] without Chrome or the two local servers.
 
 ---
 

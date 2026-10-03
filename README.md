@@ -14,6 +14,7 @@ Developed by the [Serrano Lab](https://serranolab.github.io/online/) at the [Cen
 ## Features
 
 ### Data Exploration
+- **Import tab** — builds the `.rds` from an OmiQ export, the Scaling CSV and a sample sheet: per-channel arcsinh with the OmiQ cofactor beside a blank-spread suggestion, per-sample cell-cycle gating (aligned G0/G1, valley or ln 2 midpoint G2/M, phH3), per-sample QC, and a stamped data contract (scale, cofactors and rules, source, importer, sample sheet, gating)
 - **Overview dashboard** — cell counts by the comparison variable, identity, replicate, and cell cycle with interactive bar charts and per-marker box plots (Q1–Q3; whiskers 5th–95th percentile; dot = mean) split by any metadata column, each with n cells and n replicates
 - **Ridge plots** — kernel density distributions per marker across groups
 - **Violin plots** — grouped violins with embedded box plots, median lines, and inline statistics (LMM p-values, d = β / cell-level pooled SD)

@@ -63,20 +63,28 @@ check(all(cc1$cell_cycle[smp == "C"] == "Unassigned") && is.na(cc1$gating$qc$g1_
       "a sample with fewer than 10 cells has no G1 mode: its cells are Unassigned and the QC row says so")
 ccP <- omiq_cell_cycle(dna, smp, opts = list(method = "percentile", percentile = 0.9))
 check(identical(ccP$gating$g2_rule, "percentile_90"), "the 90th percentile is available only as the explicit method percentile (0.90)")
-# support markers: Ki67 higher in G2/M (OK), CyclinD1 higher in G0/G1 (OK, weaker); then reversed
+# G1 peak CV (FWHM on the gating scale as % CV): sample A sd 0.06 at mode 5 → 1.2 %; a broad sample sd 0.6 → 12 % → HIGH
+q1 <- cc1$gating$qc
+check(abs(q1$g1_peak_cv_pct[q1$sample == "A"] - 1.2) < 0.4 && q1$g1_peak_cv_flag[q1$sample == "A"] == "OK", sprintf("G1 peak CV from the FWHM: %.1f %% for a 0.06-SD peak at mode 5 (OK)", q1$g1_peak_cv_pct[q1$sample == "A"]))
+broad <- rnorm(4000, 5, 0.6); ccB <- omiq_cell_cycle(c(sA, broad), c(rep("A", length(sA)), rep("W", 4000)), opts = list(method = "ln2"))
+qB <- ccB$gating$qc
+check(qB$g1_peak_cv_pct[qB$sample == "W"] > 10 && qB$g1_peak_cv_flag[qB$sample == "W"] == "HIGH", sprintf("a broad G1 peak (SD 0.6) gives G1 peak CV %.1f %% → HIGH", qB$g1_peak_cv_pct[qB$sample == "W"]))
+check(is.na(q1$g1_peak_cv_pct[q1$sample == "C"]) && q1$g1_peak_cv_flag[q1$sample == "C"] == "n/a", "no G1 mode → G1 peak CV n/a")
+check(cc1$gating$g2_resolved_n == 1 && cc1$gating$n_samples == 3 && isFALSE(cc1$gating$g2_resolved) && is.finite(cc1$gating$g1_peak_cv_mean),
+      "g2_resolved: 1 of 3 samples shows a G2 peak → not resolved for most; mean G1 peak CV reported")
+# support marker: Ki67 higher in G2/M (OK); reversed → flagged; absent → no columns; CyclinD1 is not a check
 is_g2m <- cc1$cell_cycle %in% c("G2", "M", "G2/M")
-ki <- ifelse(is_g2m, rnorm(length(dna), 3, .2), rnorm(length(dna), 1.5, .2)); cy <- ifelse(is_g2m, rnorm(length(dna), 1, .2), rnorm(length(dna), 2.5, .2))
-cc2 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp, support = list(Ki67 = ki, CyclinD1 = cy))
+ki <- ifelse(is_g2m, rnorm(length(dna), 3, .2), rnorm(length(dna), 1.5, .2))
+cc2 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp, support = list(Ki67 = ki))
 q2 <- cc2$gating$qc
-check(all(c("ki67_median_g1", "ki67_median_g2m", "ki67_flag", "cyclind1_median_g1", "cyclind1_median_g2m", "cyclind1_flag") %in% names(q2)) && identical(cc2$gating$support_markers, c("Ki67", "CyclinD1")),
-      "support-marker QC columns present when Ki67 and CyclinD1 exist")
-check(all(q2$ki67_flag[q2$sample %in% c("A", "B")] == "OK") && all(q2$cyclind1_flag[q2$sample %in% c("A", "B")] == "OK (weaker)") && q2$ki67_flag[q2$sample == "C"] == "n/a",
-      "Ki67 higher in G2/M → OK; CyclinD1 higher in G0/G1 → OK (weaker); too few cells → n/a")
-check(identical(cc2$cell_cycle, cc1$cell_cycle), "support markers never change the assignment")
-cc3 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp, support = list(Ki67 = -ki, CyclinD1 = -cy))
-check(all(cc3$gating$qc$ki67_flag[1:2] == "NOT HIGHER in G2/M") && all(cc3$gating$qc$cyclind1_flag[1:2] == "NOT HIGHER in G0/G1 (weaker)"), "reversed markers are flagged")
-cc4 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley"), support = list(Ki67 = ki))
-check(!any(grepl("cyclind1", names(cc4$gating$qc))) && any(grepl("ki67", names(cc4$gating$qc))), "an absent support marker adds no columns")
+check(all(c("ki67_median_g1", "ki67_median_g2m", "ki67_flag") %in% names(q2)) && identical(cc2$gating$support_markers, "Ki67") && !any(grepl("cyclin", names(q2), ignore.case = TRUE)),
+      "support-marker QC: Ki67 columns present, no CyclinD1 columns")
+check(all(q2$ki67_flag[q2$sample %in% c("A", "B")] == "OK") && q2$ki67_flag[q2$sample == "C"] == "n/a", "Ki67 higher in G2/M → OK; too few cells → n/a")
+check(identical(cc2$cell_cycle, cc1$cell_cycle), "the support marker never changes the assignment")
+cc3 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley", threshold_scope = "per_group"), group = smp, support = list(Ki67 = -ki))
+check(all(cc3$gating$qc$ki67_flag[1:2] == "NOT HIGHER in G2/M"), "a reversed Ki67 is flagged")
+cc4 <- omiq_cell_cycle(dna, smp, opts = list(method = "valley"))
+check(!any(grepl("ki67", names(cc4$gating$qc))), "an absent support marker adds no columns")
 
 # ---- in-process: channel roles and names ----
 cat("\n--- 0b. channel roles ---\n")
@@ -218,8 +226,10 @@ check(is.list(g) && g$g2_rule %in% c("valley", "ln2_midpoint") && is.finite(g$g2
       sprintf("cell_cycle_gating stamped: G2/M %s (%.3f), phH3 %s (%.2f), S rule fraction_of_g2_threshold", g$g2_rule, g$g2_threshold, g$ph3_rule, g$ph3_threshold))
 qc <- g$qc
 check(is.data.frame(qc) && nrow(qc) == 8 && all(c("g1_mode", "g2_g1_spacing", "spacing_flag", "g1_mode_cv_pct", "g1_cv_flag") %in% names(qc)), "QC per sample: G1 mode, G2−G1 spacing with flag, G1-mode CV with flag")
-check(all(c("ki67_flag", "cyclind1_flag") %in% names(qc)) && identical(g$support_markers, c("Ki67", "CyclinD1")) && all(qc$ki67_flag %in% c("OK", "NOT HIGHER in G2/M", "n/a")),
-      sprintf("support-marker QC on the NPC panel (Ki67, CyclinD1): Ki67 flags %s", paste(qc$ki67_flag, collapse = "/")))
+check("ki67_flag" %in% names(qc) && !"cyclind1_flag" %in% names(qc) && identical(g$support_markers, "Ki67") && all(qc$ki67_flag %in% c("OK", "NOT HIGHER in G2/M", "n/a")),
+      sprintf("support-marker QC on the NPC panel (Ki67 only): flags %s", paste(qc$ki67_flag, collapse = "/")))
+check(all(c("g1_peak_cv_pct", "g1_peak_cv_flag") %in% names(qc)) && all(is.finite(qc$g1_peak_cv_pct)) && !is.null(g$g2_resolved) && is.finite(g$g1_peak_cv_mean),
+      sprintf("G1 peak CV stamped per sample (mean %.1f %%); g2_resolved = %s (%d of %d samples)", g$g1_peak_cv_mean, g$g2_resolved, g$g2_resolved_n, g$n_samples))
 check(dc$n_cells_source == 1500 && is.character(dc$importer_version) && grepl("^[0-9]+\\.[0-9]+", dc$importer_version), sprintf("n_cells_source and importer_version (%s) stamped", dc$importer_version))
 # columns the loader expects, and the provenance columns
 check(all(c("cell_id", "orig_row_number", "omiq_file", "condition", "genotype", "replicate", "identity", "cell_cycle", "FxCycle", "FxCycle_aligned", "phH3", "Pax6_PE", "H3PTM", "value") %in% names(rdsA)),
@@ -286,6 +296,31 @@ resE <- run_import(upload_import(file.path(FIX, "npc_blank_raw.csv"), file.path(
                    list(cell_cycle = list(method = "ln2")))
 check(is.null(resE$error) && identical(chr(resE$gating$g2_rule), "ln2_midpoint") && abs(num(resE$gating$g2_threshold) - log(2) / 2) < 1e-9, "method ln2: G2/M threshold at +ln(2)/2 on the aligned scale, rule ln2_midpoint")
 
+# ---- 6a. provenance log beside the .rds ----
+cat("\n--- 6a. import log (<name>_import_log.md) ---\n")
+lg <- post(paste0("/api/import/result/", upA$import_id), list(action = "log"))
+L <- chr(lg$log)
+check(nchar(L) > 500 && grepl("^# EpiFlow import log", L), "result action = log returns the Markdown provenance log")
+check(all(vapply(c("## Sample sheet", "## Cofactors and rules", "## Cell-cycle gating", "## Per-sample QC"), function(h) grepl(h, L, fixed = TRUE), logical(1))), "log has the sample sheet, cofactors + rules, gating and QC sections")
+check(grepl("OmiQ workflow 183012389097095", L, fixed = TRUE) && grepl("importer: EpiFlow D3 ", L, fixed = TRUE) && grepl("import date: ", L, fixed = TRUE) && grepl("instrument: Aurora; panel: NPC PAX6/H3K27me3", L, fixed = TRUE),
+      "log names the workflow id, importer version, date, instrument and panel")
+check(grepl("| Pax6_PE | 1000 | omiq |", L, fixed = TRUE) && grepl("| 14-Blank.fcs |", L, fixed = TRUE) && grepl("g1_peak_cv_pct", L, fixed = TRUE) && grepl("phH3 threshold: ", L, fixed = TRUE),
+      "log carries the Pax6 cofactor row, the blank's sheet row, the G1 peak CV column and the phH3 threshold line")
+
+# ---- 6b. cell-cycle preview (step 4 of the Import tab, before the run) ----
+cat("\n--- 6b. /api/import/cc-preview ---\n")
+pv <- post(paste0("/api/import/cc-preview/", upA$import_id), list())
+check(is.null(pv$error) && num(pv$dna_gating_cofactor) == 600 && length(pv$samples) == 8 && isTRUE(pv$has_ph3), "default gating cofactor = the OmiQ DNA cofactor (600); one entry per stained sample; phH3 present")
+check(all(vapply(pv$samples, function(x) length(x$x) == 128 && length(x$ph3_x) == 128 && is.finite(num(x$g1_mode)) && is.finite(num(x$g2_threshold_abs)) && is.finite(num(x$g1_peak_cv_pct)), logical(1))),
+      "each sample carries DNA and phH3 densities, its G0/G1 mode, the absolute G2/M threshold and its G1 peak CV")
+check(num(pv$n_points) > 1000 && all(c("x", "y", "phase", "sample") %in% names(pv$points[[1]])) && abs(sum(num(pv$fractions)) - 100) < 0.2,
+      "pooled scatter sample (aligned DNA, phH3, phase) and phase fractions summing to 100")
+check(chr(pv$g2_rule) %in% c("valley", "ln2_midpoint") && is.finite(num(pv$ph3_threshold)), "preview reports the G2/M and phH3 rules the run would stamp")
+pv2 <- post(paste0("/api/import/cc-preview/", upA$import_id), list(dna_gating_cofactor = 150, cell_cycle = list(method = "manual", g2_threshold = 0.5, ph3_threshold = 3)))
+check(is.null(pv2$error) && num(pv2$dna_gating_cofactor) == 150 && identical(chr(pv2$g2_rule), "manual") && num(pv2$g2_threshold) == 0.5 && identical(chr(pv2$ph3_rule), "manual") && num(pv2$ph3_threshold) == 3 &&
+      all(num(lapply(pv2$samples, `[[`, "g1_mode")) > num(lapply(pv$samples, `[[`, "g1_mode"))),
+      "manual thresholds and a smaller gating cofactor are honoured by the preview (every G1 mode moves up the arcsinh axis)")
+
 # ---- 7. full files (EPIFLOW_OMIQ_FIXTURES) ----
 cat("\n--- 7. full export (", FULL, ") ---\n")
 full_raw <- list.files(file.path(FULL, "npc_raw_blank"), pattern = "\\.csv$", full.names = TRUE)
@@ -306,7 +341,7 @@ if (length(full_raw) == 1 && length(full_sc) == 1 && length(full_scaling) == 1) 
   for (i in which(chF$role %in% c("phenotypic", "dna", "ph3"))) md <- max(md, max(abs(wF[[chF$epiflow_name[i]]][mF] - scF[[chF$column[i]]][idx]), na.rm = TRUE))
   check(!anyNA(mF) && md < 1e-4, sprintf("full export: 5,000 sampled cells equal the scaled export on every phenotypic / DNA / phH3 channel (max |diff| %.2g)", md))
   qcF <- .epiflow_read_contract(rdsF)$cell_cycle_gating$qc
-  cat("      per-sample QC:\n"); print(qcF[, c("sample", "n_cells", "g1_mode", "g2_g1_spacing", "spacing_flag", "g1_cv_flag", "ki67_flag", "cyclind1_flag")], row.names = FALSE)
+  cat("      per-sample QC:\n"); print(qcF[, c("sample", "n_cells", "g1_mode", "g1_peak_cv_pct", "g2_g1_spacing", "spacing_flag", "g1_cv_flag", "ki67_flag")], row.names = FALSE, digits = 3)
   gF <- .epiflow_read_contract(rdsF)$cell_cycle_gating
   cat(sprintf("      G2/M rule on the full export: %s (threshold %.3f on the aligned scale); phH3 rule %s (%.2f)\n", gF$g2_rule, gF$g2_threshold, gF$ph3_rule, gF$ph3_threshold))
   upG <- upload_import(full_sc, full_scaling, file.path(FIX, "npc_sample_sheet.csv"), declared = "scaled")

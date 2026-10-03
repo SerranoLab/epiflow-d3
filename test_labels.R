@@ -281,5 +281,38 @@ check(has(a, "_contractLine(dc) {") && has(a, "Legacy file.</strong>") && has(a,
       "data summary shows the legacy warning or the scale / cofactor-rule / source line")
 check(has(a, "${this._contractLine(meta.data_contract)}") && ver_of("js/app.js") >= "1.3.35", "data summary renders the contract line; app.js bumped")
 
+# ---- F4: Import tab — help text, DNA histogram axis, QC wording, docs ----
+cat("\n--- F4 Import tab labels ---\n")
+im <- "frontend/js/import.js"
+check(has("frontend/index.html", 'src="js/import.js?v=') && has("frontend/index.html", "import an OmiQ export (CSV) from the sidebar"), "index.html loads import.js and the welcome text names the Import tab")
+check(has(im, "Before you import: unmixing and scaling") && has(im, "(Nguyen 2013)") && has(im, "(Parks 2006)") && has(im, "(Roederer 2001)") && has(im, "(Ferrer-Font 2020)"),
+      "the R32 help text 'Before you import: unmixing and scaling' with its four references is on the tab")
+check(has(im, "`FxCycle (arcsinh intensity, cofactor ${c})`") && has(im, "`phH3 (arcsinh intensity, cofactor ${cph})`"), "DNA and phH3 histogram axes name the quantity and its scale with the cofactor")
+check(has(im, "'FxCycle aligned (arcsinh, G0/G1 mode = 0)'") && has(im, "'phH3 (arcsinh intensity)'"), "pooled scatter axes name quantity and scale")
+check(has(im, "G1 peak CV (FWHM; flagged above 10 %)") && has(im, "G2−G1 peak spacing (expected ln 2 ≈ 0.69; flagged outside 0.55–0.85)") && has(im, "CV of G1 modes across samples (> 8 % MODERATE, > 15 % HIGH)") &&
+      has(im, "Ki67 median in G2/M vs G0/G1 (should be higher)") && lacks(im, "CyclinD1") && lacks("api/R/import.R", "CyclinD1"), "QC table header states every check and its rule; CyclinD1 is gone")
+check(has(im, "G2/M assigned by the ln 2 rule; G2 not resolved as a peak in") && has(im, "treat fractions as approximate"), "the result card carries the ln 2 / G2-not-resolved caveat with the G1 CV")
+check(has(im, "Drag the G2/M (dashed) or phH3 (dotted) line to set a manual threshold; the rule switches to manual."), "scatter note explains the draggable thresholds and the manual rule")
+# F4c follow-up 2: banner, legend, line styles, scatter title, phH3 auto placeholder, landing order, badges, provenance
+check(has(im, "<strong>G2/M applied: ${esc(applied)}</strong>") && has(im, "mean G1 peak CV <strong>${fmt(prev.g1_peak_cv_mean, 1)} %</strong>") && has(im, "(valley requested; no G2 peak to find)"),
+      "the step-4 banner names the rule actually applied and the G1 CV (never a fixed string)")
+check(has(im, "g1: { color: '#0072B2', dash: null, label: 'G0/G1 mode (solid)' }") && has(im, "g2: { color: '#D55E00', dash: '6,3', label: 'G2/M threshold (dashed)' }") && has(im, "ph3: { color: '#CC79A7', dash: '2,3', label: 'phH3 threshold (dotted)' }") && has(im, "function legendStrip(id = 'imp-cc-legend')") && has(im, "legendStrip('imp-result-legend')"),
+      "one legend strip per view (distinct ids): Okabe-Ito lines, solid / dashed / dotted")
+check(has(im, ".text('DNA aligned per sample (G0/G1 mode = 0) vs phH3')") && has(im, "// G1 mode = 0 (solid)"), "scatter title and the solid G1 line at x = 0")
+check(has(im, "ph3Field.placeholder = `auto ${Number(prev.ph3_threshold).toFixed(2)}`"), "phH3 field shows the valley rule's value as 'auto 5.xx' until edited")
+check(has(im, "upload.insertAdjacentElement('beforebegin', div);") && has(im, "Import OmiQ export (CSV)"), "landing: the Import card is inserted before 'Upload .rds'")
+check(has(im, "class=\"imp-row\"") || has(im, "row.className = 'imp-row'"), "per-sample rows (DNA and phH3 side by side, badges at the row end)")
+check(has(a, "'<i class=\"fas fa-file-import\"></i> IMPORTED'") && has(a, "'<i class=\"fas fa-exclamation-triangle\"></i> LEGACY'"), "IMPORTED / LEGACY badge after load")
+check(has(a, "<h2>Import provenance</h2>", 2) && has(a, "No provenance recorded (file predates the Import tab)") && has(a, "sections.push(this._provenanceSection(meta.data_contract));"),
+      "HTML report has an Import provenance section (legacy sentence when no contract)")
+check(has("api/R/import.R", "omiq_import_log <- function(contract, summary)") && has("api/R/plumber.R", 'file.path(dir, "result_import_log.md")') && has(im, "_import_log.md"),
+      "the run writes <name>_import_log.md beside the .rds and the tab offers it")
+check(ver_of("js/import.js") >= "1.2.1" && ver_of("js/app.js") >= "1.3.37", "import / app cache-busting bumps")
+check(lacks(im, "getElementById('imp-dna-hist')") && file.exists("test_import_headless.R") && file.exists("tools/cdp_smoke.py"), "no write to the retired #imp-dna-hist container; the headless browser test exists")
+check(has(im, "1.4826 × MAD of the blank's raw values") && has(im, "ln 2 midpoint when no G2 peak") && has(im, "single replicate"), "cofactor, G2/M and single-replicate wording present")
+check(has("USER_GUIDE.md", "### Preparing Your Data: the Import tab") && has("USER_GUIDE.md", "ln 2 midpoint") && has("README.md", "**Import tab**") && has("LOCAL_DEV.md", "EPIFLOW_OMIQ_FIXTURES"),
+      "USER_GUIDE, README and LOCAL_DEV describe the Import tab and the fixture variable")
+check(ver_of("js/api.js") >= "1.3.0" && ver_of("js/app.js") >= "1.3.36", "api / app cache-busting bumps")
+
 cat(sprintf("\n%s: %d failure(s)\n", if (failures == 0) "ALL PASS" else "FAILURES", failures))
 quit(status = if (failures == 0) 0 else 1)

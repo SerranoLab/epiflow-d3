@@ -67,6 +67,35 @@ const EpiFlowAPI = {
     return data;
   },
 
+  // F4: OmiQ import (multipart upload; JSON thereafter; download as a blob)
+  async importUpload(formData) {
+    const resp = await fetch(`${API_BASE}/api/import/upload`, { method: 'POST', body: formData });
+    const data = await resp.json().catch(() => ({ error: resp.statusText }));
+    if (!resp.ok || data.error) throw new Error(data.error || `Upload failed: ${resp.statusText}`);
+    return data;
+  },
+  async importInspect(importId)       { return this._postNoSession(`/api/import/inspect/${importId}`, {}); },
+  async importCcPreview(importId, b)  { return this._postNoSession(`/api/import/cc-preview/${importId}`, b || {}); },
+  async importRun(importId, body)     { return this._postNoSession(`/api/import/run/${importId}`, body || {}); },
+  async importProgress(importId) {
+    const resp = await fetch(`${API_BASE}/api/import/progress/${importId}`);
+    const data = await resp.json(); if (!resp.ok) throw new Error(data.error || resp.statusText); return data;
+  },
+  async importResult(importId, action = 'summary') { return this._postNoSession(`/api/import/result/${importId}`, { action }); },
+  async importDownload(importId) {
+    const resp = await fetch(`${API_BASE}/api/import/result/${importId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'download' }) });
+    if (!resp.ok) throw new Error(`Download failed: ${resp.statusText}`);
+    return await resp.blob();
+  },
+  // The import endpoints run before any data session exists.
+  async _postNoSession(endpoint, body = {}) {
+    const resp = await fetch(`${API_BASE}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await resp.json().catch(() => ({ error: resp.statusText }));
+    if (!resp.ok) throw new Error(data.error || `API error: ${resp.statusText}`);
+    if (data.error) throw new Error(data.error);
+    return data;
+  },
+
   async loadExample(opts = {}) {
     const resp = await fetch(`${API_BASE}/api/example`, {
       method: 'POST',

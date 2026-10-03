@@ -1607,12 +1607,29 @@ function(import_id, req) {
   tryCatch({
     out <- omiq_run(imp, params, progress = function(stage, pct, message) .import_progress_write(dir, stage, pct, message))
     saveRDS(out$data, file.path(dir, "result.rds"))
+    # provenance log beside the .rds (downloaded with it as <name>_import_log.md)
+    writeLines(omiq_import_log(out$contract, out$summary), file.path(dir, "result_import_log.md"))
     writeLines(jsonlite::toJSON(out$summary, auto_unbox = TRUE, digits = NA, na = "null", dataframe = "rows"), file.path(dir, "done.json"))
     TRUE
   }, error = function(e) {
     writeLines(jsonlite::toJSON(list(error = conditionMessage(e)), auto_unbox = TRUE), file.path(dir, "error.json"))
     FALSE
   })
+}
+
+#* Cell-cycle preview for the Import tab's step 4: the same gating as the run
+#* with the current controls (body = the run body), returning per-sample DNA
+#* densities on the gating scale with the G0/G1 mode and the G2/M threshold,
+#* per-sample phH3 densities with the phH3 threshold, a pooled (aligned DNA,
+#* phH3) sample of cells for the scatter, and the overall phase fractions.
+#* @post /api/import/cc-preview/<import_id>
+#* @serializer json list(auto_unbox = TRUE, digits = NA, na = "null")
+function(import_id, req) {
+  imp <- get_import(import_id)
+  if (is.null(imp)) return(list(error = "Import not found."))
+  params <- req$body %||% list()
+  tryCatch(c(list(import_id = import_id), omiq_cc_preview(imp, params)),
+           error = function(e) list(error = paste("Cell-cycle preview failed:", e$message)))
 }
 
 #* Start the import. Body: cofactors (named by EpiFlow channel name),
@@ -1645,7 +1662,12 @@ function(import_id, req) {
 function(import_id) {
   imp <- get_import(import_id)
   if (is.null(imp)) return(list(error = "Import not found."))
-  if (!is.null(imp$job)) parallel::mccollect(imp$job, wait = FALSE)   # reap when finished
+  # reap the finished child once; later polls skip it (no "cannot wait for child" noise)
+  if (!is.null(imp$job)) {
+    done_file <- file.exists(file.path(imp$dir, "done.json")) || file.exists(file.path(imp$dir, "error.json"))
+    suppressWarnings(try(parallel::mccollect(imp$job, wait = FALSE), silent = TRUE))
+    if (done_file) data_store[[sanitize_session_id(import_id)]]$job <- NULL
+  }
   prog <- if (file.exists(file.path(imp$dir, "progress.json"))) jsonlite::fromJSON(file.path(imp$dir, "progress.json")) else list(stage = "idle", pct = 0, message = "Not started")
   prog$done <- file.exists(file.path(imp$dir, "done.json"))
   if (file.exists(file.path(imp$dir, "error.json"))) { prog$error <- jsonlite::fromJSON(file.path(imp$dir, "error.json"))$error; prog$stage <- "error" }
@@ -1666,6 +1688,10 @@ function(import_id, req, res) {
   action <- (req$body %||% list())$action %||% "summary"
   summary <- jsonlite::fromJSON(file.path(imp$dir, "done.json"), simplifyVector = FALSE)
   rds <- file.path(imp$dir, "result.rds")
+  if (identical(action, "log")) {
+    logf <- file.path(imp$dir, "result_import_log.md")
+    return(list(import_id = import_id, log = if (file.exists(logf)) paste(readLines(logf, warn = FALSE), collapse = "\n") else ""))
+  }
   if (identical(action, "download")) {
     res$setHeader("Content-Type", "application/octet-stream")
     res$setHeader("Content-Disposition", paste0("attachment; filename=\"epiflow_import_", format(Sys.Date(), "%Y%m%d"), ".rds\""))

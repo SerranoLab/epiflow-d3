@@ -30,13 +30,17 @@ Serrano Lab · Center for Regenerative Medicine (CReM) · Boston University
 Upload .rds → Filter → Explore → Analyze → Export
 ```
 
-### Preparing Your Data
+### Preparing Your Data: the Import tab
 
-EpiFlow D3 accepts `.rds` files in long format. Use the **OMIQ → EpiFlow Converter** to transform raw OMIQ CSV exports into this format:
+EpiFlow D3 reads `.rds` files in long format. The **Import** tab (sidebar: *Import OmiQ export (CSV)*) builds that file from an OmiQ export and stamps it with its data contract; it replaces the former Shiny converter (still reachable at https://serranolab.shinyapps.io/File_EpiFlow_converter/ for legacy files, which EpiFlow loads with a "legacy file" warning and an unknown cofactor).
 
-**https://serranolab.shinyapps.io/File_EpiFlow_converter/**
+1. **Files** — the OmiQ export (raw, unmixed, untransformed: columns `Orig_Row_Number`, `Primary___Secondary` channels, filter columns, `OmiqFileIndex`), the OmiQ **Scaling CSV** (per-channel arcsinh cofactors; required for a raw export), and a **sample sheet** (required): one row per file with `file, condition, genotype, replicate`, optional `identity` (a value, or the name of a filter column such as `OmiqFilter`) and `role` (`blank` marks the unstained blank); any extra column becomes metadata and appears in every grouping list. A scaled export is accepted when the Scaling CSV is present (it is back-transformed, then handled identically); without it the values are kept and the cofactor is stamped as unknown.
+2. **Preview** — channels and their roles, files × sample sheet, samples per group; a group with a single replicate is flagged and must be confirmed before export. The blank is excluded from every group.
+3. **Cofactors** — for each channel the OmiQ value beside a data-driven suggestion: 1.4826 × MAD of the blank's raw values (the negatives' spread), or, without a blank, the spread below the stained negative mode (flagged weaker). The DNA channel is stored at its own cofactor. The chosen value and rule (`omiq`, `blank_mad`, `negative_mode`, `manual`) are stamped in the file. Read *Before you import: unmixing and scaling* on the tab before choosing.
+4. **Cell cycle** — DNA per sample on the gating scale (`asinh(raw / dna_gating_cofactor)`, default = the DNA cofactor), G0/G1 mode aligned per sample, G2/M by the valley between the G1 and G2 peaks or, when no G2 peak exists, the ln 2 midpoint (G2 has twice the DNA); phH3 threshold from its own valley (2.5 only when unimodal); optional S phase (0.4 × the G2/M threshold). Every rule and threshold is stamped. Previews of every sample's DNA and phH3 density, with the thresholds drawn, and a pooled aligned-DNA × phH3 scatter with draggable G2/M and phH3 lines update as you change the controls (dragging sets a manual threshold). The result card reports per sample the G1 mode, the G1 peak CV (full width at half maximum, flagged above 10 %), the G2−G1 peak spacing (expected ln 2 ≈ 0.69), the CV of G1 modes across samples, and, when the panel has Ki67, its median in G2/M vs G0/G1 (should be higher) — a check that never changes the assignment. When most samples show no G2 peak the card says so and the ln 2 fractions are to be read as approximate.
+5. **Run** — a progress bar, then **Download .rds**, **Download import log** (`<name>_import_log.md`: sample sheet, cofactors and rules, gating thresholds and rules, QC table, importer version, date, OmiQ workflow id) or **Load into EpiFlow**. The same facts are stamped on the `.rds` and appear in the HTML report as "Import provenance"; a file that predates the Import tab is badged LEGACY and the report says "no provenance recorded".
 
-The converter handles column detection, metadata extraction from OMIQ filenames, DNA transformation, cell cycle gating (G0/G1, S, G2, G2/M, M phase assignment with flexible thresholding), outlier removal, and long-format conversion.
+The transform is `asinh(x / cofactor)` per channel with the cofactor matched on the literal `Primary___Secondary` channel name; it reproduces OmiQ's own scaled export to its 5-significant-digit rounding.
 
 **Required columns:**
 

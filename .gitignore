@@ -29,3 +29,5 @@ PHENOTYPE_ONLY_APPLY.md
 
 # applied patches kept for reference
 patches_applied/
+# headless smoke pages written by test_import_headless.R (temporary)
+frontend/_smoke*
