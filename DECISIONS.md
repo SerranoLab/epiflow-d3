@@ -576,7 +576,23 @@ the in-app Methods for the volcano; axis label text asserted in
 ---
 
 ## R21 — Data contract: the arcsinh transform and its cofactor are assumed, never stamped or checked
-Status: open (2026-09-25)
+Status: done (2026-10-02); branch `features/import`, commit "R21: data contract"; the importer that writes the stamps is F4
+
+Done. `.epiflow_read_contract()` (`helpers.R`) reads every contract attribute
+(`epiflow_schema_version, value_scale, cofactors, cofactor_rule, dna_cofactor,
+dna_gating_cofactor, source, omiq_workflow_id, importer_version, import_date,
+instrument, panel, sample_sheet, cell_cycle_gating, n_cells_source,
+n_cells_kept, ingest_seed, epiflow_mode`) before any dplyr step; the loader
+fills `n_cells_source` / `n_cells_kept` and, when `EPIFLOW_MAX_CELLS_INGEST`
+thins a file, `ingest_seed = 42`; a file without the stamps is `legacy = TRUE`
+with a warning, `value_scale = "arcsinh (assumed; not stamped)"` and
+`cofactor_rule = "unknown"`. `data_contract` travels in both ingest responses
+and `/api/metadata`; the sidebar data summary shows the contract line or the
+legacy warning. `.cofactor_required(store)` returns the R21 error for any
+endpoint that needs a cofactor (Gate Finder export, R32 (3)); nothing refuses
+a legacy file otherwise. `.epiflow_stamp_contract()` writes the stamps; the
+two example generators stamp `value_scale = "arcsinh"`, `cofactor_rule =
+"synthetic"`, `source = "example"`. Test: `test_data_contract.R`.
 
 What changes. `load_epiflow_data()` (`helpers.R:83-170`) never inspects
 `value`: no transform attribute is read, no cofactor is recorded, and the
@@ -991,6 +1007,26 @@ Backing. Azad, Rajwa & Pothen 2016 (flowVS, BMC Bioinformatics); Parks,
 Roederer & Moore 2006 (logicle); R19 (titration metrics on arcsinh), R21
 (data contract).
 
+Help text (Import tab, "Before you import: unmixing and scaling"; logged
+2026-10-02, shipped with F4c). After unmixing, cells with no signal in a
+channel scatter symmetrically around zero; the width of that scatter is
+spread from brighter fluors in neighbouring channels (Nguyen 2013). A
+cofactor sets how much of that scatter you see (Parks 2006): a small cofactor
+shows the negatives' width, a large one hides it. Choose the cofactor from
+the negatives (the blank-spread suggestion), not from how smooth the plot
+looks (Roederer 2001). If the negatives are very wide, check (1) the
+spillover-spreading matrix row for this channel, (2) this marker against the
+suspected donor on the blank or an FMO, (3) that the single-stain control
+uses the same conjugate lot and is at least as bright as the sample positives
+(Ferrer-Font 2020). Fix the unmixing, then set the cofactor. The chosen value
+and rule are stamped in the file.
+Case in point (2026-10-02): the NPC Pax6 PE export at cofactor 9900 hid the
+PE negatives' spread; re-exported at 1000 (fixture set tasks 38–43).
+Refs: Nguyen R et al. 2013 Cytometry A 83:306 (spillover spreading);
+Roederer M 2001 Cytometry 45:194 (compensation and display); Parks DR,
+Roederer M, Moore WA 2006 Cytometry A 69:541 (logicle); Ferrer-Font L et al.
+2020 Curr Protoc Cytom 92:e70 (panel design and controls).
+
 ---
 
 ## R29 — Strata × features heatmap of the per-stratum LDA weights
@@ -1234,6 +1270,190 @@ equals that genotype's distinct-cell count, not 5× it.
   the root files (`/opt/epiflow-d3`, runbook step 5); `deploy/` is the
   template `deploy/DEPLOYMENT.md` copies from on a fresh host and must be
   kept identical to the root copies.
+
+---
+
+## F4 — OmiQ Import tab: replaces the Shiny converter (closes R21; delivers R32 (1) and (2))
+Status: done (2026-10-02); branch `features/import`; commits fixtures, fixtures follow-up, R21, F4a, F4b, F4c; v1.7.0
+
+Why. EpiFlow only read `.rds` files written by the external Shiny converter
+(v5.1), which never transforms marker channels (it assumes OmiQ's scaled
+export), applies one global cofactor to the DNA channel only, parses
+genotype / replicate from `[bracket]` / `Well_` filename patterns the NPC
+exports do not have, has no sample sheet, and stamps a single attribute
+(`epiflow_mode`). R21's validation showed OmiQ's scaled export is exactly
+`asinh(raw / cofactor)` with per-channel cofactors from the Scaling CSV
+matched on `Primary___Secondary`. R33's lesson: every grouping column is an
+explicit, validated, echoed request parameter.
+
+Fixtures (commit 0, rebuilt 2026-10-02 as a fixtures follow-up). The full
+exports are not tracked: they live in `OMIQ/` at the repo root (git-ignored;
+`$EPIFLOW_OMIQ_FIXTURES`, default `OMIQ`): `npc_raw/` + `npc_scaled/`
+(tasks 38 / 39, 8 stained files) and `npc_raw_blank/` + `npc_scaled_blank/`
+(tasks 42 / 43, + `14-Blank.fcs`) of OmiQ workflow 183012389097095, plus
+`Scaling PAX6 1000-183012389097095-29.csv` (Pax6 PE cofactor 1000). An
+earlier set (tasks 27 / 28 with Scaling task 17, Pax6 PE cofactor 9900) was
+superseded the same day: the larger cofactor hid the PE negatives' spread
+(see the R32 help-text note; Roederer 2001, Parks 2006).
+`tools/make_omiq_fixtures.R` (seed 42)
+writes 2,000-row subsamples, stratified by `OmiqFileIndex` and matched
+raw / scaled on the key `(OmiqFileIndex, Orig_Row_Number)` (the blank pair
+keeps 500 blank rows), to `tests/fixtures/omiq/` with the Scaling CSV whole
+and a sample sheet; `tests/fixtures/omiq/README.md` quotes each export's
+`_OMIQ-context.txt`. On the subsample every channel matches
+`asinh(raw / cofactor)` to 9e-5. Reader: base `read.csv` reads the 24 MB
+export in under a second, so no new package is added to the image.
+
+Data contract (commit 1, R21). See the R21 entry: attributes read before any
+dplyr step, legacy files warn, `n_cells_source / n_cells_kept / ingest_seed`.
+
+F4a (commit 2) — upload + inspect. `api/R/import.R`: `omiq_channels()` (roles
+h3 / phenotypic / dna / ph3 / filter / file / row / meta from the converter's
+regexes; EpiFlow names `FxCycle`, `phH3`, `Pax6_PE`, `H3K27me3`),
+`omiq_scaling()` (key = literal `Primary___Secondary`; bare primary when the
+secondary is empty), `omiq_sample_sheet()` (required `file, condition,
+genotype, replicate`; optional `identity` — a value or an export filter
+column name — and `role = blank`; every export file mapped exactly once;
+group preview = samples per condition × genotype with `single_replicate`),
+`omiq_scale_check()` (a declared-raw export whose channels all stay below 50
+is refused as already transformed), `omiq_cofactor_table()` (OmiQ value by
+exact key; suggestion = `stats::mad` (1.4826 × MAD) of the blank's raw values,
+rule `blank_mad`, DNA excluded; without a blank, MAD of the stained values
+below the lowest mode, rule `negative_mode`, `weaker = TRUE`), and the
+density helpers `omiq_density_peaks / omiq_find_mode / omiq_find_valley`
+ported from the Shiny app with the debris guard (values below the 1st
+percentile ignored; the two TALLEST prominent peaks, ordered by position;
+one prominent peak → 90th percentile, fewer than 50 values → 75th, each
+named in `rule`). Endpoints `POST /api/import/upload` (multipart raw /
+scaling / sample_sheet, `declared_scale`) and
+`POST /api/import/inspect/<import_id>`; import entries live in `data_store`
+(kind = "import") and are pruned with sessions. Declared-scaled exports
+(user rule, 2026-10-02): with a Scaling CSV, `omiq_back_transform()` gives
+raw = c × sinh(x) per channel and the identical path follows (cofactor panel,
+suggestions, transform, stamps) with `source_scale = "scaled"`; channels
+absent from the Scaling CSV stay on the scaled axis and are listed. Without a
+Scaling CSV (optional only for a scaled export) the values are kept as they
+are, every channel's rule is `unknown` and a warning is returned; such a file
+is legacy-like for cofactor-dependent features. A raw export declared scaled,
+or a scaled export declared raw, is refused by the scale check.
+Finding (2026-10-02): the first export set (tasks 27 / 28, Scaling task 17)
+carried a Pax6 PE cofactor of 9900; it reproduced the scaled export but hid
+the PE negatives' spread, so the set was re-exported with 1000 (tasks 38 /
+39 / 42 / 43, Scaling task 29), which the fixtures and tests now use.
+
+F4b (commit 3) — transform, cell-cycle port, long format, stamps, run job.
+`omiq_run()`: the blank's cells are dropped and the sample sheet joined per
+file (condition, genotype, replicate, every extra column); identity from an
+export filter column (last gate-path segment unless `identity_full_path`),
+the sheet, or "All"; chosen cofactors (named by EpiFlow channel name) or the
+inspect defaults, `dna_cofactor` and `dna_gating_cofactor` (default = the
+chosen DNA cofactor; a separate value such as 150 is allowed and stamped);
+`asinh(x / c)` per channel; `omiq_cell_cycle()` = the Shiny port: per-sample
+G0/G1 mode (density argmax, `bw = "SJ"`, 2048 points, values below the 1st
+percentile ignored, the two tallest prominent peaks ordered by position, two
+peaks closer than 0.35 merged — a split G1, not G1 / G2), `FxCycle_aligned`
+on the gating scale, G2/M threshold by `valley` (two prominent peaks ≥ 0.10
+× max; when no second peak exists the rule falls back to `ln2_midpoint`,
++ln 2 / 2 on the aligned scale — the G2 population sits at twice the DNA —
+and `g2_rule` says so; the percentile rules are explicit methods only,
+never silent fallbacks), `percentile` (0.75 or 0.90, `percentile_75` /
+`percentile_90`), `ln2` or `manual`, globally or per genotype; a sample with
+fewer than 10 DNA values has no G1 mode and stays "Unassigned"; phH3 threshold by valley on the stained phH3 (2.5 only when
+unimodal, `ph3_rule` says which; manual override); optional S phase with
+`s_rule = "fraction_of_g2_threshold"` and `s_fraction` 0.4; the four
+assignment branches; optional 1st–99th percentile outlier removal on raw
+DNA. QC per sample: G1 mode, G2−G1 peak spacing (expected ln 2, flagged
+outside 0.55–0.85 or "no second peak"), CV of G1 modes across samples
+(> 8 % MODERATE, > 15 % HIGH); G1 peak CV per sample (full width at half
+maximum of the G0/G1 peak on the gating scale, as % CV; flagged above
+10 %); `g2_resolved` (a G2 peak in more than half the samples) with the
+mean G1 peak CV, so the result card can say "G2/M assigned by the ln 2
+rule; G2 not resolved as a peak (G1 CV = x %); treat fractions as
+approximate"; support-marker QC, optional and never an input to the
+assignment: with a Ki67 channel, the per-sample median Ki67 in assigned
+G2/M vs G0/G1 (flag "NOT HIGHER in G2/M"); CyclinD1 was tried and removed
+(user decision 2026-10-02: a G1 cyclin that accumulates into S/G2 is not a
+check); absent markers add no columns. Long format: `cell_id`, `orig_row_number`,
+`omiq_file`, sheet columns, `identity`, `cell_cycle`, phenotypic columns,
+`FxCycle`, `FxCycle_aligned`, `phH3`, `H3PTM / value` (phenotype-only
+sentinel when no H3 channel); every contract attribute stamped, plus
+`source_scale`. Endpoints: `POST /api/import/run/<id>` forks the job
+(`parallel::mcparallel`; Windows synchronous) and refuses a one-replicate
+group without `confirm_single_replicate`; `GET /api/import/progress/<id>`
+reads the child's progress file; `POST /api/import/result/<id>` returns the
+summary, streams the `.rds` (`download`) or opens it as a data session
+(`load`, same response as `/api/upload` plus `import_summary`).
+Finding on the NPC data: the DNA distributions carry no resolvable G2 peak
+in 7 of 8 samples (the G2 region is a shoulder at 40–70 % of the G1 density
+height, never a local maximum), so the valley rule falls back to
+`ln2_midpoint` (user decision 2026-10-02; the converter's 90th-percentile
+fallback is gone). The G1-mode CV across the 8 samples is within 8 % after
+the split-peak merge.
+Verified: the imported values equal OmiQ's scaled export on every channel
+and cell (< 1e-4) on the fixture and on 5,000 sampled cells of the full
+export (124,105 cells import in 3–4 s); the scaled export declared scaled
+yields the same `.rds` as the raw export to < 1e-4 on every value column.
+
+F4c (commit 4) — the Import tab. `frontend/js/import.js` self-installs a
+sidebar entry ("Import OmiQ export (CSV)"), a nav button and
+`#panel-import` (the titration pattern): Files (export + declared scale,
+Scaling CSV, sample sheet, template download) → Preview (channels with
+roles, files × sheet, samples per group with the single-replicate rows
+flagged amber and the blank grey; the group-by select is
+`buildGroupingOptions` over the sheet columns) → Cofactors (OmiQ value,
+suggestion + rule, weaker badge, chosen input; "use OmiQ / suggestion for
+all") → Cell cycle (G2/M rule valley / ln 2 / percentile / manual, scope,
+S phase, phH3 override, outliers, DNA gating cofactor; previews recompute
+(debounced, 400 ms) on every control change through
+`POST /api/import/cc-preview/<id>` — the run's gating on the full data —
+giving per-sample DNA densities on the gating scale with the G0/G1 mode and
+G2/M threshold drawn (axis "FxCycle (arcsinh intensity, cofactor c)"),
+per-sample phH3 densities with the phH3 threshold, and a pooled
+aligned-DNA × phH3 scatter (6,000-cell display sample, density contours)
+with draggable G2/M and phH3 lines whose drop writes the manual value into
+the field and switches the rule to manual) → Run (single-replicate
+confirmation only when needed; progress bar polling `/progress`) → Result
+(cells per sample, cell-cycle fractions, the per-sample QC table with the
+G1 peak CV, G2−G1 spacing, G1-mode CV and Ki67 flags, the ln 2 caveat when
+G2 is not resolved, the same previews with the stamped thresholds, the
+stamped cofactors; "Download .rds" and
+"Load into EpiFlow", which opens the session through the normal
+`onDataLoaded` path so every R34 list sees the sheet columns). The R32
+help text "Before you import: unmixing and scaling" sits at the top of the
+tab. USER_GUIDE's data-preparation section now describes the tab (the Shiny
+converter is kept as a legacy link); README and LOCAL_DEV updated.
+Follow-up 2 (2026-10-02): the step-4 banner names the rule the server
+actually applied (per group when scoped) and the mean G1 peak CV, with
+"(valley requested; no G2 peak to find)" when the ln 2 fallback took over;
+one legend strip for the step (Okabe-Ito: G0/G1 mode #0072B2 solid, G2/M
+#D55E00 dashed, phH3 #CC79A7 dotted); the scatter is titled "DNA aligned
+per sample (G0/G1 mode = 0) vs phH3" with a solid line at x = 0; one row per
+sample with the DNA and phH3 panels side by side and compact QC badges at
+the row end (single column otherwise); the phH3 field shows the valley
+rule's value as "auto 5.xx" until edited; the run writes
+`<name>_import_log.md` beside the `.rds` (sample sheet, cofactors + rules,
+gating thresholds + rules, QC table, importer version, date, OmiQ workflow
+id; `result` action `log` serves it); the HTML report gains an "Import
+provenance" section from the stamped attributes ("no provenance recorded
+(file predates the Import tab)" on legacy files); the landing puts the
+Import card first and "Upload .rds" second, and a loaded file is badged
+IMPORTED or LEGACY from its contract.
+Browser bug (2026-10-02, user report): upload and inspect returned 200 but
+rendering the Preview threw "Cannot set properties of null (setting
+'innerHTML')". The null container was `#imp-dna-hist`, removed from the
+step-4 markup by follow-up 2 while `prepareCellCycle()` still wrote to it,
+so the throw happened on every path (the nav-tab and the landing-card
+entries already share one `#panel-import`); it now writes to
+`#imp-cc-rows`. The two legend strips had the same id; the result card's is
+`imp-result-legend`.
+Tests: F4 block in `test_labels.R` (banner, legend, log, report section,
+badges, the retired container); `log`, `cc-preview` and G1-peak-CV blocks
+in `test_omiq_import.R`; **`test_import_headless.R`** drives the tab in a
+real headless Chrome over the DevTools protocol (`tools/cdp_smoke.py`,
+standard library only): scenario A from the empty landing card, scenario B
+with the example loaded and Import opened from the nav tab — inspect,
+cell-cycle preview, run, result and load, with no JS error, rejection or
+alert; it prints [SKIP] without Chrome or the two local servers.
 
 ---
 

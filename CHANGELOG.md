@@ -3,6 +3,52 @@
 Earlier release notes: `CHANGELOG_v1.2.0.md`. Finding IDs (R1 …, L1 …) refer to
 the September 2026 publication audit; each has an entry in `DECISIONS.md`.
 
+## EpiFlow D3 v1.7.0 — 2026-10-02
+
+The Import tab (F4): EpiFlow builds its own `.rds` from an OmiQ export and
+replaces the Shiny converter.
+
+### Added
+- **F4 — Import tab.** Inputs: the raw OmiQ export (a scaled export is
+  back-transformed with the Scaling CSV, or kept with cofactor "unknown"),
+  the OmiQ Scaling CSV, and a required sample sheet (file → condition,
+  genotype, replicate; identity from a value or a filter column; one blank).
+  Per-channel `asinh(x / cofactor)` with the cofactor matched on the literal
+  `Primary___Secondary` name; cofactor panel with the OmiQ value beside the
+  blank-spread suggestion (1.4826 × MAD of the blank's raw values; stained
+  negative mode, flagged weaker, without a blank); DNA stored at its own
+  cofactor and gated at `dna_gating_cofactor`; cell-cycle gating ported from
+  the converter (per-sample G0/G1 alignment, G2/M by the valley between the
+  G1 and G2 peaks with the ln 2 midpoint as the fallback, explicit percentile
+  or manual; data-driven phH3 threshold; optional S phase); per-sample QC
+  (G1 peak CV, G2−G1 spacing vs ln 2, G1-mode CV, Ki67 check); the blank
+  excluded from groups; a one-replicate group blocks export unless
+  confirmed; progress endpoint; result card; download `.rds` and
+  `<name>_import_log.md`; load into EpiFlow. Help text "Before you import:
+  unmixing and scaling" (R32).
+- **R21 — Data contract.** Attributes stamped on the `.rds` (schema version,
+  value scale, cofactors and rules, DNA cofactors, source, workflow,
+  importer version, import date, instrument, panel, sample sheet,
+  cell-cycle gating with QC, n_cells_source / n_cells_kept / ingest_seed)
+  are read before any dplyr step and echoed in every ingest response and
+  `/api/metadata`; legacy files load with a warning and cofactor "unknown";
+  `.cofactor_required()` guards cofactor-dependent features. The HTML
+  report gains "Import provenance"; loaded files are badged IMPORTED or
+  LEGACY.
+- Fixtures: `tests/fixtures/omiq/` (2,000-row subsamples of OmiQ workflow
+  183012389097095 tasks 38 / 39 / 42 / 43 and the task-29 Scaling CSV, with
+  a sample sheet); full exports under `OMIQ/` (`EPIFLOW_OMIQ_FIXTURES`).
+
+### Tests
+`test_data_contract.R`, `test_omiq_import.R` (90 checks; full export when
+available), `test_import_headless.R` (real Chrome over DevTools,
+`tools/cdp_smoke.py`), `test_grouping_options.R` extended, F4 / R21 blocks in
+`test_labels.R`.
+
+### Still open
+R32 (3) the c/2–2c sensitivity check; R8, R11, R12, R15, R16, R19, R22–R24,
+R26, R29, R30; L17; cross_genotype alias removal (one release after 1.6.0).
+
 ## EpiFlow D3 v1.6.1 — 2026-10-02
 
 - **F3** — Gating plot coloured by any label: the comparison variable
